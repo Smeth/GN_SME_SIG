@@ -22,8 +22,7 @@
 |-----|---------|
 | **Accueil** | Raccourcis, état du mois SME (à brancher sur `TabSme`), chemins base / maquette |
 | **Liste générale** | Grille existante (tout / présents / filtre) |
-| **Structures** | Table `TabStructure` (code, désignation, ordre) |
-| **Subdivisions** | Hiérarchie `TabSecun` / `TabSecdeux` / `TabSectrois` |
+| **Structures** | Onglet unique : `TabStructure`, couples (Structure, SubArme) liste générale, hiérarchie `TabSecun` / `TabSecdeux` / `TabSectrois` |
 | **Grades** | Table `TabGrade` (ordre de préséance) |
 | **Fonctions** | Valeurs distinctes `ListeGenerale.Fonction` (en attendant une table dédiée) |
 | **Liste des présents** | Aperçu HTML par structure + export Excel |

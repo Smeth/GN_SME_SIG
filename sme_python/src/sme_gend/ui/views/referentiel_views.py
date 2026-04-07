@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QSpinBox,
+    QTabWidget,
     QTableView,
     QVBoxLayout,
     QWidget,
@@ -162,8 +162,7 @@ class StructureSubdivisionView(_RefBase):
         super().__init__(service, parent)
         self._pairs: list[tuple[str, str]] = []
         self._hint.setText(
-            "<b>Structures ↔ subdivisions d'arme</b> — couples distincts "
-            "(Structure, SubArme) issus de la liste générale. Lecture seule. "
+            "Couples distincts <b>(Structure, SubArme)</b> dans la liste générale — lecture seule. "
             "<b>Double-clic</b> : détail."
         )
         self._table.doubleClicked.connect(self._on_double_click)
@@ -195,7 +194,7 @@ class StructureSubdivisionView(_RefBase):
 
 
 class StructuresView(QWidget):
-    """TabStructure — INSERT / UPDATE / DELETE."""
+    """Structures : TabStructure, couples structure/SubArme, hiérarchie subdivisions (tout regroupé)."""
 
     def __init__(self, service: ReferentielService, parent=None) -> None:
         super().__init__(parent)
@@ -210,18 +209,18 @@ class StructuresView(QWidget):
         self._table.doubleClicked.connect(self._open_subdivisions_modal)
 
         self._hint = QLabel(
-            "<b>Structures</b> (TabStructure) — les modifications sont écrites dans la base Access. "
-            "<b>Double-clic</b> ou <b>Subdivisions d'arme…</b> : fenêtre avec les SubArme "
-            "(ListeGenerale) pour la structure sélectionnée."
+            "<b>Structures</b> — regroupe la table <b>TabStructure</b>, la vue des couples "
+            "(Structure, SubArme) dans la liste générale, et la hiérarchie référentielle "
+            "<b>Secun → Secdeux → Sectrois</b>. Utilisez les onglets ci-dessous."
         )
         self._hint.setWordWrap(True)
 
-        self._btn = QPushButton("Actualiser")
+        self._btn = QPushButton("Actualiser tout")
         self._btn.clicked.connect(self.reload)
         self._btn_add = QPushButton("Nouvelle structure…")
         self._btn_add.clicked.connect(self._on_add)
         self._btn_sub = QPushButton("Subdivisions d'arme…")
-        self._btn_sub.setToolTip("SubArme distincts dans ListeGenerale pour cette structure")
+        self._btn_sub.setToolTip("SubArme distincts dans ListeGenerale pour la structure sélectionnée")
         self._btn_sub.clicked.connect(self._open_subdivisions_modal)
         self._btn_edit = QPushButton("Modifier…")
         self._btn_edit.clicked.connect(self._on_edit)
@@ -236,13 +235,32 @@ class StructuresView(QWidget):
         bar.addWidget(self._btn_del)
         bar.addStretch()
 
+        page_main = QWidget()
+        lay_main = QVBoxLayout(page_main)
+        lay_main.setContentsMargins(0, 0, 0, 0)
+        lay_main.addLayout(bar)
+        lay_main.addWidget(self._table, stretch=1)
+
+        self._pairs_panel = StructureSubdivisionView(service, self)
+        self._hierarchy_panel = SubdivisionsView(service, self)
+
+        self._tabs = QTabWidget()
+        self._tabs.setDocumentMode(True)
+        self._tabs.addTab(page_main, "Structures (TabStructure)")
+        self._tabs.addTab(self._pairs_panel, "Couples structure ↔ SubArme")
+        self._tabs.addTab(self._hierarchy_panel, "Hiérarchie subdivisions")
+
         lay = QVBoxLayout(self)
         lay.addWidget(self._hint)
-        lay.addLayout(bar)
-        lay.addWidget(self._table, stretch=1)
+        lay.addWidget(self._tabs, stretch=1)
         self.reload()
 
     def reload(self) -> None:
+        self._reload_main_table()
+        self._pairs_panel.reload()
+        self._hierarchy_panel.reload()
+
+    def _reload_main_table(self) -> None:
         try:
             self._rows = self._service.structures()
         except Exception as e:
@@ -336,8 +354,8 @@ class SubdivisionsView(_RefBase):
         super().__init__(service, parent)
         self._flat_rows: list[SubdivisionFlatRow] = []
         self._hint.setText(
-            "<b>Subdivisions</b> — hiérarchie Secun → Secdeux → Sectrois (jointure). "
-            "<b>Double-clic</b> : détail de la ligne. L’édition des tables liées pourra être ajoutée ultérieurement."
+            "Référentiel <b>Secun → Secdeux → Sectrois</b> (jointure Access). Lecture seule. "
+            "<b>Double-clic</b> : détail. L’édition des tables pourra être ajoutée ultérieurement."
         )
         self._table.doubleClicked.connect(self._on_double_click)
         self.reload()

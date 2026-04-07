@@ -36,10 +36,10 @@ ou `sme-gend` si le dossier Scripts est dans le `PATH`.
 
 ## Fonctionnalités
 
-- **Accueil** : chemins base / maquette / fichier de mise en page
+- **Tableau de bord** : indicateurs, graphiques, chemins base / maquette / mise en page
 - **Liste générale** : grille, filtres, présents seulement
 - **Mise en page liste** : ordre des **sections** (glisser-déposer), titres personnalisés, option *regroupement par subdivision* — fichier `data/liste_present_layout.json`
-- **Structures, Struct. ↔ subdivisions**, **Subdivisions**, **Grades**, **Fonctions** : consultation
+- **Structures** : `TabStructure`, couples (structure ↔ SubArme) liste générale, hiérarchie Secun→Secdeux→Sectrois ; **Grades**, **Fonctions**
 - **Liste des présents** : aperçu HTML + export Excel **fidèle à la maquette** (styles copiés depuis `resultat.xlsx`, feuille `Liste_SME`)
 
 Voir **`docs/PLAN_SME.md`** pour la feuille de route.

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QAction, QIcon, QKeySequence
+from PySide6.QtGui import QAction, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
-    QMessageBox,
     QSizePolicy,
     QStackedWidget,
     QStatusBar,
@@ -33,13 +34,7 @@ from sme_gend.ui.views.home_view import HomeView
 from sme_gend.ui.views.layout_editor_view import LayoutEditorView
 from sme_gend.ui.views.liste_present_view import ListePresentView
 from sme_gend.ui.views.personnel_list_view import PersonnelListView
-from sme_gend.ui.views.referentiel_views import (
-    FonctionsView,
-    GradesView,
-    StructureSubdivisionView,
-    StructuresView,
-    SubdivisionsView,
-)
+from sme_gend.ui.views.referentiel_views import FonctionsView, GradesView, StructuresView
 
 # Données utilisateur sur QTreeWidgetItem : indice pile (-1 = dossier non navigable)
 _ROLE_STACK = Qt.ItemDataRole.UserRole
@@ -82,8 +77,6 @@ class ShellWindow(QMainWindow):
         register_page("Liste générale", PersonnelListView(personnel, referentiel))
         register_page("Mise en page liste", LayoutEditorView(layout_cfg))
         register_page("Structures", StructuresView(referentiel))
-        register_page("Struct. ↔ subdivisions", StructureSubdivisionView(referentiel))
-        register_page("Subdivisions", SubdivisionsView(referentiel))
         register_page("Grades", GradesView(referentiel))
         register_page("Fonctions", FonctionsView(referentiel))
         register_page("Liste des présents", ListePresentView(liste_present))
@@ -94,8 +87,6 @@ class ShellWindow(QMainWindow):
             _std_icon(style, QStyle.StandardPixmap.SP_FileDialogListView),
             _std_icon(style, QStyle.StandardPixmap.SP_FileDialogDetailedView),
             _std_icon(style, QStyle.StandardPixmap.SP_DesktopIcon),
-            _std_icon(style, QStyle.StandardPixmap.SP_ArrowRight),
-            _std_icon(style, QStyle.StandardPixmap.SP_DirIcon),
             _std_icon(style, QStyle.StandardPixmap.SP_MessageBoxInformation),
             _std_icon(
                 style,
@@ -152,21 +143,27 @@ class ShellWindow(QMainWindow):
         )
         add_leaf(f_eff, "Liste générale", 1)
         add_leaf(f_eff, "Mise en page liste", 2)
-        add_leaf(f_eff, "Liste des présents", 8)
+        add_leaf(f_eff, "Liste des présents", 6)
 
         f_ref = add_folder(
             "Référentiels",
             _std_icon(style, QStyle.StandardPixmap.SP_DialogOpenButton),
         )
         add_leaf(f_ref, "Structures", 3)
-        add_leaf(f_ref, "Struct. ↔ subdivisions", 4)
-        add_leaf(f_ref, "Subdivisions", 5)
-        add_leaf(f_ref, "Grades", 6)
-        add_leaf(f_ref, "Fonctions", 7)
+        add_leaf(f_ref, "Grades", 4)
+        add_leaf(f_ref, "Fonctions", 5)
 
         self._nav.itemClicked.connect(self._on_nav_item_clicked)
         self._nav.setCurrentItem(self._page_to_item[0])
         self._stack.setCurrentIndex(0)
+
+        # F1 / aide : QShortcut plus fiable que QAction seul sous Windows (conflits menu / focus)
+        self._shortcut_about = QShortcut(QKeySequence("F1"), self)
+        self._shortcut_about.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._shortcut_about.activated.connect(self._about)
+        self._shortcut_about_ctrl = QShortcut(QKeySequence("Ctrl+H"), self)
+        self._shortcut_about_ctrl.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._shortcut_about_ctrl.activated.connect(self._about)
 
         # --- En-tête étendu (logo + textes + bouton réduire) ---
         logo_path = icon_path("app.svg")
@@ -250,7 +247,7 @@ class ShellWindow(QMainWindow):
         self._btn_help_sidebar = QToolButton()
         self._btn_help_sidebar.setObjectName("sidebarHelpBtn")
         self._btn_help_sidebar.setText("?")
-        self._btn_help_sidebar.setToolTip("À propos / aide — F1")
+        self._btn_help_sidebar.setToolTip("À propos / aide — F1 ou Ctrl+H")
         self._btn_help_sidebar.setAutoRaise(True)
         self._btn_help_sidebar.setMinimumSize(36, 36)
         self._btn_help_sidebar.clicked.connect(self._about)
@@ -326,8 +323,6 @@ class ShellWindow(QMainWindow):
             "Liste générale",
             "Mise en page liste",
             "Structures",
-            "Struct. ↔ subdivisions",
-            "Subdivisions",
             "Grades",
             "Fonctions",
             "Liste des présents",
@@ -339,8 +334,6 @@ class ShellWindow(QMainWindow):
 
         m_help = bar.addMenu("&Aide")
         act_about = QAction("À propos de SME…", self)
-        act_about.setShortcut(QKeySequence("F1"))
-        act_about.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
         act_about.setMenuRole(QAction.MenuRole.NoRole)
         act_about.triggered.connect(self._about)
         m_help.addAction(act_about)
@@ -418,25 +411,34 @@ class ShellWindow(QMainWindow):
         self._set_sidebar_compact(not self._sidebar_compact)
 
     def _about(self) -> None:
-        m = QMessageBox(self)
-        m.setWindowTitle("À propos — SME")
-        m.setIcon(QMessageBox.Icon.Information)
-        m.setTextFormat(Qt.TextFormat.RichText)
-        m.setStandardButtons(QMessageBox.StandardButton.Ok)
-        m.setDefaultButton(QMessageBox.StandardButton.Ok)
-        m.setText(
-            f"<h3>SME — Situation mensuelle des effectifs</h3>"
+        # QDialog plutôt que QMessageBox(RichText) : certains thèmes Windows / Fusion
+        # n’affichent pas correctement la boîte « À propos » (fenêtre invisible ou bloquée).
+        dlg = QDialog(self)
+        dlg.setWindowTitle("À propos — SME")
+        dlg.setModal(True)
+        dlg.setMinimumWidth(420)
+        body = QLabel(
+            f"<h3 style=\"margin-top:0;\">SME — Situation mensuelle des effectifs</h3>"
             f"<p>Application de gestion et d’export des listes de personnel.</p>"
             f"<p><b>Version</b> {__version__}</p>"
             f"<p><b>Réalisation</b> : "
             f"<a href=\"https://smeth-dev.site\">smeth-dev.site</a></p>"
             f"<p style=\"color:#666;\">Client desktop PySide6 — données Access.</p>"
+            f"<p style=\"color:#888;font-size:11px;\">Raccourcis : F1, Ctrl+H</p>"
         )
-        m.setOpenExternalLinks(True)
-        m.setModal(True)
-        m.raise_()
-        m.activateWindow()
-        m.exec()
+        body.setWordWrap(True)
+        body.setTextFormat(Qt.TextFormat.RichText)
+        body.setOpenExternalLinks(True)
+        body.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextBrowserInteraction
+        )
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        bb.accepted.connect(dlg.accept)
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(body)
+        lay.addWidget(bb)
+        dlg.adjustSize()
+        dlg.exec()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Escape:
