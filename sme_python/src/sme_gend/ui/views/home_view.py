@@ -1,4 +1,4 @@
-"""Vue Accueil — tableau de bord (synthèse effectifs, graphiques)."""
+"""Vue Accueil — tableau de bord (synthèse effectifs, TabSme, graphiques)."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from PySide6.QtCharts import (
     QChart,
     QChartView,
     QHorizontalBarSeries,
+    QLineSeries,
     QPieSeries,
     QValueAxis,
 )
@@ -33,6 +34,22 @@ from PySide6.QtWidgets import (
 from sme_gend.config.settings import Settings, liste_layout_config_path
 from sme_gend.services.dashboard_service import DashboardService
 
+_PALETTE = [
+    "#1a237e",
+    "#3949ab",
+    "#5c6bc0",
+    "#7986cb",
+    "#9fa8da",
+    "#ffd54f",
+    "#ffb300",
+    "#00897b",
+    "#c62828",
+    "#6d4c41",
+    "#7b1fa2",
+    "#00695c",
+    "#ef6c00",
+]
+
 
 def _card(title: str, value: str, accent: bool = False) -> QFrame:
     f = QFrame()
@@ -53,7 +70,6 @@ def _card(title: str, value: str, accent: bool = False) -> QFrame:
 
 
 def _pos_card(label: str, count: str) -> QFrame:
-    """Carte compacte pour une position administrative."""
     f = QFrame()
     f.setObjectName("dashPosCard")
     lay = QVBoxLayout(f)
@@ -80,21 +96,19 @@ def _chart_theme(chart: QChart) -> None:
     chart.setBackgroundBrush(QColor("#ffffff"))
     chart.legend().setVisible(True)
     chart.legend().setAlignment(Qt.AlignmentFlag.AlignBottom)
-    f = QFont("Segoe UI", 9)
     chart.setTitleFont(QFont("Segoe UI", 11, QFont.Weight.DemiBold))
 
 
 def _make_chart_view(chart: QChart) -> QChartView:
     view = QChartView(chart)
     view.setRenderHint(QPainter.RenderHint.Antialiasing)
-    view.setMinimumHeight(280)
+    view.setMinimumHeight(260)
     view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
     return view
 
 
 def _pie_presence(presents: int, hors: int) -> QChartView:
     series = QPieSeries()
-    # Trou du donut : fraction 0–1 (API Qt Charts : setHoleSize, pas setHoleRadius).
     series.setHoleSize(0.45)
     series.setPieSize(0.85)
     if presents > 0:
@@ -118,20 +132,26 @@ def _pie_presence(presents: int, hors: int) -> QChartView:
     return _make_chart_view(chart)
 
 
-def _hbar_positions(positions: list[tuple[str, int]], title: str) -> QChartView:
-    top = positions[:14]
+def _hbar_grouped_multi(items: list[tuple[str, int]], title: str) -> QChartView:
+    """Barres horizontales : une couleur par barre (jeu de séries creux)."""
+    top = items[:14]
     if not top:
         chart = QChart()
         chart.setTitle(title)
         _chart_theme(chart)
         return _make_chart_view(chart)
+    rev = list(reversed(top))
+    n = len(rev)
     series = QHorizontalBarSeries()
-    bar_set = QBarSet("Effectif")
-    labels: list[str] = []
-    for name, n in reversed(top):
-        bar_set << float(n)
-        labels.append(_truncate(name, 36))
-    series.append(bar_set)
+    for i, (name, val) in enumerate(rev):
+        bs = QBarSet("")
+        row = [0.0] * n
+        row[i] = float(val)
+        for v in row:
+            bs << v
+        bs.setBrush(QColor(_PALETTE[i % len(_PALETTE)]))
+        series.append(bs)
+    labels = [_truncate(rev[j][0], 36) for j in range(n)]
     chart = QChart()
     chart.addSeries(series)
     chart.setTitle(title)
@@ -148,50 +168,24 @@ def _hbar_positions(positions: list[tuple[str, int]], title: str) -> QChartView:
     return _make_chart_view(chart)
 
 
-def _hbar_named(items: list[tuple[str, int]], title: str, axis_label: str) -> QChartView:
+def _bar_vertical_multi(items: list[tuple[str, int]], title: str) -> QChartView:
+    """Histogramme vertical : une couleur par colonne."""
     if not items:
         chart = QChart()
         chart.setTitle(title)
         _chart_theme(chart)
         return _make_chart_view(chart)
-    series = QHorizontalBarSeries()
-    bar_set = QBarSet(axis_label)
-    labels: list[str] = []
-    for _name, n in reversed(items):
-        bar_set << float(n)
-        labels.append(_truncate(_name, 32))
-    bar_set.setBrush(QColor("#1a237e"))
-    series.append(bar_set)
-    chart = QChart()
-    chart.addSeries(series)
-    chart.setTitle(title)
-    _chart_theme(chart)
-    ay = QBarCategoryAxis()
-    ay.append(labels)
-    chart.addAxis(ay, Qt.AlignmentFlag.AlignLeft)
-    series.attachAxis(ay)
-    ax = QValueAxis()
-    ax.setLabelFormat("%d")
-    chart.addAxis(ax, Qt.AlignmentFlag.AlignBottom)
-    series.attachAxis(ax)
-    return _make_chart_view(chart)
-
-
-def _bar_vertical_compare(items: list[tuple[str, int]], title: str) -> QChartView:
-    """Histogramme vertical pour comparer les effectifs (structures / grades)."""
-    if not items:
-        chart = QChart()
-        chart.setTitle(title)
-        _chart_theme(chart)
-        return _make_chart_view(chart)
+    n = len(items)
     series = QBarSeries()
-    bar_set = QBarSet("Effectif")
-    labels: list[str] = []
-    for name, n in items:
-        bar_set << float(n)
-        labels.append(_truncate(name, 12))
-    bar_set.setBrush(QColor("#3949ab"))
-    series.append(bar_set)
+    for i, (name, val) in enumerate(items):
+        bs = QBarSet("")
+        row = [0.0] * n
+        row[i] = float(val)
+        for v in row:
+            bs << v
+        bs.setBrush(QColor(_PALETTE[i % len(_PALETTE)]))
+        series.append(bs)
+    labels = [_truncate(items[j][0], 12) for j in range(n)]
     chart = QChart()
     chart.addSeries(series)
     chart.setTitle(title)
@@ -209,8 +203,73 @@ def _bar_vertical_compare(items: list[tuple[str, int]], title: str) -> QChartVie
     return _make_chart_view(chart)
 
 
+def _hbar_named_multi(items: list[tuple[str, int]], title: str) -> QChartView:
+    if not items:
+        chart = QChart()
+        chart.setTitle(title)
+        _chart_theme(chart)
+        return _make_chart_view(chart)
+    rev = list(reversed(items))
+    n = len(rev)
+    series = QHorizontalBarSeries()
+    for i, (name, val) in enumerate(rev):
+        bs = QBarSet("")
+        row = [0.0] * n
+        row[i] = float(val)
+        for v in row:
+            bs << v
+        bs.setBrush(QColor(_PALETTE[i % len(_PALETTE)]))
+        series.append(bs)
+    labels = [_truncate(rev[j][0], 32) for j in range(n)]
+    chart = QChart()
+    chart.addSeries(series)
+    chart.setTitle(title)
+    _chart_theme(chart)
+    ay = QBarCategoryAxis()
+    ay.append(labels)
+    chart.addAxis(ay, Qt.AlignmentFlag.AlignLeft)
+    series.attachAxis(ay)
+    ax = QValueAxis()
+    ax.setLabelFormat("%d")
+    chart.addAxis(ax, Qt.AlignmentFlag.AlignBottom)
+    series.attachAxis(ax)
+    return _make_chart_view(chart)
+
+
+def _sme_trend_line(points: list[tuple[str, float]], title: str) -> QChartView:
+    """Tendance Statut (score 0–1) selon l’ordre chronologique des mois TabSme."""
+    if not points:
+        chart = QChart()
+        chart.setTitle(title)
+        _chart_theme(chart)
+        return _make_chart_view(chart)
+    line = QLineSeries()
+    line.setName("Score (Statut)")
+    line.setColor(QColor("#1a237e"))
+    for i, (_lab, y) in enumerate(points):
+        line.append(float(i), float(y))
+    chart = QChart()
+    chart.addSeries(line)
+    chart.setTitle(title)
+    _chart_theme(chart)
+    ax = QValueAxis()
+    ax.setLabelFormat("%d")
+    ax.setRange(0, max(len(points) - 1, 0))
+    ax.setTitleText("Indice chronologique (voir tableau des mois ci-dessus)")
+    chart.addAxis(ax, Qt.AlignmentFlag.AlignBottom)
+    line.attachAxis(ax)
+    ay = QValueAxis()
+    ay.setRange(0, 1)
+    ay.setLabelFormat("%.2f")
+    ay.setTitleText("Score dérivé du Statut")
+    chart.addAxis(ay, Qt.AlignmentFlag.AlignLeft)
+    line.attachAxis(ay)
+    chart.legend().setVisible(False)
+    return _make_chart_view(chart)
+
+
 class HomeView(QWidget):
-    """Récapitulatif global : effectifs, positions, graphiques, chemins système."""
+    """Récapitulatif global : effectifs, TabSme, positions, graphiques."""
 
     def __init__(self, settings: Settings, dashboard: DashboardService, parent=None) -> None:
         super().__init__(parent)
@@ -220,8 +279,7 @@ class HomeView(QWidget):
         title = QLabel("Tableau de bord")
         title.setObjectName("dashPageTitle")
         sub = QLabel(
-            "Indicateurs issus de la liste générale : effectifs, positions administratives, "
-            "structures et grades."
+            "Indicateurs liste générale, périodes SME (TabSme), positions, structures et grades."
         )
         sub.setObjectName("dashSubtitle")
         sub.setWordWrap(True)
@@ -234,6 +292,25 @@ class HomeView(QWidget):
         head.addWidget(title, alignment=Qt.AlignmentFlag.AlignLeft)
         head.addStretch()
         head.addWidget(self._btn_refresh)
+
+        self._sme_frame = QFrame()
+        self._sme_frame.setObjectName("dashSmeFrame")
+        sme_outer = QVBoxLayout(self._sme_frame)
+        self._sme_hint = QLabel()
+        self._sme_hint.setWordWrap(True)
+        self._sme_hint.setObjectName("dashSubtitle")
+        self._sme_table = QTableWidget()
+        self._sme_table.setColumnCount(3)
+        self._sme_table.setHorizontalHeaderLabels(["Code SME", "Mois / période", "Statut"])
+        self._sme_table.horizontalHeader().setStretchLastSection(True)
+        self._sme_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._sme_table.setAlternatingRowColors(True)
+        self._sme_trend_holder = QWidget()
+        self._sme_trend_lay = QVBoxLayout(self._sme_trend_holder)
+        self._sme_trend_lay.setContentsMargins(0, 0, 0, 0)
+        sme_outer.addWidget(self._sme_hint)
+        sme_outer.addWidget(self._sme_table)
+        sme_outer.addWidget(self._sme_trend_holder)
 
         self._grid = QGridLayout()
         self._grid.setSpacing(16)
@@ -280,10 +357,14 @@ class HomeView(QWidget):
         inner_lay.setSpacing(20)
         inner_lay.addLayout(head)
         inner_lay.addWidget(sub)
+        inner_lay.addWidget(
+            QLabel("<b>SME — période mensuelle (TabSme)</b>", textFormat=Qt.TextFormat.RichText)
+        )
+        inner_lay.addWidget(self._sme_frame)
         inner_lay.addLayout(self._grid)
         inner_lay.addWidget(
             QLabel(
-                "<b>Effectifs par position administrative</b> — une carte par libellé de position",
+                "<b>Effectifs par position administrative</b> — une carte par libellé",
                 textFormat=Qt.TextFormat.RichText,
             )
         )
@@ -315,6 +396,14 @@ class HomeView(QWidget):
                 w.setParent(None)
                 w.deleteLater()
 
+    def _clear_vbox(self, lay: QVBoxLayout) -> None:
+        while lay.count():
+            item = lay.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+
     def _reload_stats(self) -> None:
         try:
             s = self._dashboard.snapshot()
@@ -334,6 +423,33 @@ class HomeView(QWidget):
 
         self._clear_layout(self._pos_grid)
         self._clear_layout(self._charts_layout)
+        self._clear_vbox(self._sme_trend_lay)
+
+        if s.sme_table_ok:
+            self._sme_hint.setText(
+                "Historique des périodes SME enregistrées dans <b>TabSme</b>. "
+                "Le graphique de tendance encode le champ <b>Statut</b> (ouvert/actif → 1, fermé → 0, "
+                "sinon valeur numérique ou 0,5 par défaut)."
+            )
+            self._sme_table.setRowCount(len(s.sme_rows))
+            for row, r in enumerate(s.sme_rows):
+                self._sme_table.setItem(row, 0, QTableWidgetItem(r.codsme))
+                self._sme_table.setItem(row, 1, QTableWidgetItem(r.mois))
+                self._sme_table.setItem(row, 2, QTableWidgetItem(r.statut))
+            self._sme_table.resizeColumnsToContents()
+            trend_list = list(s.sme_trend_points)
+            self._sme_trend_lay.addWidget(
+                _sme_trend_line(
+                    trend_list,
+                    "Tendance du Statut SME (liste ordonnée par mois)",
+                )
+            )
+        else:
+            self._sme_hint.setText(
+                "Table <b>TabSme</b> absente ou inaccessible : créez-la dans Access "
+                "(colonnes typiques : Codsme, mois, Statut) pour activer l’historique mensuel."
+            )
+            self._sme_table.setRowCount(0)
 
         c1 = _card("Effectifs enregistrés", str(s.total_effectifs))
         c2 = _card("Présents", str(s.presents))
@@ -353,12 +469,12 @@ class HomeView(QWidget):
 
         self._charts_layout.addWidget(_pie_presence(s.presents, s.hors_present), 0, 0)
         self._charts_layout.addWidget(
-            _hbar_positions(s.positions, "Positions administratives (effectifs)"),
+            _hbar_grouped_multi(s.positions, "Positions administratives (effectifs)"),
             0,
             1,
         )
         self._charts_layout.addWidget(
-            _bar_vertical_compare(
+            _bar_vertical_multi(
                 s.structures_distribution,
                 "Top structures (effectifs dans la liste générale)",
             ),
@@ -366,10 +482,9 @@ class HomeView(QWidget):
             0,
         )
         self._charts_layout.addWidget(
-            _hbar_named(
+            _hbar_named_multi(
                 s.grades_distribution,
                 "Répartition par grade (effectifs)",
-                "Personnes",
             ),
             1,
             1,

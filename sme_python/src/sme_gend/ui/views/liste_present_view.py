@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QTextBrowser,
@@ -34,30 +35,43 @@ class ListePresentView(QWidget):
         self._btn_export.clicked.connect(self._export)
 
         self._info = QLabel(
-            "Aperçu aligné sur la <b>maquette</b> : 18 colonnes comme "
-            "<code>resultat.xlsx</code>, titres de section par structure, "
-            "puis sous-blocs par <b>subdivision d'arme</b>. "
-            "L’export Excel reprend la même logique (feuille « SME_ListePresents » "
-            "si une maquette est copiée)."
+            "Données : table Access <b>ListeGenerale</b>, lignes dont la position "
+            "administrative (Padmin) est « présent », ordre des sections selon "
+            "<code>liste_present_layout.json</code>. "
+            "Aperçu aligné sur la <b>maquette</b> (18 colonnes comme "
+            "<code>resultat.xlsx</code>), titres par structure puis sous-blocs "
+            "par <b>subdivision d'arme</b>. La recherche filtre les personnes "
+            "affichées sans modifier la base."
         )
         self._info.setWordWrap(True)
         self._info.setTextFormat(Qt.TextFormat.RichText)
+
+        self._search = QLineEdit()
+        self._search.setPlaceholderText(
+            "Filtrer (nom, grade, structure, matricule…) — sur les présents uniquement"
+        )
+        self._search.textChanged.connect(self._refresh)
 
         bar = QHBoxLayout()
         bar.addWidget(self._btn_refresh)
         bar.addWidget(self._btn_export)
         bar.addStretch()
 
+        search_row = QHBoxLayout()
+        search_row.addWidget(QLabel("Recherche :"))
+        search_row.addWidget(self._search, stretch=1)
+
         lay = QVBoxLayout(self)
         lay.addWidget(self._info)
         lay.addLayout(bar)
+        lay.addLayout(search_row)
         lay.addWidget(self._browser, stretch=1)
 
         self._refresh()
 
     def _refresh(self) -> None:
         try:
-            html = self._service.build_preview_html()
+            html = self._service.build_preview_html(self._search.text().strip() or None)
         except Exception as e:
             QMessageBox.critical(self, "Aperçu", str(e))
             return
@@ -73,7 +87,9 @@ class ListePresentView(QWidget):
         if not path:
             return
         try:
-            self._service.export_excel(Path(path))
+            self._service.export_excel(
+                Path(path), search_filter=self._search.text().strip() or None
+            )
         except Exception as e:
             QMessageBox.critical(self, "Export", str(e))
             return

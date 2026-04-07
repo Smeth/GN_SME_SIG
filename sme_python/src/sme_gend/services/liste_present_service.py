@@ -26,6 +26,25 @@ def _is_present(padmin: str | None) -> bool:
     return "present" in padmin.strip().lower().replace("é", "e").replace("è", "e")
 
 
+def _row_matches(row: ListeGeneraleRow, needle: str) -> bool:
+    """Même logique que la liste générale (recherche texte)."""
+    parts = [
+        row.id,
+        row.noms or "",
+        row.grade or "",
+        row.position_admin or "",
+        row.structure or "",
+        row.subdivision_arme or "",
+        row.fonction or "",
+        row.matricule_militaire or "",
+        row.matricule_solde or "",
+        row.obs or "",
+        row.diplome or "",
+    ]
+    blob = " ".join(parts).lower()
+    return needle in blob
+
+
 class ListePresentService:
     """Présents ; ordre des sections piloté par `liste_present_layout.json`."""
 
@@ -38,8 +57,11 @@ class ListePresentService:
     def _structure_index(self) -> dict[str, StructureRow]:
         return {s.code: s for s in self._structures.fetch_all()}
 
-    def _presents_by_structure(self) -> dict[str, list[ListeGeneraleRow]]:
+    def _presents_by_structure(self, search_filter: str | None = None) -> dict[str, list[ListeGeneraleRow]]:
         presents = [r for r in self._liste.fetch_all() if _is_present(r.position_admin)]
+        needle = (search_filter or "").strip().lower()
+        if needle:
+            presents = [r for r in presents if _row_matches(r, needle)]
         by_struct: dict[str, list[ListeGeneraleRow]] = defaultdict(list)
         for row in presents:
             key = (row.structure or "").strip() or "(Sans structure)"
@@ -67,17 +89,24 @@ class ListePresentService:
             blocks.append((sub, lst))
         return blocks
 
-    def build_sections_data(self, layout: ListeLayoutConfig | None = None) -> list[
+    def build_sections_data(
+        self,
+        layout: ListeLayoutConfig | None = None,
+        *,
+        search_filter: str | None = None,
+    ) -> list[
         tuple[str, str, str, list[tuple[str, list[ListeGeneraleRow]]]]
     ]:
         """
         Sections ordonnées selon la config (titres, subdivisions).
         Retourne : (title_main, title_sub, structure_code, blocks).
+        Données : table Access ListeGenerale, filtre position « présent » (Padmin) ;
+        `search_filter` restreint l’aperçu / export aux lignes correspondantes.
         """
         if layout is None:
             layout = self._layout_config.load()
 
-        by_struct = self._presents_by_structure()
+        by_struct = self._presents_by_structure(search_filter)
         st_idx = self._structure_index()
         out: list[tuple[str, str, str, list[tuple[str, list[ListeGeneraleRow]]]]] = []
 
@@ -100,9 +129,9 @@ class ListePresentService:
 
         return out
 
-    def build_preview_html(self) -> str:
+    def build_preview_html(self, search_filter: str | None = None) -> str:
         """Aperçu HTML aligné sur la même donnée que l’export (ordre config)."""
-        sections = self.build_sections_data()
+        sections = self.build_sections_data(search_filter=search_filter)
         ncols = len(RESULTAT_HEADERS)
 
         css = """
@@ -155,11 +184,11 @@ class ListePresentService:
         parts.append("</table></body></html>")
         return "".join(parts)
 
-    def export_excel(self, destination: Path) -> None:
+    def export_excel(self, destination: Path, search_filter: str | None = None) -> None:
         """Export : fidèle à la maquette si `resultat.xlsx` + `liste_present_layout.json` disponibles."""
         dest = Path(destination)
         layout = self._layout_config.load()
-        sections = self.build_sections_data(layout)
+        sections = self.build_sections_data(layout, search_filter=search_filter)
         tpl = self._settings.template_liste_present_path
 
         if tpl is not None and tpl.is_file():

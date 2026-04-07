@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
+    QDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from sme_gend.models.liste_generale import ListeGeneraleRow
 from sme_gend.services.personnel_service import PersonnelService
+from sme_gend.ui.personnel_edit_dialog import PersonnelEditDialog
 from sme_gend.ui.personnel_table_model import PersonnelTableModel
 
 
@@ -57,6 +59,11 @@ class PersonnelListView(QWidget):
         act_pres = QAction("Présents seulement", self)
         act_pres.triggered.connect(self._show_presents)
         bar.addAction(act_pres)
+        act_edit = QAction("Modifier la ligne…", self)
+        act_edit.triggered.connect(self._edit_current)
+        bar.addAction(act_edit)
+
+        self._table.doubleClicked.connect(self._edit_current)
 
         layout = QVBoxLayout(self)
         layout.addWidget(bar)
@@ -100,6 +107,39 @@ class PersonnelListView(QWidget):
         else:
             rows = [r for r in self._all_rows if _row_matches(r, needle)]
         self._model.set_rows(rows)
+
+    def _edit_current(self) -> None:
+        idx = self._table.selectionModel().currentIndex()
+        if not idx.isValid():
+            QMessageBox.information(self, "Personnel", "Sélectionnez une ligne.")
+            return
+        row_obj = self._model.row_at(idx.row())
+        if row_obj is None:
+            return
+        fresh = self._service.get_by_id(row_obj.id)
+        if fresh is None:
+            QMessageBox.warning(
+                self,
+                "Personnel",
+                "Ligne introuvable en base (identifiant peut-être obsolète). Actualisez la liste.",
+            )
+            return
+        dlg = PersonnelEditDialog(self, fresh)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        new_row = dlg.result_row()
+        try:
+            self._service.update_personnel(fresh, new_row)
+        except Exception as e:
+            QMessageBox.critical(self, "Enregistrement", str(e))
+            return
+        QMessageBox.information(
+            self,
+            "Personnel",
+            "Modifications enregistrées dans Access. "
+            "La trace est ajoutée à data/personnel_audit.jsonl.",
+        )
+        self._refresh_all()
 
 
 def _row_matches(row: ListeGeneraleRow, needle: str) -> bool:

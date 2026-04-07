@@ -1,4 +1,4 @@
-"""Fenêtre principale — menu, sidebar brandée, navigation icônes."""
+"""Fenêtre principale — menu, sidebar brandée, navigation arborescente."""
 
 from __future__ import annotations
 
@@ -8,14 +8,15 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QSizePolicy,
     QStackedWidget,
     QStatusBar,
     QStyle,
     QToolButton,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -40,6 +41,10 @@ from sme_gend.ui.views.referentiel_views import (
     SubdivisionsView,
 )
 
+# Données utilisateur sur QTreeWidgetItem : indice pile (-1 = dossier non navigable)
+_ROLE_STACK = Qt.ItemDataRole.UserRole
+_ROLE_LABEL = Qt.ItemDataRole.UserRole + 1
+
 
 def _std_icon(style: QStyle, sp: QStyle.StandardPixmap) -> QIcon:
     return style.standardIcon(sp)
@@ -61,59 +66,37 @@ class ShellWindow(QMainWindow):
         self.setMinimumSize(1024, 680)
 
         style = self.style()
+        self._page_to_item: dict[int, QTreeWidgetItem] = {}
+        self._nav_labels: list[str] = []
+        self._sidebar_compact = False
 
         self._stack = QStackedWidget()
         self._stack.setObjectName("contentStack")
 
-        self._nav = QListWidget()
-        self._nav.setObjectName("navList")
-        self._nav.setSpacing(2)
-        self._nav.setFrameShape(QFrame.Shape.NoFrame)
-
-        def add_page(text: str, widget: QWidget, icon: QIcon) -> None:
+        def register_page(text: str, widget: QWidget) -> None:
             self._stack.addWidget(widget)
-            item = QListWidgetItem(icon, "  " + text)
-            item.setSizeHint(item.sizeHint().expandedTo(QSize(200, 40)))
-            self._nav.addItem(item)
+            self._nav_labels.append(text)
 
-        add_page(
-            "Accueil",
-            HomeView(settings, dashboard),
+        # --- Pages (ordre pile = index utilisé partout) ---
+        register_page("Accueil", HomeView(settings, dashboard))
+        register_page("Liste générale", PersonnelListView(personnel))
+        register_page("Mise en page liste", LayoutEditorView(layout_cfg))
+        register_page("Structures", StructuresView(referentiel))
+        register_page("Struct. ↔ subdivisions", StructureSubdivisionView(referentiel))
+        register_page("Subdivisions", SubdivisionsView(referentiel))
+        register_page("Grades", GradesView(referentiel))
+        register_page("Fonctions", FonctionsView(referentiel))
+        register_page("Liste des présents", ListePresentView(liste_present))
+
+        # Icônes réelles (register_page a mis des QIcon() vides pour index 0)
+        icons: list[QIcon] = [
             _std_icon(style, QStyle.StandardPixmap.SP_DirHomeIcon),
-        )
-        add_page(
-            "Liste générale",
-            PersonnelListView(personnel),
             _std_icon(style, QStyle.StandardPixmap.SP_FileDialogListView),
-        )
-        add_page(
-            "Mise en page liste",
-            LayoutEditorView(layout_cfg),
             _std_icon(style, QStyle.StandardPixmap.SP_FileDialogDetailedView),
-        )
-        add_page(
-            "Structures",
-            StructuresView(referentiel),
             _std_icon(style, QStyle.StandardPixmap.SP_DesktopIcon),
-        )
-        add_page(
-            "Struct. ↔ subdivisions",
-            StructureSubdivisionView(referentiel),
             _std_icon(style, QStyle.StandardPixmap.SP_ArrowRight),
-        )
-        add_page(
-            "Subdivisions",
-            SubdivisionsView(referentiel),
             _std_icon(style, QStyle.StandardPixmap.SP_DirIcon),
-        )
-        add_page(
-            "Grades",
-            GradesView(referentiel),
             _std_icon(style, QStyle.StandardPixmap.SP_MessageBoxInformation),
-        )
-        add_page(
-            "Fonctions",
-            FonctionsView(referentiel),
             _std_icon(
                 style,
                 getattr(
@@ -122,80 +105,165 @@ class ShellWindow(QMainWindow):
                     QStyle.StandardPixmap.SP_FileDialogContentsView,
                 ),
             ),
-        )
-        add_page(
-            "Liste des présents",
-            ListePresentView(liste_present),
             _std_icon(style, QStyle.StandardPixmap.SP_DialogApplyButton),
+        ]
+
+        self._nav = QTreeWidget()
+        self._nav.setObjectName("navTree")
+        self._nav.setHeaderHidden(True)
+        self._nav.setRootIsDecorated(True)
+        self._nav.setIndentation(14)
+        self._nav.setAnimated(True)
+        self._nav.setIconSize(QSize(22, 22))
+        self._nav.setFrameShape(QFrame.Shape.NoFrame)
+        self._nav.setUniformRowHeights(True)
+        self._nav.setWordWrap(False)
+        self._nav.setTextElideMode(Qt.TextElideMode.ElideNone)
+
+        def add_leaf(parent: QTreeWidgetItem | None, label: str, stack_idx: int) -> QTreeWidgetItem:
+            if parent is None:
+                it = QTreeWidgetItem(self._nav, [label])
+            else:
+                it = QTreeWidgetItem(parent, [label])
+            it.setIcon(0, icons[stack_idx])
+            it.setData(0, _ROLE_STACK, stack_idx)
+            it.setData(0, _ROLE_LABEL, label)
+            it.setToolTip(0, label)
+            it.setTextAlignment(0, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter))
+            self._page_to_item[stack_idx] = it
+            return it
+
+        def add_folder(text: str, folder_icon: QIcon) -> QTreeWidgetItem:
+            it = QTreeWidgetItem(self._nav, [text])
+            it.setIcon(0, folder_icon)
+            it.setData(0, _ROLE_STACK, -1)
+            it.setData(0, _ROLE_LABEL, text)
+            it.setToolTip(0, text)
+            it.setExpanded(True)
+            it.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
+            it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            return it
+
+        add_leaf(None, "Accueil", 0)
+
+        f_eff = add_folder(
+            "Effectifs & listes",
+            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogNewFolder),
         )
+        add_leaf(f_eff, "Liste générale", 1)
+        add_leaf(f_eff, "Mise en page liste", 2)
+        add_leaf(f_eff, "Liste des présents", 8)
 
-        self._nav.currentRowChanged.connect(self._stack.setCurrentIndex)
-        self._nav.setCurrentRow(0)
+        f_ref = add_folder(
+            "Référentiels",
+            _std_icon(style, QStyle.StandardPixmap.SP_DialogOpenButton),
+        )
+        add_leaf(f_ref, "Structures", 3)
+        add_leaf(f_ref, "Struct. ↔ subdivisions", 4)
+        add_leaf(f_ref, "Subdivisions", 5)
+        add_leaf(f_ref, "Grades", 6)
+        add_leaf(f_ref, "Fonctions", 7)
 
-        # En-tête sidebar : logo + titres + replier
+        self._nav.itemClicked.connect(self._on_nav_item_clicked)
+        self._nav.setCurrentItem(self._page_to_item[0])
+        self._stack.setCurrentIndex(0)
+
+        # --- En-tête étendu (logo + textes + bouton réduire) ---
         logo_path = icon_path("app.svg")
-        logo_lbl = QLabel()
+        self._logo_lbl = QLabel()
         if logo_path.is_file():
-            logo_lbl.setPixmap(QIcon(str(logo_path)).pixmap(52, 52))
-        logo_lbl.setFixedSize(56, 56)
+            self._logo_lbl.setPixmap(QIcon(str(logo_path)).pixmap(52, 52))
+        self._logo_lbl.setFixedSize(56, 56)
 
-        brand = QLabel("GENDARMERIE NATIONALE")
-        brand.setObjectName("sidebarBrand")
-        title = QLabel("SME")
-        title.setObjectName("sidebarTitle")
-        sub = QLabel("Effectifs")
-        sub.setStyleSheet("color: #b0bec5; font-size: 12px;")
+        self._sidebar_brand = QLabel("GENDARMERIE NATIONALE")
+        self._sidebar_brand.setObjectName("sidebarBrand")
+        self._sidebar_title = QLabel("SME")
+        self._sidebar_title.setObjectName("sidebarTitle")
+        self._sidebar_sub = QLabel("Effectifs")
+        self._sidebar_sub.setStyleSheet("color: #b0bec5; font-size: 12px;")
 
         head_txt = QVBoxLayout()
         head_txt.setSpacing(2)
-        head_txt.addWidget(brand)
-        head_txt.addWidget(title)
-        head_txt.addWidget(sub)
+        head_txt.addWidget(self._sidebar_brand)
+        head_txt.addWidget(self._sidebar_title)
+        head_txt.addWidget(self._sidebar_sub)
 
         self._btn_collapse_sidebar = QToolButton()
         self._btn_collapse_sidebar.setText("◀")
         self._btn_collapse_sidebar.setObjectName("sidebarCollapseBtn")
-        self._btn_collapse_sidebar.setToolTip("Replier la barre latérale")
+        self._btn_collapse_sidebar.setToolTip("Réduire aux icônes")
         self._btn_collapse_sidebar.setAutoRaise(True)
+        self._btn_collapse_sidebar.setMinimumSize(36, 36)
         self._btn_collapse_sidebar.clicked.connect(self._collapse_sidebar)
 
         head_row = QHBoxLayout()
         head_row.setSpacing(14)
-        head_row.addWidget(logo_lbl, alignment=Qt.AlignmentFlag.AlignTop)
+        head_row.addWidget(self._logo_lbl, alignment=Qt.AlignmentFlag.AlignTop)
         head_row.addLayout(head_txt, stretch=1)
         head_row.addWidget(self._btn_collapse_sidebar, alignment=Qt.AlignmentFlag.AlignTop)
 
-        head_w = QWidget()
-        head_w.setLayout(head_row)
+        self._head_expanded = QWidget()
+        self._head_expanded.setLayout(head_row)
 
-        self._sidebar_frame = QFrame()
-        self._sidebar_frame.setObjectName("sidebarFrame")
-        side_lay = QVBoxLayout(self._sidebar_frame)
-        side_lay.setContentsMargins(12, 20, 12, 16)
-        side_lay.setSpacing(8)
-        side_lay.addWidget(head_w)
-        side_lay.addWidget(self._nav, stretch=1)
-
-        self._rail = QFrame()
-        self._rail.setObjectName("sidebarRail")
-        self._rail.setFixedWidth(44)
-        self._rail.hide()
-        rail_lay = QVBoxLayout(self._rail)
-        rail_lay.setContentsMargins(4, 16, 4, 8)
+        # --- En-tête compact : uniquement un bouton large « développer » (évite logo 56px + barre 72px) ---
         self._btn_expand_sidebar = QToolButton()
         self._btn_expand_sidebar.setText("▶")
         self._btn_expand_sidebar.setObjectName("sidebarExpandBtn")
-        self._btn_expand_sidebar.setToolTip("Afficher la barre latérale")
-        self._btn_expand_sidebar.setAutoRaise(True)
+        self._btn_expand_sidebar.setToolTip("Développer la barre latérale")
+        self._btn_expand_sidebar.setMinimumHeight(40)
+        self._btn_expand_sidebar.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         self._btn_expand_sidebar.clicked.connect(self._expand_sidebar)
-        rail_lay.addWidget(self._btn_expand_sidebar)
-        rail_lay.addStretch()
+
+        self._logo_small = QLabel()
+        if logo_path.is_file():
+            self._logo_small.setPixmap(QIcon(str(logo_path)).pixmap(28, 28))
+        self._logo_small.setFixedSize(32, 32)
+        self._logo_small.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        head_narrow_lay = QVBoxLayout()
+        head_narrow_lay.setSpacing(8)
+        head_narrow_lay.setContentsMargins(4, 8, 4, 8)
+        head_narrow_lay.addWidget(self._btn_expand_sidebar)
+        head_narrow_lay.addWidget(self._logo_small, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        self._head_compact = QWidget()
+        self._head_compact.setLayout(head_narrow_lay)
+        self._head_compact.hide()
+
+        self._header_stack = QStackedWidget()
+        self._header_stack.addWidget(self._head_expanded)
+        self._header_stack.addWidget(self._head_compact)
+
+        self._sidebar_frame = QFrame()
+        self._sidebar_frame.setObjectName("sidebarFrame")
+        self._sidebar_frame.setMinimumWidth(260)
+        self._sidebar_frame.setMaximumWidth(280)
+        self._side_lay = QVBoxLayout(self._sidebar_frame)
+        self._side_lay.setContentsMargins(12, 20, 12, 16)
+        self._side_lay.setSpacing(8)
+        self._side_lay.addWidget(self._header_stack)
+        self._side_lay.addWidget(self._nav, stretch=1)
+
+        self._btn_help_sidebar = QToolButton()
+        self._btn_help_sidebar.setObjectName("sidebarHelpBtn")
+        self._btn_help_sidebar.setText("?")
+        self._btn_help_sidebar.setToolTip("À propos / aide — F1")
+        self._btn_help_sidebar.setAutoRaise(True)
+        self._btn_help_sidebar.setMinimumSize(36, 36)
+        self._btn_help_sidebar.clicked.connect(self._about)
+        help_row = QHBoxLayout()
+        help_row.addStretch()
+        help_row.addWidget(self._btn_help_sidebar)
+        help_row.addStretch()
+        self._side_lay.addLayout(help_row)
 
         central = QWidget()
         lay = QHBoxLayout(central)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        lay.addWidget(self._rail)
         lay.addWidget(self._sidebar_frame)
         lay.addWidget(self._stack, stretch=1)
         self.setCentralWidget(central)
@@ -208,8 +276,33 @@ class ShellWindow(QMainWindow):
         status.showMessage("Prêt")
         status.addPermanentWidget(QLabel(f"Base : {db}"))
 
+    def _on_nav_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
+        del column
+        idx = item.data(0, _ROLE_STACK)
+        if idx is None:
+            return
+        try:
+            stack_idx = int(idx)
+        except (TypeError, ValueError):
+            return
+        if stack_idx < 0:
+            return
+        self._stack.setCurrentIndex(stack_idx)
+
+    def _walk_nav_items(self):
+        """Parcourt tous les items (y compris enfants)."""
+        for i in range(self._nav.topLevelItemCount()):
+            yield from self._walk_item(self._nav.topLevelItem(i))
+
+    def _walk_item(self, item: QTreeWidgetItem):
+        yield item
+        for j in range(item.childCount()):
+            yield from self._walk_item(item.child(j))
+
     def _build_menu_bar(self) -> None:
         bar = self.menuBar()
+        # Barre de menus intégrée à la fenêtre (évite menus natifs Windows peu fiables avec thème QSS)
+        bar.setNativeMenuBar(False)
 
         m_file = bar.addMenu("&Fichier")
         act_quit = QAction("Quitter", self)
@@ -222,7 +315,7 @@ class ShellWindow(QMainWindow):
         act_reload.setShortcut("F5")
         act_reload.triggered.connect(self._refresh_dashboard_if_visible)
         m_view.addAction(act_reload)
-        act_sidebar = QAction("Afficher / masquer la barre latérale", self)
+        act_sidebar = QAction("Réduire / développer la barre latérale (icônes)", self)
         act_sidebar.setShortcut("Ctrl+B")
         act_sidebar.triggered.connect(self._toggle_sidebar)
         m_view.addAction(act_sidebar)
@@ -246,11 +339,14 @@ class ShellWindow(QMainWindow):
 
         m_help = bar.addMenu("&Aide")
         act_about = QAction("À propos de SME…", self)
+        act_about.setShortcut(QKeySequence("F1"))
+        act_about.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
+        act_about.setMenuRole(QAction.MenuRole.NoRole)
         act_about.triggered.connect(self._about)
         m_help.addAction(act_about)
 
     def _refresh_dashboard_if_visible(self) -> None:
-        if self._nav.currentRow() != 0:
+        if self._stack.currentIndex() != 0:
             return
         w = self._stack.widget(0)
         if hasattr(w, "_reload_stats"):
@@ -258,28 +354,76 @@ class ShellWindow(QMainWindow):
             self.statusBar().showMessage("Indicateurs actualisés.", 3000)
 
     def _go_page(self, index: int) -> None:
-        if 0 <= index < self._nav.count():
-            self._nav.setCurrentRow(index)
+        if 0 <= index < self._stack.count():
+            self._stack.setCurrentIndex(index)
+            it = self._page_to_item.get(index)
+            if it is not None:
+                self._nav.setCurrentItem(it)
+                self._nav.scrollToItem(it)
+
+    def _set_nav_compact_labels(self, compact: bool) -> None:
+        align = (
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter
+            if compact
+            else Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        for item in self._walk_nav_items():
+            label = item.data(0, _ROLE_LABEL)
+            if label is None:
+                continue
+            text = str(label)
+            if compact:
+                item.setText(0, "")
+                item.setToolTip(0, text)
+            else:
+                item.setText(0, text)
+                item.setToolTip(0, text)
+            item.setTextAlignment(0, int(align))
+
+    def _set_sidebar_compact(self, compact: bool) -> None:
+        self._sidebar_compact = compact
+        self._sidebar_frame.setProperty("compact", compact)
+        self._sidebar_frame.style().unpolish(self._sidebar_frame)
+        self._sidebar_frame.style().polish(self._sidebar_frame)
+
+        if compact:
+            self._sidebar_frame.setMinimumWidth(84)
+            self._sidebar_frame.setMaximumWidth(100)
+            self._header_stack.setCurrentIndex(1)
+            self._nav.setIconSize(QSize(26, 26))
+            # Icônes alignées : pas d’indentation de branche (évite décalage + chevauchement scrollbar)
+            self._nav.setIndentation(0)
+            self._nav.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self._nav.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self._set_nav_compact_labels(True)
+            self._side_lay.setContentsMargins(6, 10, 6, 10)
+        else:
+            self._sidebar_frame.setMinimumWidth(260)
+            self._sidebar_frame.setMaximumWidth(300)
+            self._header_stack.setCurrentIndex(0)
+            self._nav.setIconSize(QSize(22, 22))
+            self._nav.setIndentation(14)
+            self._nav.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self._nav.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self._set_nav_compact_labels(False)
+            self._side_lay.setContentsMargins(12, 20, 12, 16)
 
     def _collapse_sidebar(self) -> None:
-        self._sidebar_frame.setVisible(False)
-        self._rail.setVisible(True)
+        self._set_sidebar_compact(True)
 
     def _expand_sidebar(self) -> None:
-        self._sidebar_frame.setVisible(True)
-        self._rail.setVisible(False)
+        self._set_sidebar_compact(False)
 
     def _toggle_sidebar(self) -> None:
-        if self._sidebar_frame.isVisible():
-            self._collapse_sidebar()
-        else:
-            self._expand_sidebar()
+        self._set_sidebar_compact(not self._sidebar_compact)
 
     def _about(self) -> None:
         m = QMessageBox(self)
-        m.setWindowTitle("À propos")
+        m.setWindowTitle("À propos — SME")
         m.setIcon(QMessageBox.Icon.Information)
         m.setTextFormat(Qt.TextFormat.RichText)
+        m.setStandardButtons(QMessageBox.StandardButton.Ok)
+        m.setDefaultButton(QMessageBox.StandardButton.Ok)
         m.setText(
             f"<h3>SME — Situation mensuelle des effectifs</h3>"
             f"<p>Application de gestion et d’export des listes de personnel.</p>"
@@ -289,6 +433,9 @@ class ShellWindow(QMainWindow):
             f"<p style=\"color:#666;\">Client desktop PySide6 — données Access.</p>"
         )
         m.setOpenExternalLinks(True)
+        m.setModal(True)
+        m.raise_()
+        m.activateWindow()
         m.exec()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802

@@ -22,3 +22,24 @@ class StructureRepository:
             cur = conn.cursor()
             cur.execute(SQL)
             return [StructureRow.from_sequence(r) for r in cur.fetchall()]
+
+    def insert(self, code: str, designation: str, ordre_tri: int | None) -> None:
+        with self._conn.connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO TabStructure (code, designation, OderTri) VALUES (?, ?, ?)",
+                (code.strip(), designation.strip(), ordre_tri),
+            )
+
+    def update(self, code: str, designation: str, ordre_tri: int | None) -> None:
+        with self._conn.connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE TabStructure SET designation = ?, OderTri = ? WHERE code = ?",
+                (designation.strip(), ordre_tri, code.strip()),
+            )
+
+    def delete(self, code: str) -> None:
+        with self._conn.connect() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM TabStructure WHERE code = ?", (code.strip(),))
