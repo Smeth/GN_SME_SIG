@@ -68,6 +68,30 @@ class ListeGeneraleRepository:
         rows = self.fetch_all()
         return [r for r in rows if _is_present(r.position_admin)]
 
+    def fetch_distinct_padmin(self) -> list[str]:
+        """Valeurs distinctes de position administrative (liste générale)."""
+        q = """
+        SELECT DISTINCT Padmin FROM ListeGenerale
+        WHERE Padmin IS NOT NULL AND Padmin <> ''
+        ORDER BY Padmin
+        """
+        with self._conn_factory.connect() as conn:
+            cur = conn.cursor()
+            cur.execute(q)
+            return [str(r[0]).strip() for r in cur.fetchall() if r[0]]
+
+    def fetch_distinct_subarme(self) -> list[str]:
+        """Valeurs distinctes SubArme (effectifs)."""
+        q = """
+        SELECT DISTINCT SubArme FROM ListeGenerale
+        WHERE SubArme IS NOT NULL AND SubArme <> ''
+        ORDER BY SubArme
+        """
+        with self._conn_factory.connect() as conn:
+            cur = conn.cursor()
+            cur.execute(q)
+            return [str(r[0]).strip() for r in cur.fetchall() if r[0]]
+
     def fetch_distinct_subarme_for_structure(self, structure_code: str) -> list[str]:
         """Subdivisions d'arme distinctes pour une structure (champ ListeGenerale.Structure)."""
         q = """

@@ -329,6 +329,25 @@ class HomeView(QWidget):
         self._charts_layout = QGridLayout(self._charts_wrap)
         self._charts_layout.setSpacing(16)
 
+        self._grade_table = QTableWidget()
+        self._grade_table.setObjectName("dashGradeTable")
+        self._grade_table.setColumnCount(4)
+        self._grade_table.setHorizontalHeaderLabels(
+            ["Grade (liste générale)", "Effectif", "% du total", "Écart vs répartition uniforme"]
+        )
+        self._grade_table.horizontalHeader().setStretchLastSection(True)
+        self._grade_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._grade_table.setAlternatingRowColors(True)
+        self._grade_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self._grade_table.verticalHeader().setVisible(False)
+        self._grade_hint = QLabel(
+            "Pour chaque libellé de grade : effectif, part du personnel total, et "
+            "<b>écart en points de pourcentage</b> par rapport à une répartition <i>uniforme</i> "
+            "(si tous les grades observés avaient le même effectif)."
+        )
+        self._grade_hint.setWordWrap(True)
+        self._grade_hint.setObjectName("dashSubtitle")
+
         self._table = QTableWidget()
         self._table.setColumnCount(2)
         self._table.setHorizontalHeaderLabels(["Position administrative", "Effectif"])
@@ -358,9 +377,8 @@ class HomeView(QWidget):
         inner_lay.addLayout(head)
         inner_lay.addWidget(sub)
         inner_lay.addWidget(
-            QLabel("<b>SME — période mensuelle (TabSme)</b>", textFormat=Qt.TextFormat.RichText)
+            QLabel("<b>Indicateurs principaux</b>", textFormat=Qt.TextFormat.RichText)
         )
-        inner_lay.addWidget(self._sme_frame)
         inner_lay.addLayout(self._grid)
         inner_lay.addWidget(
             QLabel(
@@ -370,9 +388,24 @@ class HomeView(QWidget):
         )
         inner_lay.addWidget(self._pos_scroll)
         inner_lay.addWidget(
-            QLabel("<b>Graphiques</b> — présence, positions, structures, grades", textFormat=Qt.TextFormat.RichText)
+            QLabel(
+                "<b>Graphiques et courbes</b> — présence, positions, structures, grades",
+                textFormat=Qt.TextFormat.RichText,
+            )
         )
         inner_lay.addWidget(self._charts_wrap)
+        inner_lay.addWidget(
+            QLabel(
+                "<b>Effectifs et répartition par grade</b> — variations par rapport à une base uniforme",
+                textFormat=Qt.TextFormat.RichText,
+            )
+        )
+        inner_lay.addWidget(self._grade_hint)
+        inner_lay.addWidget(self._grade_table)
+        inner_lay.addWidget(
+            QLabel("<b>SME — période mensuelle (TabSme)</b>", textFormat=Qt.TextFormat.RichText)
+        )
+        inner_lay.addWidget(self._sme_frame)
         inner_lay.addWidget(QLabel("<b>Tableau détaillé (positions)</b>", textFormat=Qt.TextFormat.RichText))
         inner_lay.addWidget(self._table)
         inner_lay.addWidget(paths)
@@ -412,6 +445,7 @@ class HomeView(QWidget):
                 lab.setText("")
             if self._path_labels:
                 self._path_labels[0].setText(f"<b>Erreur</b><br/>{e}")
+            self._grade_table.setRowCount(0)
             return
 
         while self._grid.count():
@@ -495,6 +529,14 @@ class HomeView(QWidget):
             self._table.setItem(row, 0, QTableWidgetItem(pos))
             self._table.setItem(row, 1, QTableWidgetItem(str(n)))
         self._table.resizeColumnsToContents()
+
+        self._grade_table.setRowCount(len(s.grades_effectifs_detail))
+        for row, (g, n, pct, ecart) in enumerate(s.grades_effectifs_detail):
+            self._grade_table.setItem(row, 0, QTableWidgetItem(g))
+            self._grade_table.setItem(row, 1, QTableWidgetItem(str(n)))
+            self._grade_table.setItem(row, 2, QTableWidgetItem(f"{pct:.1f} %"))
+            self._grade_table.setItem(row, 3, QTableWidgetItem(f"{ecart:+.1f} pts"))
+        self._grade_table.resizeColumnsToContents()
 
         tpl = self._settings.template_liste_present_path
         tpl_txt = str(tpl) if tpl else "(aucune — placez resultat.xlsx dans data/ ou Impression/)"

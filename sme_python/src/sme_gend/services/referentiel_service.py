@@ -43,6 +43,24 @@ class ReferentielService:
         """Valeurs distinctes SubArme dans ListeGenerale pour cette structure (code TabStructure)."""
         return self._liste_generale.fetch_distinct_subarme_for_structure(structure_code)
 
+    def subdivision_arme_combo_choices(self) -> list[str]:
+        """Libellés pour liste déroulante SubArme : hiérarchie + valeurs déjà en base."""
+        from_flat = [r.design_t for r in self._subdivisions.fetch_flat_hierarchy() if r.design_t]
+        from_data = self._liste_generale.fetch_distinct_subarme()
+        seen: set[str] = set()
+        out: list[str] = []
+        for x in from_flat + from_data:
+            x = (x or "").strip()
+            if x and x not in seen:
+                seen.add(x)
+                out.append(x)
+        out.sort(key=str.lower)
+        return out
+
+    def position_admin_choices(self) -> list[str]:
+        """Positions administratives distinctes (liste générale)."""
+        return self._liste_generale.fetch_distinct_padmin()
+
     def structure_insert(self, code: str, designation: str, ordre_tri: int | None) -> None:
         self._structures.insert(code, designation, ordre_tri)
 

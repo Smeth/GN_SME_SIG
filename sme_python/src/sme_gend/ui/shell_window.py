@@ -78,8 +78,8 @@ class ShellWindow(QMainWindow):
             self._nav_labels.append(text)
 
         # --- Pages (ordre pile = index utilisé partout) ---
-        register_page("Accueil", HomeView(settings, dashboard))
-        register_page("Liste générale", PersonnelListView(personnel))
+        register_page("Tableau de bord", HomeView(settings, dashboard))
+        register_page("Liste générale", PersonnelListView(personnel, referentiel))
         register_page("Mise en page liste", LayoutEditorView(layout_cfg))
         register_page("Structures", StructuresView(referentiel))
         register_page("Struct. ↔ subdivisions", StructureSubdivisionView(referentiel))
@@ -144,7 +144,7 @@ class ShellWindow(QMainWindow):
             it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             return it
 
-        add_leaf(None, "Accueil", 0)
+        add_leaf(None, "Tableau de bord", 0)
 
         f_eff = add_folder(
             "Effectifs & listes",
@@ -322,7 +322,7 @@ class ShellWindow(QMainWindow):
 
         m_nav = bar.addMenu("&Navigation")
         nav_entries = [
-            "Accueil",
+            "Tableau de bord",
             "Liste générale",
             "Mise en page liste",
             "Structures",

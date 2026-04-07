@@ -45,3 +45,8 @@ class RefTableModel(QAbstractTableModel):
         if orientation == Qt.Orientation.Horizontal:
             return self._headers[section]
         return str(section + 1)
+
+    def row_at(self, row: int) -> list[str] | None:
+        if 0 <= row < len(self._rows):
+            return self._rows[row]
+        return None

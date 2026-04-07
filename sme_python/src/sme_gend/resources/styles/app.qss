@@ -225,6 +225,10 @@ QTableWidget {
     gridline-color: #eef0f3;
 }
 
+QTableWidget#dashGradeTable {
+    min-height: 120px;
+}
+
 QTableWidget::item {
     padding: 8px;
 }
@@ -304,4 +308,76 @@ QScrollArea#dashPosScroll {
     background-color: transparent;
     border: 1px solid #e1e4e8;
     border-radius: 10px;
+}
+
+/* Dialogues (personnel, référentiels, subdivisions structure) */
+QDialog#PersonnelEditDialog,
+QDialog#StructureSubdivisionsDialog,
+QDialog#RefEditDialog {
+    background-color: #fafbfc;
+}
+
+QFrame#PersonnelEditHeader {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1a237e, stop:1 #283593);
+    border-radius: 12px;
+    padding: 14px 18px;
+}
+
+QLabel#PersonnelEditTitle {
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+QLabel#PersonnelEditSubtitle {
+    color: #e8eaf6;
+    font-size: 12px;
+}
+
+QLabel#PersonnelEditHint {
+    color: #5c6370;
+    font-size: 12px;
+    padding: 4px 0 8px 0;
+}
+
+QDialog#PersonnelEditDialog QGroupBox {
+    font-weight: 600;
+    color: #1a237e;
+    border: 1px solid #e1e4e8;
+    border-radius: 8px;
+    margin-top: 14px;
+    padding-top: 12px;
+    background-color: #ffffff;
+}
+
+QDialog#PersonnelEditDialog QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 6px;
+}
+
+QLabel#modalTitle {
+    color: #1a237e;
+    font-weight: 700;
+}
+
+QLabel#modalSubtitle {
+    color: #5c6370;
+    font-size: 12px;
+}
+
+QDialog QPushButton {
+    padding: 8px 16px;
+    border-radius: 6px;
+}
+
+QDialog QPushButton:default {
+    background-color: #ffd54f;
+    color: #1a237e;
+    font-weight: 600;
+    border: none;
+}
+
+QDialog QPushButton:default:hover {
+    background-color: #ffecb3;
 }

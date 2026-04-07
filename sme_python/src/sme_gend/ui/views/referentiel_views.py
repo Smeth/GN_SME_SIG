@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QMessageBox,
     QPushButton,
     QSpinBox,
@@ -21,8 +20,10 @@ from PySide6.QtWidgets import (
 
 from sme_gend.models.grade_ref import GradeRefRow
 from sme_gend.models.structure import StructureRow
+from sme_gend.repositories.subdivision_repository import SubdivisionFlatRow
 from sme_gend.services.referentiel_service import ReferentielService
 from sme_gend.ui.ref_table_model import RefTableModel
+from sme_gend.ui.structure_subdivisions_dialog import StructureSubdivisionsDialog
 
 
 class _RefBase(QWidget):
@@ -57,9 +58,30 @@ def _parse_int_opt(s: str) -> int | None:
     return int(s)
 
 
+def _readonly_detail_dialog(parent: QWidget, title: str, fields: list[tuple[str, str]]) -> None:
+    """Petite fenêtre modale lecture seule (détail référentiel)."""
+    d = QDialog(parent)
+    d.setObjectName("RefEditDialog")
+    d.setWindowTitle(title)
+    d.setModal(True)
+    d.setMinimumWidth(400)
+    form = QFormLayout()
+    for label, value in fields:
+        le = QLineEdit(value)
+        le.setReadOnly(True)
+        form.addRow(label, le)
+    bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+    bb.accepted.connect(d.accept)
+    lay = QVBoxLayout(d)
+    lay.addLayout(form)
+    lay.addWidget(bb)
+    d.exec()
+
+
 class _StructureDialog(QDialog):
     def __init__(self, parent, row: StructureRow | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("RefEditDialog")
         self.setWindowTitle("Structure" if row is None else "Modifier la structure")
         self._code = QLineEdit()
         self._designation = QLineEdit()
@@ -96,6 +118,7 @@ class _StructureDialog(QDialog):
 class _GradeDialog(QDialog):
     def __init__(self, parent, row: GradeRefRow | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("RefEditDialog")
         self.setWindowTitle("Grade" if row is None else "Modifier le grade")
         self._code = QLineEdit()
         self._libelle = QLineEdit()
@@ -137,10 +160,13 @@ class StructureSubdivisionView(_RefBase):
 
     def __init__(self, service: ReferentielService, parent=None) -> None:
         super().__init__(service, parent)
+        self._pairs: list[tuple[str, str]] = []
         self._hint.setText(
             "<b>Structures ↔ subdivisions d'arme</b> — couples distincts "
-            "(Structure, SubArme) issus de la liste générale. Lecture seule."
+            "(Structure, SubArme) issus de la liste générale. Lecture seule. "
+            "<b>Double-clic</b> : détail."
         )
+        self._table.doubleClicked.connect(self._on_double_click)
         self.reload()
 
     def reload(self) -> None:
@@ -149,8 +175,23 @@ class StructureSubdivisionView(_RefBase):
         except Exception as e:
             QMessageBox.critical(self, "Erreur", str(e))
             return
+        self._pairs = list(pairs)
         data = [[a, b] for a, b in pairs]
         self._model.set_data(["Structure (code)", "Subdivision d'arme"], data)
+
+    def _on_double_click(self) -> None:
+        idx = self._table.selectionModel().currentIndex()
+        if not idx.isValid():
+            return
+        row = idx.row()
+        if row < 0 or row >= len(self._pairs):
+            return
+        a, b = self._pairs[row]
+        _readonly_detail_dialog(
+            self,
+            "Couple structure / subdivision d'arme",
+            [("Structure (code)", a), ("Subdivision d'arme (SubArme)", b)],
+        )
 
 
 class StructuresView(QWidget):
@@ -166,29 +207,22 @@ class StructuresView(QWidget):
         self._table.horizontalHeader().setStretchLastSection(True)
         self._table.setAlternatingRowColors(True)
         self._table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-        self._table.selectionModel().currentRowChanged.connect(
-            self._on_structure_selection_changed
-        )
+        self._table.doubleClicked.connect(self._open_subdivisions_modal)
 
         self._hint = QLabel(
             "<b>Structures</b> (TabStructure) — les modifications sont écrites dans la base Access. "
-            "Sélectionnez une ligne pour voir les <b>subdivisions d'arme</b> (SubArme) "
-            "rattachées dans ListeGenerale."
+            "<b>Double-clic</b> ou <b>Subdivisions d'arme…</b> : fenêtre avec les SubArme "
+            "(ListeGenerale) pour la structure sélectionnée."
         )
         self._hint.setWordWrap(True)
-
-        self._sub_hint = QLabel(
-            "<b>Subdivisions d'arme</b> pour la structure sélectionnée "
-            "(valeurs distinctes SubArme dans ListeGenerale où Structure = code) :"
-        )
-        self._sub_hint.setWordWrap(True)
-        self._sub_list = QListWidget()
-        self._sub_list.setAlternatingRowColors(True)
 
         self._btn = QPushButton("Actualiser")
         self._btn.clicked.connect(self.reload)
         self._btn_add = QPushButton("Nouvelle structure…")
         self._btn_add.clicked.connect(self._on_add)
+        self._btn_sub = QPushButton("Subdivisions d'arme…")
+        self._btn_sub.setToolTip("SubArme distincts dans ListeGenerale pour cette structure")
+        self._btn_sub.clicked.connect(self._open_subdivisions_modal)
         self._btn_edit = QPushButton("Modifier…")
         self._btn_edit.clicked.connect(self._on_edit)
         self._btn_del = QPushButton("Supprimer")
@@ -197,6 +231,7 @@ class StructuresView(QWidget):
         bar = QHBoxLayout()
         bar.addWidget(self._btn)
         bar.addWidget(self._btn_add)
+        bar.addWidget(self._btn_sub)
         bar.addWidget(self._btn_edit)
         bar.addWidget(self._btn_del)
         bar.addStretch()
@@ -204,9 +239,7 @@ class StructuresView(QWidget):
         lay = QVBoxLayout(self)
         lay.addWidget(self._hint)
         lay.addLayout(bar)
-        lay.addWidget(self._table, stretch=2)
-        lay.addWidget(self._sub_hint)
-        lay.addWidget(self._sub_list, stretch=1)
+        lay.addWidget(self._table, stretch=1)
         self.reload()
 
     def reload(self) -> None:
@@ -222,28 +255,23 @@ class StructuresView(QWidget):
         self._model.set_data(["Code", "Désignation", "Ordre tri"], data)
         if self._rows:
             self._table.selectRow(0)
-        self._load_subdivisions_for_current()
 
     def _selected_row(self) -> int:
         idx = self._table.selectionModel().currentIndex()
         return idx.row()
 
-    def _on_structure_selection_changed(self, _current, _previous) -> None:
-        self._load_subdivisions_for_current()
-
-    def _load_subdivisions_for_current(self) -> None:
-        self._sub_list.clear()
+    def _open_subdivisions_modal(self) -> None:
         row = self._selected_row()
         if row < 0 or row >= len(self._rows):
+            QMessageBox.information(self, "Structures", "Sélectionnez une structure.")
             return
-        code = self._rows[row].code
-        try:
-            subs = self._service.subdivisions_arme_for_structure(code)
-        except Exception as e:
-            QMessageBox.critical(self, "Subdivisions", str(e))
-            return
-        for s in subs:
-            self._sub_list.addItem(s)
+        dlg = StructureSubdivisionsDialog(
+            self,
+            self._service,
+            self._rows[row],
+            on_structure_changed=self.reload,
+        )
+        dlg.exec()
 
     def _on_add(self) -> None:
         dlg = _StructureDialog(self, None)
@@ -306,10 +334,12 @@ class StructuresView(QWidget):
 class SubdivisionsView(_RefBase):
     def __init__(self, service: ReferentielService, parent=None) -> None:
         super().__init__(service, parent)
+        self._flat_rows: list[SubdivisionFlatRow] = []
         self._hint.setText(
             "<b>Subdivisions</b> — hiérarchie Secun → Secdeux → Sectrois (jointure). "
-            "L’édition des trois tables liées sera ajoutée dans une version ultérieure."
+            "<b>Double-clic</b> : détail de la ligne. L’édition des tables liées pourra être ajoutée ultérieurement."
         )
+        self._table.doubleClicked.connect(self._on_double_click)
         self.reload()
 
     def reload(self) -> None:
@@ -318,6 +348,7 @@ class SubdivisionsView(_RefBase):
         except Exception as e:
             QMessageBox.critical(self, "Erreur", str(e))
             return
+        self._flat_rows = list(flat)
         data = [
             [r.code_u, r.design_u, r.code_d, r.design_d, r.code_t, r.design_t]
             for r in flat
@@ -325,6 +356,27 @@ class SubdivisionsView(_RefBase):
         self._model.set_data(
             ["Code U", "Niveau 1", "Code D", "Niveau 2", "Code T", "Niveau 3"],
             data,
+        )
+
+    def _on_double_click(self) -> None:
+        idx = self._table.selectionModel().currentIndex()
+        if not idx.isValid():
+            return
+        row = idx.row()
+        if row < 0 or row >= len(self._flat_rows):
+            return
+        r = self._flat_rows[row]
+        _readonly_detail_dialog(
+            self,
+            f"Subdivision — {r.code_t}",
+            [
+                ("Code niveau 1 (U)", r.code_u),
+                ("Niveau 1", r.design_u),
+                ("Code niveau 2 (D)", r.code_d),
+                ("Niveau 2", r.design_d),
+                ("Code niveau 3 (T)", r.code_t),
+                ("Niveau 3", r.design_t),
+            ],
         )
 
 
@@ -341,9 +393,11 @@ class GradesView(QWidget):
         self._table.horizontalHeader().setStretchLastSection(True)
         self._table.setAlternatingRowColors(True)
         self._table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self._table.doubleClicked.connect(self._on_edit)
 
         self._hint = QLabel(
-            "<b>Grades</b> (TabGrade) — ordre de préséance ; enregistrement dans Access."
+            "<b>Grades</b> (TabGrade) — ordre de préséance ; enregistrement dans Access. "
+            "<b>Double-clic</b> : modifier."
         )
         self._hint.setWordWrap(True)
 
@@ -446,10 +500,13 @@ class GradesView(QWidget):
 class FonctionsView(_RefBase):
     def __init__(self, service: ReferentielService, parent=None) -> None:
         super().__init__(service, parent)
+        self._fnames: list[str] = []
         self._hint.setText(
             "<b>Fonctions</b> — valeurs distinctes dans ListeGenerale.Fonction. "
-            "Sans table dédiée, l’édition se fait via la liste générale ou une future table."
+            "Pas de table dédiée : modifier une affectation depuis la <b>liste générale</b> (fiche personnel). "
+            "<b>Double-clic</b> : détail."
         )
+        self._table.doubleClicked.connect(self._on_double_click)
         self.reload()
 
     def reload(self) -> None:
@@ -458,5 +515,37 @@ class FonctionsView(_RefBase):
         except Exception as e:
             QMessageBox.critical(self, "Erreur", str(e))
             return
+        self._fnames = list(fns)
         data = [[f] for f in fns]
         self._model.set_data(["Fonction"], data)
+
+    def _on_double_click(self) -> None:
+        idx = self._table.selectionModel().currentIndex()
+        if not idx.isValid():
+            return
+        row = idx.row()
+        if row < 0 or row >= len(self._fnames):
+            return
+        fn = self._fnames[row]
+        d = QDialog(self)
+        d.setObjectName("RefEditDialog")
+        d.setWindowTitle("Fonction")
+        d.setModal(True)
+        d.setMinimumWidth(420)
+        lay = QVBoxLayout(d)
+        info = QLabel(
+            "Cette valeur provient des fiches personnel (ListeGenerale.Fonction). "
+            "Pour la modifier sur un individu, ouvrez la <b>liste générale</b> et éditez la ligne concernée."
+        )
+        info.setWordWrap(True)
+        info.setTextFormat(Qt.TextFormat.RichText)
+        lay.addWidget(info)
+        le = QLineEdit(fn)
+        le.setReadOnly(True)
+        form = QFormLayout()
+        form.addRow("Fonction", le)
+        lay.addLayout(form)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        bb.accepted.connect(d.accept)
+        lay.addWidget(bb)
+        d.exec()

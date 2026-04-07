@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from sme_gend.models.liste_generale import ListeGeneraleRow
 from sme_gend.services.personnel_service import PersonnelService
+from sme_gend.services.referentiel_service import ReferentielService
 from sme_gend.ui.personnel_edit_dialog import PersonnelEditDialog
 from sme_gend.ui.personnel_table_model import PersonnelTableModel
 
@@ -25,9 +26,15 @@ from sme_gend.ui.personnel_table_model import PersonnelTableModel
 class PersonnelListView(QWidget):
     """Consultation de la liste générale Access."""
 
-    def __init__(self, service: PersonnelService, parent=None) -> None:
+    def __init__(
+        self,
+        service: PersonnelService,
+        referentiel: ReferentielService,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self._service = service
+        self._referentiel = referentiel
         self._all_rows: list[ListeGeneraleRow] = []
         self._filter_text = ""
 
@@ -124,7 +131,7 @@ class PersonnelListView(QWidget):
                 "Ligne introuvable en base (identifiant peut-être obsolète). Actualisez la liste.",
             )
             return
-        dlg = PersonnelEditDialog(self, fresh)
+        dlg = PersonnelEditDialog(self, fresh, self._referentiel)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         new_row = dlg.result_row()

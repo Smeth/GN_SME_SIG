@@ -67,6 +67,8 @@ def _sort_key_mois(mois: str) -> tuple:
 
 @dataclass(frozen=True, slots=True)
 class DashboardSnapshot:
+    """Instantané tableau de bord. grades_effectifs_detail : (grade, effectif, % total, écart vs uniforme)."""
+
     total_effectifs: int
     presents: int
     hors_present: int
@@ -78,6 +80,7 @@ class DashboardSnapshot:
     nb_subdivisions_hierarchie: int
     grades_distribution: list[tuple[str, int]]
     structures_distribution: list[tuple[str, int]]
+    grades_effectifs_detail: tuple[tuple[str, int, float, float], ...]
     sme_table_ok: bool
     sme_rows: tuple[SmeRow, ...]
     sme_trend_points: tuple[tuple[str, float], ...]
@@ -113,6 +116,16 @@ class DashboardService:
         grades_distribution = _top_n_with_other(grade_counter, 10)
         structures_distribution = _top_n_with_other(struct_counter, 10)
 
+        grade_keys = sorted(grade_counter.keys(), key=lambda k: (-grade_counter[k], k))
+        n_grades_distinct = len(grade_keys)
+        uniform_pct = (100.0 / n_grades_distinct) if n_grades_distinct else 0.0
+        grades_detail: list[tuple[str, int, float, float]] = []
+        for g in grade_keys:
+            c = grade_counter[g]
+            pct = (100.0 * c / total) if total else 0.0
+            ecart = pct - uniform_pct
+            grades_detail.append((g, c, pct, ecart))
+
         structs_eff = len({(r.structure or "").strip() for r in rows if (r.structure or "").strip()})
         nb_struct = len(self._structures.fetch_all())
         nb_grades = len(self._grades.fetch_all())
@@ -144,6 +157,7 @@ class DashboardService:
             nb_subdivisions_hierarchie=nb_sub,
             grades_distribution=grades_distribution,
             structures_distribution=structures_distribution,
+            grades_effectifs_detail=tuple(grades_detail),
             sme_table_ok=sme_table_ok,
             sme_rows=tuple(sme_rows_list),
             sme_trend_points=tuple(trend),
