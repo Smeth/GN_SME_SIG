@@ -1,0 +1,243 @@
+/* SME Gendarmerie — thème clair institutionnel (bleu nuit + or) */
+
+* {
+    font-family: "Segoe UI", "SF Pro Display", Roboto, sans-serif;
+    font-size: 13px;
+}
+
+QMainWindow {
+    background-color: #f0f2f5;
+}
+
+QMenuBar {
+    background-color: #1a237e;
+    color: #ffffff;
+    padding: 4px 8px;
+    border: none;
+}
+
+QMenuBar::item {
+    padding: 6px 12px;
+    border-radius: 4px;
+}
+
+QMenuBar::item:selected {
+    background-color: rgba(255, 215, 0, 0.25);
+}
+
+QMenuBar::item:pressed {
+    background-color: rgba(255, 215, 0, 0.4);
+}
+
+QMenu {
+    background-color: #ffffff;
+    border: 1px solid #d0d4dc;
+    padding: 4px;
+}
+
+QMenu::item {
+    padding: 8px 28px 8px 12px;
+    border-radius: 4px;
+}
+
+QMenu::item:selected {
+    background-color: #e8eaf6;
+    color: #1a237e;
+}
+
+/* Bandeau repliable (barre latérale masquée) */
+QFrame#sidebarRail {
+    background-color: #e8eaf6;
+    border: none;
+    border-right: 1px solid #c5cae9;
+}
+
+QToolButton#sidebarExpandBtn,
+QToolButton#sidebarCollapseBtn {
+    color: #ffd54f;
+    font-weight: bold;
+    font-size: 14px;
+    padding: 6px;
+    border-radius: 6px;
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+QFrame#sidebarRail QToolButton#sidebarExpandBtn {
+    color: #1a237e;
+    background-color: rgba(26, 35, 126, 0.08);
+}
+
+QToolButton#sidebarExpandBtn:hover,
+QToolButton#sidebarCollapseBtn:hover {
+    background-color: rgba(255, 213, 79, 0.35);
+}
+
+/* Sidebar */
+QFrame#sidebarFrame {
+    background-color: #1a237e;
+    border: none;
+    min-width: 260px;
+    max-width: 280px;
+}
+
+QLabel#sidebarBrand {
+    color: #ffd54f;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+}
+
+QLabel#sidebarTitle {
+    color: #ffffff;
+    font-size: 17px;
+    font-weight: 700;
+}
+
+QListWidget#navList {
+    background-color: transparent;
+    border: none;
+    outline: none;
+    padding: 8px 0;
+}
+
+QListWidget#navList::item {
+    color: #e8eaf6;
+    padding: 12px 16px;
+    margin: 2px 10px;
+    border-radius: 8px;
+    min-height: 22px;
+}
+
+QListWidget#navList::item:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+QListWidget#navList::item:selected {
+    background-color: #ffd54f;
+    color: #1a237e;
+    font-weight: 600;
+}
+
+QStackedWidget#contentStack {
+    background-color: #f0f2f5;
+}
+
+QStatusBar {
+    background-color: #ffffff;
+    color: #5c6370;
+    border-top: 1px solid #e1e4e8;
+    padding: 4px 12px;
+}
+
+/* Cartes dashboard */
+QFrame#dashCard {
+    background-color: #ffffff;
+    border: 1px solid #e1e4e8;
+    border-radius: 12px;
+    padding: 0px;
+}
+
+QLabel#dashCardTitle {
+    color: #5c6370;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+}
+
+QLabel#dashCardValue {
+    color: #1a237e;
+    font-size: 28px;
+    font-weight: 700;
+}
+
+QLabel#dashPageTitle {
+    color: #1a237e;
+    font-size: 22px;
+    font-weight: 700;
+}
+
+QLabel#dashSubtitle {
+    color: #5c6370;
+    font-size: 13px;
+}
+
+QTableWidget {
+    background-color: #ffffff;
+    border: 1px solid #e1e4e8;
+    border-radius: 8px;
+    gridline-color: #eef0f3;
+}
+
+QTableWidget::item {
+    padding: 8px;
+}
+
+QHeaderView::section {
+    background-color: #e8eaf6;
+    color: #1a237e;
+    font-weight: 600;
+    padding: 8px;
+    border: none;
+    border-bottom: 2px solid #c5cae9;
+}
+
+QPushButton#dashRefresh {
+    background-color: #ffd54f;
+    color: #1a237e;
+    font-weight: 600;
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: none;
+}
+
+QPushButton#dashRefresh:hover {
+    background-color: #ffecb3;
+}
+
+QPushButton#dashRefresh:pressed {
+    background-color: #ffc107;
+}
+
+QScrollArea {
+    border: none;
+    background-color: transparent;
+}
+
+QFrame#dashPaths {
+    background-color: #ffffff;
+    border: 1px solid #e1e4e8;
+    border-radius: 10px;
+    padding: 12px 16px;
+}
+
+QLabel#dashPathLabel {
+    color: #5c6370;
+    font-size: 12px;
+}
+
+/* Cartes par position administrative */
+QFrame#dashPosCard {
+    background-color: #ffffff;
+    border: 1px solid #d0d4dc;
+    border-radius: 10px;
+    min-width: 140px;
+    max-width: 220px;
+}
+
+QLabel#dashPosCardTitle {
+    color: #37474f;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+QLabel#dashPosCardValue {
+    color: #1a237e;
+    font-size: 20px;
+    font-weight: 700;
+}
+
+QScrollArea#dashPosScroll {
+    background-color: transparent;
+    border: 1px solid #e1e4e8;
+    border-radius: 10px;
+}

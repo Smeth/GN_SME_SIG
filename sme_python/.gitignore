@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+*.mdb.lock
+# Base Access locale (remplacez par votre smegend.mdb ; ne pas versionner les gros fichiers)
+data/*.mdb
+data/*.accdb

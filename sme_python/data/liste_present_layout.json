@@ -1,0 +1,340 @@
+{
+  "version": 1,
+  "template_sheet": "Liste",
+  "output_sheet": "Liste_SME",
+  "header_row": 3,
+  "style_row_section": 4,
+  "style_row_sub": 5,
+  "style_row_data": 6,
+  "ncols": 18,
+  "sections": [
+    {
+      "id": "auto-COMGEND-0",
+      "order": 0,
+      "structure_code": "COMGEND",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-CAB-COMGEND-1",
+      "order": 1,
+      "structure_code": "CAB-COMGEND",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-EM-GEND-2",
+      "order": 2,
+      "structure_code": "EM-GEND",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-IT-3",
+      "order": 3,
+      "structure_code": "IT",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-DOE-4",
+      "order": 4,
+      "structure_code": "DOE",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-DPF-5",
+      "order": 5,
+      "structure_code": "DPF",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-DSF-6",
+      "order": 6,
+      "structure_code": "DSF",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-DTRJD-7",
+      "order": 7,
+      "structure_code": "DTRJD",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-DIRTRANS-8",
+      "order": 8,
+      "structure_code": "DIRTRANS",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-DIRMAT-9",
+      "order": 9,
+      "structure_code": "DIRMAT",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-DDT-10",
+      "order": 10,
+      "structure_code": "DDT",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-GIGN-11",
+      "order": 11,
+      "structure_code": "GIGN",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-CRO-12",
+      "order": 12,
+      "structure_code": "CRO",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-CS-DPF-13",
+      "order": 13,
+      "structure_code": "CS-DPF",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-GE-GQG-14",
+      "order": 14,
+      "structure_code": "GE-GQG",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-EGN-15",
+      "order": 15,
+      "structure_code": "EGN",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-GGTA-16",
+      "order": 16,
+      "structure_code": "GGTA",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-GGF-17",
+      "order": 17,
+      "structure_code": "GGF",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-GSR-18",
+      "order": 18,
+      "structure_code": "GSR",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-GGMF-19",
+      "order": 19,
+      "structure_code": "GGMF",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-RG-BZV-20",
+      "order": 20,
+      "structure_code": "RG-BZV",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-1er GGM-21",
+      "order": 21,
+      "structure_code": "1er GGM",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-RG-POO-22",
+      "order": 22,
+      "structure_code": "RG-POO",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-RG-BZA-23",
+      "order": 23,
+      "structure_code": "RG-BZA",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-RG-LEK-24",
+      "order": 24,
+      "structure_code": "RG-LEK",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-RG-NRI-25",
+      "order": 25,
+      "structure_code": "RG-NRI",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-RG-KLU-26",
+      "order": 26,
+      "structure_code": "RG-KLU",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-RG-PNR-27",
+      "order": 27,
+      "structure_code": "RG-PNR",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-2e GGM-28",
+      "order": 28,
+      "structure_code": "2e GGM",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-RG-PLT-29",
+      "order": 29,
+      "structure_code": "RG-PLT",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-RG-CVO-30",
+      "order": 30,
+      "structure_code": "RG-CVO",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-RG-CUV-31",
+      "order": 31,
+      "structure_code": "RG-CUV",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-RG-SGH-32",
+      "order": 32,
+      "structure_code": "RG-SGH",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-RG-LIK-33",
+      "order": 33,
+      "structure_code": "RG-LIK",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-RG-COB-34",
+      "order": 34,
+      "structure_code": "RG-COB",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-RG-NKA-35",
+      "order": 35,
+      "structure_code": "RG-NKA",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-RG-DJL-36",
+      "order": 36,
+      "structure_code": "RG-DJL",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-OCR-37",
+      "order": 37,
+      "structure_code": "OCR",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-CIK-38",
+      "order": 38,
+      "structure_code": "CIK",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-DETACHE-39",
+      "order": 39,
+      "structure_code": "DETACHE",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    },
+    {
+      "id": "auto-N_SIGNALE-40",
+      "order": 40,
+      "structure_code": "N_SIGNALE",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true
+    }
+  ]
+}
