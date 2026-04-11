@@ -8,11 +8,13 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sme_gend.config.settings import Settings
+from sme_gend.models.liste_generale import ListeGeneraleRow
 from sme_gend.models.sme_row import SmeRow
 from sme_gend.repositories.grade_repository import GradeRepository
 from sme_gend.repositories.liste_generale_repository import ListeGeneraleRepository
 from sme_gend.repositories.sme_repository import SmeRepository
 from sme_gend.repositories.structure_repository import StructureRepository
+from sme_gend.services import numerique_padmin as npa
 
 
 def _is_present(padmin: str | None) -> bool:
@@ -65,6 +67,160 @@ def _sort_key_mois(mois: str) -> tuple:
         return (9999, 99)
 
 
+def _padmin_eq(padmin: str | None, code: str) -> bool:
+    """Égalité insensible à la casse (libellés Access)."""
+    a = (padmin or "").strip()
+    if not a:
+        return False
+    return a == code or a.casefold() == code.casefold()
+
+
+def _is_stage_interne(padmin: str | None) -> bool:
+    x = " ".join((padmin or "").strip().split()).casefold().replace("é", "e")
+    return x == "stageinterne" or x == "stage interne"
+
+
+def _is_punis_row(row: ListeGeneraleRow) -> bool:
+    return _padmin_eq(row.position_admin, npa.PADMIN_PUNIS) or _padmin_eq(
+        row.position_admin, npa.PADMIN_PRISON_MA
+    )
+
+
+def _fmt_int(n: int) -> str:
+    return f"{n:,}".replace(",", "\u202f")
+
+
+@dataclass(frozen=True, slots=True)
+class DashboardKpiCard:
+    """Une carte KPI (indicateurs principaux). variant : default | success | info | brand | muted | alert | highlight."""
+
+    kpi_id: str
+    title: str
+    value: str
+    subtitle: str | None
+    variant: str
+
+
+def build_main_kpi_cards(
+    total: int,
+    presents: int,
+    taux_pct: float,
+    rows: list[ListeGeneraleRow],
+) -> tuple[DashboardKpiCard, ...]:
+    """
+    Cartes « indicateurs principaux » : effectifs + répartition Padmin (données ListeGenerale).
+    Aligné sur les codes utilisés pour la situation numérique (numerique_padmin).
+    """
+    c_present = sum(1 for r in rows if _is_present(r.position_admin))
+    c_det = sum(1 for r in rows if _padmin_eq(r.position_admin, npa.PADMIN_DETACHE))
+    c_si = sum(1 for r in rows if _is_stage_interne(r.position_admin))
+    c_miss = sum(1 for r in rows if _padmin_eq(r.position_admin, npa.PADMIN_MISSION))
+    c_mal = sum(1 for r in rows if _padmin_eq(r.position_admin, npa.PADMIN_MALADE))
+    c_des = sum(1 for r in rows if _padmin_eq(r.position_admin, npa.PADMIN_DESERTEUR))
+    c_sl = sum(1 for r in rows if _padmin_eq(r.position_admin, npa.PADMIN_STAGE_LOCAL))
+    c_se = sum(1 for r in rows if _padmin_eq(r.position_admin, npa.PADMIN_STAGE_EX))
+    c_imr = sum(1 for r in rows if _padmin_eq(r.position_admin, npa.PADMIN_INST_MR))
+    c_ca = sum(1 for r in rows if _padmin_eq(r.position_admin, npa.PADMIN_CONGE_ADMIN))
+    c_pun = sum(1 for r in rows if _is_punis_row(r))
+
+    sub = f"{_fmt_int(presents)} / {_fmt_int(total)} présents" if total else None
+
+    cards: list[DashboardKpiCard] = [
+        DashboardKpiCard(
+            "effectifs",
+            "Effectifs enregistrés",
+            _fmt_int(total),
+            None,
+            "default",
+        ),
+        DashboardKpiCard(
+            "present",
+            "Présent",
+            _fmt_int(c_present),
+            None,
+            "success",
+        ),
+        DashboardKpiCard(
+            "detache",
+            "Détaché",
+            _fmt_int(c_det),
+            None,
+            "info",
+        ),
+        DashboardKpiCard(
+            "stage_interne",
+            "StageInterne",
+            _fmt_int(c_si),
+            None,
+            "brand",
+        ),
+        DashboardKpiCard(
+            "mission",
+            "Mission",
+            _fmt_int(c_miss),
+            None,
+            "info",
+        ),
+        DashboardKpiCard(
+            "malade",
+            "Malade",
+            _fmt_int(c_mal),
+            None,
+            "muted",
+        ),
+        DashboardKpiCard(
+            "deserteur",
+            "Déserteur",
+            _fmt_int(c_des),
+            None,
+            "alert",
+        ),
+        DashboardKpiCard(
+            "stage_local",
+            "StageLocal",
+            _fmt_int(c_sl),
+            None,
+            "muted",
+        ),
+        DashboardKpiCard(
+            "stage_ex",
+            "StageEx",
+            _fmt_int(c_se),
+            None,
+            "muted",
+        ),
+        DashboardKpiCard(
+            "inst_mr",
+            "Inst Mise Route",
+            _fmt_int(c_imr),
+            None,
+            "muted",
+        ),
+        DashboardKpiCard(
+            "conge_admin",
+            "CongéAdmin",
+            _fmt_int(c_ca),
+            None,
+            "info",
+        ),
+        DashboardKpiCard(
+            "punis",
+            "Punis",
+            _fmt_int(c_pun),
+            None,
+            "muted",
+        ),
+        DashboardKpiCard(
+            "taux",
+            "Taux de présence",
+            f"{taux_pct:.1f}\u00a0%",
+            sub,
+            "highlight",
+        ),
+    ]
+    return tuple(cards)
+
+
 @dataclass(frozen=True, slots=True)
 class DashboardSnapshot:
     """Instantané tableau de bord. indisponibles = effectifs hors position « présent ». grades_effectifs_detail : (grade, effectif, % total, écart vs uniforme)."""
@@ -73,6 +229,7 @@ class DashboardSnapshot:
     presents: int
     indisponibles: int
     taux_presence_pct: float
+    main_kpi_cards: tuple[DashboardKpiCard, ...]
     positions: list[tuple[str, int]]
     structures_distinctes_effectifs: int
     nb_structures_referentiel: int
@@ -145,11 +302,14 @@ class DashboardService:
                 sme_rows_list.sort(key=lambda r: _sort_key_mois(r.mois))
                 trend = [(r.mois, _statut_score(r.statut)) for r in sme_rows_list]
 
+        main_kpi = build_main_kpi_cards(total, presents, taux, rows)
+
         return DashboardSnapshot(
             total_effectifs=total,
             presents=presents,
             indisponibles=indispo,
             taux_presence_pct=taux,
+            main_kpi_cards=main_kpi,
             positions=positions,
             structures_distinctes_effectifs=structs_eff,
             nb_structures_referentiel=nb_struct,

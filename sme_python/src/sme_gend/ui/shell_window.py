@@ -84,7 +84,10 @@ class ShellWindow(QMainWindow):
             self._nav_labels.append(text)
 
         # --- Pages (ordre pile = index utilisé partout) ---
-        register_page("Tableau de bord", HomeView(settings, dashboard))
+        register_page(
+            "Tableau de bord",
+            HomeView(settings, dashboard, navigate_to_page=self._go_page),
+        )
         register_page("Liste générale", PersonnelListView(personnel, referentiel))
         register_page(
             "Mise en page liste",

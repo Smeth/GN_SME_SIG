@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCharts import (
@@ -22,9 +23,11 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QStyle,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -32,7 +35,11 @@ from PySide6.QtWidgets import (
 )
 
 from sme_gend.config.settings import Settings, liste_layout_config_path
-from sme_gend.services.dashboard_service import DashboardService
+from sme_gend.services.dashboard_service import (
+    DashboardKpiCard,
+    DashboardService,
+    DashboardSnapshot,
+)
 from sme_gend.ui.confirm_dialogs import confirm_yes_no
 
 _PALETTE = [
@@ -52,21 +59,107 @@ _PALETTE = [
 ]
 
 
-def _card(title: str, value: str, accent: bool = False) -> QFrame:
+_KPI_ICON_META: dict[str, tuple[QStyle.StandardPixmap, str]] = {
+    "effectifs": (QStyle.StandardPixmap.SP_DriveHDIcon, "#eceff1"),
+    "present": (QStyle.StandardPixmap.SP_DialogApplyButton, "#e8f5e9"),
+    "detache": (QStyle.StandardPixmap.SP_ArrowLeft, "#e3f2fd"),
+    "stage_interne": (QStyle.StandardPixmap.SP_FileDialogInfoView, "#f3e5f5"),
+    "mission": (QStyle.StandardPixmap.SP_ArrowForward, "#e3f2fd"),
+    "malade": (QStyle.StandardPixmap.SP_FileIcon, "#eceff1"),
+    "deserteur": (QStyle.StandardPixmap.SP_MessageBoxWarning, "#ffcdd2"),
+    "stage_local": (QStyle.StandardPixmap.SP_FileIcon, "#eceff1"),
+    "stage_ex": (QStyle.StandardPixmap.SP_FileIcon, "#eceff1"),
+    "inst_mr": (QStyle.StandardPixmap.SP_FileIcon, "#eceff1"),
+    "conge_admin": (QStyle.StandardPixmap.SP_FileDialogListView, "#e3f2fd"),
+    "punis": (QStyle.StandardPixmap.SP_FileIcon, "#eceff1"),
+    "taux": (QStyle.StandardPixmap.SP_FileDialogListView, "#fff9c4"),
+}
+
+
+def _kpi_value_color(variant: str) -> str | None:
+    return {
+        "success": "#2e7d32",
+        "alert": "#c62828",
+        "highlight": "#f57f17",
+        "info": "#1565c0",
+        "brand": "#6a1b9a",
+    }.get(variant)
+
+
+def _kpi_icon_badge(parent: QWidget, kpi_id: str) -> QFrame:
+    pix_kind, bg = _KPI_ICON_META.get(
+        kpi_id, (QStyle.StandardPixmap.SP_FileIcon, "#eceff1")
+    )
+    pm = parent.style().standardIcon(pix_kind).pixmap(22, 22)
+    box = QFrame()
+    box.setFixedSize(44, 44)
+    box.setStyleSheet(
+        f"background-color: {bg}; border-radius: 10px; border: none;"
+    )
+    lay = QVBoxLayout(box)
+    lay.setContentsMargins(0, 0, 0, 0)
+    ic = QLabel()
+    ic.setPixmap(pm)
+    ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    lay.addWidget(ic)
+    return box
+
+
+def _dash_kpi_card(parent: QWidget, card: DashboardKpiCard) -> QFrame:
+    """Carte indicateur (liste générale / Padmin) — données : DashboardService."""
     f = QFrame()
-    f.setObjectName("dashCard")
-    lay = QVBoxLayout(f)
-    lay.setContentsMargins(20, 16, 20, 20)
-    t = QLabel(title)
-    t.setObjectName("dashCardTitle")
-    t.setWordWrap(True)
-    v = QLabel(value)
-    v.setObjectName("dashCardValue")
-    if accent:
-        v.setStyleSheet("color: #c62828;")
-    lay.addWidget(t)
-    lay.addWidget(v)
-    lay.addStretch()
+    f.setObjectName("dashKpiCard")
+    if card.variant == "alert":
+        frame_ss = (
+            "QFrame#dashKpiCard { background: #ffffff; border-radius: 10px; "
+            "border: 1px solid #ffcdd2; border-left: 4px solid #c62828; }"
+        )
+    elif card.variant == "highlight":
+        frame_ss = (
+            "QFrame#dashKpiCard { background: #fffde7; border-radius: 10px; "
+            "border: 1px solid #ffe082; }"
+        )
+    else:
+        frame_ss = (
+            "QFrame#dashKpiCard { background: #ffffff; border-radius: 10px; "
+            "border: 1px solid #e0e0e0; }"
+        )
+    f.setStyleSheet(frame_ss)
+
+    outer = QVBoxLayout(f)
+    outer.setContentsMargins(16, 14, 16, 14)
+    outer.setSpacing(4)
+
+    top = QHBoxLayout()
+    top.setSpacing(8)
+    title = QLabel(card.title)
+    title.setObjectName("dashKpiCardTitle")
+    title.setWordWrap(True)
+    title.setStyleSheet("color: #424242; font-size: 12px;")
+    top.addWidget(title, stretch=1, alignment=Qt.AlignmentFlag.AlignTop)
+    top.addWidget(_kpi_icon_badge(parent, card.kpi_id), alignment=Qt.AlignmentFlag.AlignTop)
+    outer.addLayout(top)
+
+    val = QLabel(card.value)
+    val.setObjectName("dashKpiCardValue")
+    vc = _kpi_value_color(card.variant)
+    if vc:
+        val.setStyleSheet(
+            f"color: {vc}; font-weight: 600; font-size: 22px; font-family: 'Segoe UI', sans-serif;"
+        )
+    else:
+        val.setStyleSheet(
+            "color: #212121; font-weight: 600; font-size: 22px; font-family: 'Segoe UI', sans-serif;"
+        )
+    outer.addWidget(val)
+
+    if card.subtitle:
+        sub = QLabel(card.subtitle)
+        sub.setWordWrap(True)
+        sub.setStyleSheet("color: #757575; font-size: 11px;")
+        outer.addWidget(sub)
+
+    outer.addStretch()
     return f
 
 
@@ -272,10 +365,19 @@ def _sme_trend_line(points: list[tuple[str, float]], title: str) -> QChartView:
 class HomeView(QWidget):
     """Récapitulatif global : effectifs, TabSme, positions, graphiques."""
 
-    def __init__(self, settings: Settings, dashboard: DashboardService, parent=None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        dashboard: DashboardService,
+        parent=None,
+        *,
+        navigate_to_page: Callable[[int], None] | None = None,
+    ) -> None:
         super().__init__(parent)
         self._settings = settings
         self._dashboard = dashboard
+        self._navigate_to_page = navigate_to_page
+        self._page_scroll: QScrollArea | None = None
 
         title = QLabel("Tableau de bord")
         title.setObjectName("dashPageTitle")
@@ -378,9 +480,30 @@ class HomeView(QWidget):
         inner_lay.addLayout(head)
         inner_lay.addWidget(sub)
         inner_lay.addWidget(
-            QLabel("<b>Indicateurs principaux</b>", textFormat=Qt.TextFormat.RichText)
+            QLabel(
+                "<b>Indicateurs principaux</b> — effectifs et positions administratives "
+                "(ListeGenerale.Padmin), hors filtre de période.",
+                textFormat=Qt.TextFormat.RichText,
+            )
         )
         inner_lay.addLayout(self._grid)
+
+        self._repartitions_block = QWidget()
+        rep_outer = QVBoxLayout(self._repartitions_block)
+        rep_outer.setSpacing(14)
+        rep_outer.setContentsMargins(0, 8, 0, 0)
+        self._rep_title = QLabel("RÉPARTITIONS")
+        self._rep_title.setStyleSheet(
+            "color: #212121; font-size: 12px; font-weight: 700; letter-spacing: 4px;"
+        )
+        self._rep_cards_row = QWidget()
+        self._rep_cards_lay = QHBoxLayout(self._rep_cards_row)
+        self._rep_cards_lay.setSpacing(16)
+        self._rep_cards_lay.setContentsMargins(0, 0, 0, 0)
+        rep_outer.addWidget(self._rep_title)
+        rep_outer.addWidget(self._rep_cards_row)
+        inner_lay.addWidget(self._repartitions_block)
+
         inner_lay.addWidget(
             QLabel(
                 "<b>Effectifs par position administrative</b> — une carte par libellé",
@@ -415,12 +538,177 @@ class HomeView(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(inner)
+        self._page_scroll = scroll
 
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 20)
         root.addWidget(scroll)
 
         self._reload_stats(silent=True)
+
+    def _clear_hbox(self, lay: QHBoxLayout) -> None:
+        while lay.count():
+            item = lay.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+
+    def _ensure_visible(self, w: QWidget) -> None:
+        if self._page_scroll is not None:
+            self._page_scroll.ensureWidgetVisible(w)
+
+    def _open_structures_ref(self) -> None:
+        if self._navigate_to_page is not None:
+            self._navigate_to_page(5)
+
+    def _rep_row_bar(self, label: str, count: int, max_c: int, bar_hex: str) -> QWidget:
+        wrap = QWidget()
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        la = QLabel(_truncate(label, 32))
+        la.setStyleSheet("font-size: 12px; color: #424242;")
+        nu = QLabel(str(count))
+        nu.setStyleSheet("font-size: 12px; font-weight: 600; color: #212121;")
+        row.addWidget(la, stretch=1)
+        row.addWidget(nu)
+        topw = QWidget()
+        topw.setLayout(row)
+        bar = QProgressBar()
+        bar.setRange(0, max(1, max_c))
+        bar.setValue(count)
+        bar.setTextVisible(False)
+        bar.setFixedHeight(6)
+        bar.setStyleSheet(
+            "QProgressBar { border: none; background: #f5f5f5; border-radius: 3px; }"
+            f"QProgressBar::chunk {{ background: {bar_hex}; border-radius: 3px; }}"
+        )
+        v = QVBoxLayout(wrap)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(5)
+        v.addWidget(topw)
+        v.addWidget(bar)
+        return wrap
+
+    def _rep_card_frame(
+        self,
+        title: str,
+        body: QWidget,
+        footer: QWidget | None,
+        header_extra: QWidget | None,
+    ) -> QFrame:
+        card = QFrame()
+        card.setObjectName("dashRepCard")
+        card.setStyleSheet(
+            "QFrame#dashRepCard { background: #ffffff; border: 1px solid #e8e8e8; "
+            "border-radius: 12px; }"
+        )
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        v = QVBoxLayout(card)
+        v.setContentsMargins(16, 14, 16, 14)
+        v.setSpacing(10)
+        head = QHBoxLayout()
+        ht = QLabel(title)
+        ht.setStyleSheet("font-size: 13px; font-weight: 600; color: #37474f;")
+        head.addWidget(ht, stretch=1)
+        if header_extra is not None:
+            head.addWidget(header_extra, alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        v.addLayout(head)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("background: #eeeeee; border: none; min-height: 1px; max-height: 1px;")
+        v.addWidget(sep)
+        v.addWidget(body)
+        if footer is not None:
+            v.addWidget(footer)
+        return card
+
+    def _rep_link_voir_tout(self, slot: Callable[[], None]) -> QLabel:
+        lab = QLabel(
+            "<a href=\"v\" style=\"color: #f9a825; text-decoration: none; font-weight: 600;\">"
+            "Voir tout</a>"
+        )
+        lab.setTextFormat(Qt.TextFormat.RichText)
+        lab.linkActivated.connect(lambda _u: slot())
+        return lab
+
+    def _fill_repartitions(self, s: DashboardSnapshot) -> None:
+        self._clear_hbox(self._rep_cards_lay)
+        pos_top = s.positions[:6]
+        pos_max = max((c for _, c in pos_top), default=1)
+        n_pos_other = max(0, len(s.positions) - 6)
+        body_p = QWidget()
+        vl_p = QVBoxLayout(body_p)
+        vl_p.setContentsMargins(0, 4, 0, 0)
+        vl_p.setSpacing(10)
+        for lab, cnt in pos_top:
+            vl_p.addWidget(self._rep_row_bar(lab, cnt, pos_max, "#ffca28"))
+        foot_p: QWidget | None = None
+        if n_pos_other > 0:
+            foot_p = QLabel(f"+{n_pos_other} autre(s)")
+            foot_p.setStyleSheet("color: #212121; font-size: 11px;")
+        card_p = self._rep_card_frame(
+            "Par position administrative",
+            body_p,
+            foot_p,
+            self._rep_link_voir_tout(lambda: self._ensure_visible(self._table)),
+        )
+        self._rep_cards_lay.addWidget(card_p, stretch=1)
+
+        grades = list(s.grades_effectifs_detail)
+        g_top = grades[:6]
+        g_max = max((t[1] for t in g_top), default=1)
+        n_g_other = max(0, len(grades) - 6)
+        body_g = QWidget()
+        vl_g = QVBoxLayout(body_g)
+        vl_g.setContentsMargins(0, 4, 0, 0)
+        vl_g.setSpacing(10)
+        for gcode, cnt, _pct, _ec in g_top:
+            vl_g.addWidget(self._rep_row_bar(gcode, cnt, g_max, "#64b5f6"))
+        foot_g: QWidget | None = None
+        if n_g_other > 0:
+            foot_g = QLabel(f"+{n_g_other} autre(s)")
+            foot_g.setStyleSheet("color: #212121; font-size: 11px;")
+        card_g = self._rep_card_frame(
+            "Par grade",
+            body_g,
+            foot_g,
+            self._rep_link_voir_tout(lambda: self._ensure_visible(self._grade_table)),
+        )
+        self._rep_cards_lay.addWidget(card_g, stretch=1)
+
+        n_struct = s.structures_distinctes_effectifs
+        body_s = QWidget()
+        hs = QHBoxLayout(body_s)
+        hs.setContentsMargins(0, 10, 0, 10)
+        val = QLabel(str(n_struct))
+        val.setStyleSheet("font-size: 36px; font-weight: 700; color: #212121;")
+        hs.addWidget(val, alignment=Qt.AlignmentFlag.AlignVCenter)
+        hs.addStretch()
+        icon_fr = QFrame()
+        icon_fr.setFixedSize(52, 52)
+        icon_fr.setStyleSheet("background: #e3f2fd; border-radius: 12px; border: none;")
+        il = QVBoxLayout(icon_fr)
+        il.setContentsMargins(0, 0, 0, 0)
+        ic = QLabel()
+        ic.setPixmap(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon).pixmap(28, 28)
+        )
+        ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        il.addWidget(ic)
+        hs.addWidget(icon_fr, alignment=Qt.AlignmentFlag.AlignVCenter)
+        if self._navigate_to_page is not None:
+            foot_s = QLabel(
+                "<a href=\"g\" style=\"color: #26c6da; text-decoration: none;\">"
+                "Gérer les structures →</a>"
+            )
+            foot_s.setTextFormat(Qt.TextFormat.RichText)
+            foot_s.linkActivated.connect(lambda _u: self._open_structures_ref())
+        else:
+            foot_s = QLabel("Référentiel → Structures (barre latérale)")
+            foot_s.setStyleSheet("color: #90a4ae; font-size: 11px;")
+        card_s = self._rep_card_frame("Structures", body_s, foot_s, None)
+        self._rep_cards_lay.addWidget(card_s, stretch=1)
 
     def _clear_layout(self, layout: QGridLayout) -> None:
         while layout.count():
@@ -455,6 +743,7 @@ class HomeView(QWidget):
             if self._path_labels:
                 self._path_labels[0].setText(f"<b>Erreur</b><br/>{e}")
             self._grade_table.setRowCount(0)
+            self._clear_hbox(self._rep_cards_lay)
             return
 
         while self._grid.count():
@@ -494,17 +783,10 @@ class HomeView(QWidget):
             )
             self._sme_table.setRowCount(0)
 
-        c1 = _card("Effectifs enregistrés", str(s.total_effectifs))
-        c2 = _card("Présents", str(s.presents))
-        c3 = _card("Indisponibles", str(s.indisponibles), accent=True)
-        c4 = _card("Structures (liste générale)", str(s.structures_distinctes_effectifs))
-        c5 = _card("Structures (référentiel)", str(s.nb_structures_referentiel))
-        c6 = _card("Grades (référentiel)", str(s.nb_grades_referentiel))
-        c7 = _card("Subdivisions (hiérarchie)", str(s.nb_subdivisions_hierarchie))
-        c8 = _card("Taux de présence", f"{s.taux_presence_pct:.1f} %")
+        for i, kpi in enumerate(s.main_kpi_cards):
+            self._grid.addWidget(_dash_kpi_card(self, kpi), i // 4, i % 4)
 
-        for i, c in enumerate([c1, c2, c3, c4, c5, c6, c7, c8]):
-            self._grid.addWidget(c, i // 4, i % 4)
+        self._fill_repartitions(s)
 
         for i, (pos, n) in enumerate(s.positions):
             row, col = divmod(i, 4)
