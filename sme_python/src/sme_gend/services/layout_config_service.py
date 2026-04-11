@@ -7,6 +7,8 @@ from pathlib import Path
 
 from sme_gend.config.settings import Settings, liste_layout_config_path
 from sme_gend.models.liste_layout import ListeLayoutConfig, SectionBlock
+from sme_gend.models.structure import StructureRow
+from sme_gend.repositories.liste_generale_repository import ListeGeneraleRepository
 from sme_gend.repositories.structure_repository import StructureRepository
 
 
@@ -14,6 +16,11 @@ class LayoutConfigService:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._structures = StructureRepository(settings)
+        self._liste_generale = ListeGeneraleRepository(settings)
+
+    def subarme_labels_for_structure(self, structure_code: str) -> list[str]:
+        """Libellés SubArme distincts pour une structure (liste générale), triés comme en base."""
+        return self._liste_generale.fetch_distinct_subarme_for_structure(structure_code)
 
     def path(self) -> Path:
         return liste_layout_config_path()
@@ -80,3 +87,56 @@ class LayoutConfigService:
             ncols=cfg.ncols,
             sections=new_secs,
         )
+
+    def structure_row(self, code: str) -> StructureRow | None:
+        """Référentiel TabStructure pour un code, ou None."""
+        return self._structures.fetch_by_code(code)
+
+    def update_structure_referentiel(
+        self, code: str, designation: str, ordre_tri: int | None
+    ) -> None:
+        """Met à jour désignation et ordre de tri dans TabStructure (code inchangé)."""
+        self._structures.update(code, designation, ordre_tri)
+
+    def rename_structure_code(
+        self, cfg: ListeLayoutConfig, old_code: str, new_code: str
+    ) -> ListeLayoutConfig:
+        """
+        Renomme le code structure dans TabStructure, ListeGenerale.Structure
+        et dans les sections de la mise en page (objet `cfg` modifié).
+        """
+        old_c = (old_code or "").strip()
+        new_c = (new_code or "").strip()
+        if not old_c or not new_c or old_c == new_c:
+            raise ValueError("Codes invalides.")
+        clash = self._structures.fetch_by_code(new_c)
+        if clash is not None and clash.code != old_c:
+            raise ValueError(f"Le code « {new_c} » existe déjà dans TabStructure.")
+        self._structures.rename_code(old_c, new_c)
+        self._liste_generale.update_structure_column(old_c, new_c)
+        for sec in cfg.sections:
+            if sec.structure_code.strip() == old_c:
+                sec.structure_code = new_c
+        return cfg
+
+    def rename_subarme_in_database(
+        self, cfg: ListeLayoutConfig, structure_code: str, old_label: str, new_label: str
+    ) -> tuple[int, ListeLayoutConfig]:
+        """
+        Met à jour SubArme dans ListeGenerale et remplace le libellé dans subdivision_order
+        de la section concernée (si présent).
+        """
+        n = self._liste_generale.rename_subarme_for_structure(
+            structure_code, old_label, new_label
+        )
+        sc = (structure_code or "").strip()
+        old_l = (old_label or "").strip()
+        new_l = (new_label or "").strip()
+        for sec in cfg.sections:
+            if sec.structure_code.strip() != sc:
+                continue
+            if sec.subdivision_order:
+                sec.subdivision_order = [
+                    new_l if x == old_l else x for x in sec.subdivision_order
+                ]
+        return n, cfg

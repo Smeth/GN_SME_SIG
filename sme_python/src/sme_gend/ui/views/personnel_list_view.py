@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 
 from PySide6.QtCore import QSize, QSortFilterProxyModel, Qt, QTimer
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QKeySequence, QShortcut, QShowEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 from sme_gend.models.liste_generale import ListeGeneraleRow
 from sme_gend.services.personnel_service import PersonnelService
 from sme_gend.services.referentiel_service import ReferentielService
+from sme_gend.ui.confirm_dialogs import confirm_overwrite_file, confirm_yes_no
 from sme_gend.ui.personnel_edit_dialog import PersonnelEditDialog
 from sme_gend.ui.personnel_table_model import PersonnelTableModel
 
@@ -40,6 +41,11 @@ class PersonnelListView(QWidget):
     """Consultation de la liste générale Access."""
 
     _DEBOUNCE_MS = 280
+    _FOOTER_DEFAULT_HINT = (
+        "Ordre : COMGEND → C2 CEMGEND → INSPECTEUR IT → DIRECTEUR DOE → DPF → DSF → DIRTRANS → "
+        "DTRJD → DIRMAT → DDT, puis toutes les autres fonctions par grade (PrefOrd) ; "
+        "les en-têtes ne réordonnent pas le tableau."
+    )
 
     def __init__(
         self,
@@ -63,7 +69,8 @@ class PersonnelListView(QWidget):
         self._table.setAlternatingRowColors(True)
         self._table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
-        self._table.setSortingEnabled(True)
+        # Tri par colonnes désactivé : l'ordre des lignes suit la règle métier (fonctions prioritaires + grade).
+        self._table.setSortingEnabled(False)
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._on_table_context_menu)
         self._table.doubleClicked.connect(self._edit_current)
@@ -108,6 +115,7 @@ class PersonnelListView(QWidget):
         filters_form.addRow("Grade :", self._grade_combo)
         filters_form.addRow("Structure :", self._structure_combo)
         filters_form.addRow("Subdivision d'arme :", self._subarme_combo)
+        self._subarme_field_label = filters_form.labelForField(self._subarme_combo)
 
         reset_btn = QPushButton("Réinitialiser les filtres")
         reset_btn.setToolTip(
@@ -151,7 +159,7 @@ class PersonnelListView(QWidget):
         )
         self._toggle_filters_btn.setToolTip(
             "Afficher ou masquer les listes de filtre (position administrative, grade, "
-            "structure, subdivision d'arme)."
+            "structure ; la subdivision d'arme apparaît lorsqu'une structure est choisie)."
         )
         self._toggle_filters_btn.clicked.connect(self._on_toggle_filters)
 
@@ -165,7 +173,7 @@ class PersonnelListView(QWidget):
         self._btn_refresh.setIconSize(QSize(22, 22))
         self._btn_refresh.setToolTip("Actualiser depuis la base Access (Ctrl+R)")
         self._btn_refresh.setAutoRaise(True)
-        self._btn_refresh.clicked.connect(self._refresh_all)
+        self._btn_refresh.clicked.connect(lambda: self._refresh_all(silent=False))
 
         self._menu_btn = QToolButton()
         self._menu_btn.setObjectName("personnelMoreMenuBtn")
@@ -232,18 +240,23 @@ class PersonnelListView(QWidget):
         self._footer = QLabel()
         self._footer.setObjectName("pageSubtitle")
         self._footer.setMinimumHeight(22)
+        self._footer.setWordWrap(True)
+        self._footer.setText(self._FOOTER_DEFAULT_HINT)
 
         layout = QVBoxLayout(self)
         layout.addWidget(filter_panel)
         layout.addWidget(self._stack, stretch=1)
         layout.addWidget(self._footer)
 
-        QShortcut(QKeySequence("Ctrl+R"), self, self._refresh_all)
+        QShortcut(QKeySequence("Ctrl+R"), self, lambda: self._refresh_all(silent=False))
         QShortcut(QKeySequence(Qt.Key.Key_Return), self._table, self._edit_current)
         QShortcut(QKeySequence(Qt.Key.Key_Enter), self._table, self._edit_current)
         QShortcut(QKeySequence(Qt.Key.Key_F2), self._table, self._edit_current)
 
-        self._refresh_all()
+    def showEvent(self, event: QShowEvent) -> None:
+        """Chaque ouverture de l’onglet : rechargement trié depuis la base (ordre métier appliqué)."""
+        super().showEvent(event)
+        self._refresh_all(silent=True)
 
     def _on_toggle_filters(self) -> None:
         self._filters_body.setVisible(not self._filters_body.isVisible())
@@ -262,7 +275,7 @@ class PersonnelListView(QWidget):
         QTimer.singleShot(ms, self._clear_footer)
 
     def _clear_footer(self) -> None:
-        self._footer.setText("")
+        self._footer.setText(self._FOOTER_DEFAULT_HINT)
 
     def _distinct_from_rows(self, attr: str) -> list[str]:
         seen: set[str] = set()
@@ -353,12 +366,9 @@ class PersonnelListView(QWidget):
         self._fill_subarme_combo(preserve_data=self._subarme_combo.currentData())
 
     def _subarme_choices_for_structure(self, structure_code: str | None) -> list[str]:
-        from_rows = self._distinct_from_rows("subdivision_arme")
+        """Sans structure choisie, pas de liste (le filtre subdivision reste masqué)."""
         if structure_code is None:
-            return self._merge_unique_sorted(
-                self._referentiel.subdivision_arme_combo_choices(),
-                from_rows,
-            )
+            return []
         from_db = self._referentiel.subdivisions_arme_for_structure(structure_code)
         from_data = [
             (r.subdivision_arme or "").strip()
@@ -367,6 +377,14 @@ class PersonnelListView(QWidget):
             and (r.subdivision_arme or "").strip()
         ]
         return self._merge_unique_sorted(from_db, from_data)
+
+    def _sync_subarme_row_visibility(self) -> None:
+        """Affiche le filtre subdivision uniquement si une structure est sélectionnée (pas « Tous »)."""
+        show = self._structure_combo.currentData() is not None
+        self._subarme_combo.setVisible(show)
+        lab = getattr(self, "_subarme_field_label", None)
+        if lab is not None:
+            lab.setVisible(show)
 
     def _fill_subarme_combo(self, preserve_data: object = None) -> None:
         if preserve_data is None:
@@ -378,12 +396,20 @@ class PersonnelListView(QWidget):
             [(x, x) for x in choices],
             preserve_data,
         )
+        self._sync_subarme_row_visibility()
 
     def _on_structure_filter_changed(self) -> None:
         self._fill_subarme_combo(preserve_data=None)
         self._apply_filter()
 
     def _reset_filters(self) -> None:
+        if not confirm_yes_no(
+            self,
+            "Réinitialiser les filtres",
+            "Remettre tous les filtres et la recherche à zéro ?",
+            default_no=True,
+        ):
+            return
         self._filter_debounce.stop()
         for cb in (
             self._padmin_combo,
@@ -409,7 +435,15 @@ class PersonnelListView(QWidget):
         self._search.blockSignals(False)
         self._apply_filter()
 
-    def _refresh_all(self) -> None:
+    def _refresh_all(self, *, silent: bool = False) -> None:
+        if not silent:
+            if not confirm_yes_no(
+                self,
+                "Actualiser",
+                "Recharger la liste générale complète depuis la base Access ?",
+                default_no=False,
+            ):
+                return
         try:
             self._all_rows = self._service.liste_complete()
         except Exception as e:
@@ -420,6 +454,13 @@ class PersonnelListView(QWidget):
         self._apply_filter()
 
     def _show_all(self) -> None:
+        if not confirm_yes_no(
+            self,
+            "Liste complète",
+            "Recharger et afficher la liste générale complète depuis la base ?",
+            default_no=True,
+        ):
+            return
         try:
             self._all_rows = self._service.liste_complete()
         except Exception as e:
@@ -430,6 +471,13 @@ class PersonnelListView(QWidget):
         self._apply_filter()
 
     def _show_presents(self) -> None:
+        if not confirm_yes_no(
+            self,
+            "Présents seulement",
+            "Recharger et n’afficher que les personnels en position « présent » ?",
+            default_no=True,
+        ):
+            return
         try:
             self._all_rows = self._service.liste_presents()
         except Exception as e:
@@ -549,6 +597,13 @@ class PersonnelListView(QWidget):
         menu.exec(self._table.viewport().mapToGlobal(pos))
 
     def _export_csv(self) -> None:
+        if not confirm_yes_no(
+            self,
+            "Export CSV",
+            "Exporter la liste affichée (filtres appliqués) vers un fichier CSV ?",
+            default_no=True,
+        ):
+            return
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Exporter en CSV",
@@ -556,6 +611,8 @@ class PersonnelListView(QWidget):
             "Fichiers CSV (*.csv);;Tous les fichiers (*)",
         )
         if not path:
+            return
+        if not confirm_overwrite_file(self, path):
             return
         headers = [
             self._model.headerData(c, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)

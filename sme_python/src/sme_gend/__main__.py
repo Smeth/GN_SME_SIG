@@ -12,6 +12,9 @@ def main() -> int:
     from sme_gend.services.dashboard_service import DashboardService
     from sme_gend.services.layout_config_service import LayoutConfigService
     from sme_gend.services.liste_present_service import ListePresentService
+    from sme_gend.services.detaches_config_service import DetachesConfigService
+    from sme_gend.services.detaches_preview_service import DetachesPreviewService
+    from sme_gend.services.numerique_preview_service import NumeriquePreviewService
     from sme_gend.services.personnel_service import PersonnelService
     from sme_gend.services.referentiel_service import ReferentielService
     from sme_gend.ui.config_paths_dialog import ConfigPathsDialog
@@ -55,8 +58,21 @@ def main() -> int:
     layout_cfg = LayoutConfigService(settings)
     liste_present = ListePresentService(settings, layout_cfg)
     dashboard = DashboardService(settings)
+    numerique_preview = NumeriquePreviewService(settings)
+    detaches_preview = DetachesPreviewService(settings)
+    detaches_cfg = DetachesConfigService(settings)
 
-    window = ShellWindow(settings, personnel, referentiel, liste_present, layout_cfg, dashboard)
+    window = ShellWindow(
+        settings,
+        personnel,
+        referentiel,
+        liste_present,
+        layout_cfg,
+        dashboard,
+        numerique_preview,
+        detaches_preview,
+        detaches_cfg,
+    )
     window.setWindowIcon(load_app_icon())
     window.show()
     return app.exec()

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QAction, QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QCloseEvent, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -27,12 +27,20 @@ from sme_gend.config.settings import Settings
 from sme_gend.services.dashboard_service import DashboardService
 from sme_gend.services.layout_config_service import LayoutConfigService
 from sme_gend.services.liste_present_service import ListePresentService
+from sme_gend.services.detaches_config_service import DetachesConfigService
+from sme_gend.services.detaches_preview_service import DetachesPreviewService
+from sme_gend.services.numerique_preview_service import NumeriquePreviewService
 from sme_gend.services.personnel_service import PersonnelService
 from sme_gend.services.referentiel_service import ReferentielService
+from sme_gend.ui.confirm_dialogs import confirm_yes_no
 from sme_gend.ui.resources import icon_path
+from sme_gend.ui.views.detaches_config_view import DetachesConfigView
+from sme_gend.ui.views.detaches_view import DetachesView
 from sme_gend.ui.views.home_view import HomeView
 from sme_gend.ui.views.layout_editor_view import LayoutEditorView
 from sme_gend.ui.views.liste_present_view import ListePresentView
+from sme_gend.ui.views.numerique_indispo_view import NumeriqueIndispoView
+from sme_gend.ui.views.numerique_matrice_view import NumeriqueMatriceView
 from sme_gend.ui.views.personnel_list_view import PersonnelListView
 from sme_gend.ui.views.referentiel_views import FonctionsView, GradesView, StructuresView
 
@@ -54,6 +62,9 @@ class ShellWindow(QMainWindow):
         liste_present: ListePresentService,
         layout_cfg: LayoutConfigService,
         dashboard: DashboardService,
+        numerique_preview: NumeriquePreviewService,
+        detaches_preview: DetachesPreviewService,
+        detaches_cfg: DetachesConfigService,
     ) -> None:
         super().__init__()
         self.setWindowTitle("SME — Situation mensuelle des effectifs")
@@ -75,17 +86,32 @@ class ShellWindow(QMainWindow):
         # --- Pages (ordre pile = index utilisé partout) ---
         register_page("Tableau de bord", HomeView(settings, dashboard))
         register_page("Liste générale", PersonnelListView(personnel, referentiel))
-        register_page("Mise en page liste", LayoutEditorView(layout_cfg))
+        register_page(
+            "Mise en page liste",
+            LayoutEditorView(layout_cfg, detaches_cfg),
+        )
+        register_page("Liste des présents", ListePresentView(liste_present))
+        register_page("Détachés", DetachesView(settings, detaches_preview, detaches_cfg))
         register_page("Structures", StructuresView(referentiel))
         register_page("Grades", GradesView(referentiel))
         register_page("Fonctions", FonctionsView(referentiel))
-        register_page("Liste des présents", ListePresentView(liste_present))
+        register_page("Config. fichier DETACHES", DetachesConfigView(detaches_cfg))
+        register_page(
+            "Matrice (situation numérique)",
+            NumeriqueMatriceView(settings, numerique_preview),
+        )
+        register_page(
+            "Indispo par structure",
+            NumeriqueIndispoView(settings, numerique_preview),
+        )
 
         # Icônes réelles (register_page a mis des QIcon() vides pour index 0)
         icons: list[QIcon] = [
             _std_icon(style, QStyle.StandardPixmap.SP_DirHomeIcon),
             _std_icon(style, QStyle.StandardPixmap.SP_FileDialogListView),
             _std_icon(style, QStyle.StandardPixmap.SP_FileDialogDetailedView),
+            _std_icon(style, QStyle.StandardPixmap.SP_DialogApplyButton),
+            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogContentsView),
             _std_icon(style, QStyle.StandardPixmap.SP_DesktopIcon),
             _std_icon(style, QStyle.StandardPixmap.SP_MessageBoxInformation),
             _std_icon(
@@ -96,7 +122,16 @@ class ShellWindow(QMainWindow):
                     QStyle.StandardPixmap.SP_FileDialogContentsView,
                 ),
             ),
-            _std_icon(style, QStyle.StandardPixmap.SP_DialogApplyButton),
+            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogInfoView),
+            _std_icon(style, QStyle.StandardPixmap.SP_ComputerIcon),
+            _std_icon(
+                style,
+                getattr(
+                    QStyle.StandardPixmap,
+                    "SP_FileDialogStart",
+                    QStyle.StandardPixmap.SP_CommandLink,
+                ),
+            ),
         ]
 
         self._nav = QTreeWidget()
@@ -143,15 +178,32 @@ class ShellWindow(QMainWindow):
         )
         add_leaf(f_eff, "Liste générale", 1)
         add_leaf(f_eff, "Mise en page liste", 2)
-        add_leaf(f_eff, "Liste des présents", 6)
+        add_leaf(f_eff, "Liste des présents", 3)
+
+        f_det = add_folder(
+            "Détachés",
+            _std_icon(
+                style,
+                getattr(QStyle.StandardPixmap, "SP_DriveNetIcon", QStyle.StandardPixmap.SP_DirIcon),
+            ),
+        )
+        add_leaf(f_det, "Liste & export", 4)
+
+        f_num = add_folder(
+            "Situation numérique",
+            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogInfoView),
+        )
+        add_leaf(f_num, "Matrice (effectifs)", 9)
+        add_leaf(f_num, "Indispo par structure", 10)
 
         f_ref = add_folder(
             "Référentiels",
             _std_icon(style, QStyle.StandardPixmap.SP_DialogOpenButton),
         )
-        add_leaf(f_ref, "Structures", 3)
-        add_leaf(f_ref, "Grades", 4)
-        add_leaf(f_ref, "Fonctions", 5)
+        add_leaf(f_ref, "Structures", 5)
+        add_leaf(f_ref, "Grades", 6)
+        add_leaf(f_ref, "Fonctions", 7)
+        add_leaf(f_ref, "Config. fichier DETACHES", 8)
 
         self._nav.itemClicked.connect(self._on_nav_item_clicked)
         self._nav.setCurrentItem(self._page_to_item[0])
@@ -274,6 +326,13 @@ class ShellWindow(QMainWindow):
         status.showMessage("Prêt")
         status.addPermanentWidget(QLabel(f"Base : {db}"))
 
+        # « Mise en page liste » = index 2 (voir ordre register_page ci-dessus)
+        for i in range(self._stack.count()):
+            w = self._stack.widget(i)
+            if isinstance(w, ListePresentView):
+                w.set_open_layout_editor(lambda: self._go_page(2))
+                break
+
     def _on_nav_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
         del column
         idx = item.data(0, _ROLE_STACK)
@@ -331,12 +390,18 @@ class ShellWindow(QMainWindow):
             "Tableau de bord",
             "Liste générale",
             "Mise en page liste",
+            "Liste des présents",
+            "Détachés",
             "Structures",
             "Grades",
             "Fonctions",
-            "Liste des présents",
+            "Config. fichier DETACHES",
+            "Matrice (situation numérique)",
+            "Indispo par structure",
         ]
         for idx, label in enumerate(nav_entries):
+            if idx == 9:
+                m_nav.addSeparator()
             act = QAction(label, self)
             act.triggered.connect(lambda checked=False, i=idx: self._go_page(i))
             m_nav.addAction(act)
@@ -359,7 +424,7 @@ class ShellWindow(QMainWindow):
             self,
             "Chemins enregistrés",
             "Redémarrez l’application pour appliquer les nouveaux chemins "
-            "(base Access et liste des présents).",
+            "(base Access, maquettes Excel).",
         )
 
     def _refresh_dashboard_if_visible(self) -> None:
@@ -463,6 +528,17 @@ class ShellWindow(QMainWindow):
         lay.addWidget(bb)
         dlg.adjustSize()
         dlg.exec()
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        if not confirm_yes_no(
+            self,
+            "Quitter",
+            "Fermer l'application SME ?",
+            default_no=True,
+        ):
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Escape:

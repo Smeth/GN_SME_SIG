@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from sme_gend.config.settings import Settings
 from sme_gend.models.liste_generale import ListeGeneraleRow
+from sme_gend.repositories.grade_repository import GradeRepository
 from sme_gend.repositories.liste_generale_repository import ListeGeneraleRepository
 from sme_gend.services import audit_log
+from sme_gend.services.personnel_list_order import sort_liste_generale_default_order
 
 
 class PersonnelService:
@@ -13,9 +15,12 @@ class PersonnelService:
 
     def __init__(self, settings: Settings) -> None:
         self._repo = ListeGeneraleRepository(settings)
+        self._grades = GradeRepository(settings)
 
     def liste_complete(self) -> list[ListeGeneraleRow]:
-        return self._repo.fetch_all()
+        raw = self._repo.fetch_all()
+        grades = self._grades.fetch_all()
+        return sort_liste_generale_default_order(raw, grades)
 
     def liste_presents(self) -> list[ListeGeneraleRow]:
         """Personnes en position « présent » (liste des présents — base)."""

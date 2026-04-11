@@ -163,6 +163,56 @@ class ListeGeneraleRepository:
             if cur.rowcount == 0:
                 raise ValueError(f"Aucune ligne mise à jour pour Id = {row.id!r}")
 
+    def update_structure_column(self, old_code: str, new_code: str) -> int:
+        """Met à jour le champ Structure pour toutes les lignes concernées."""
+        o = (old_code or "").strip()
+        n = (new_code or "").strip()
+        if not o or not n:
+            return 0
+        with self._conn_factory.connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE ListeGenerale SET Structure = ? WHERE Structure = ?",
+                (n, o),
+            )
+            return int(cur.rowcount or 0)
+
+    def rename_subarme_for_structure(
+        self, structure_code: str, old_label: str, new_label: str
+    ) -> int:
+        """
+        Renomme les SubArme pour une structure donnée.
+        `old_label` / `new_label` : libellés tels qu'en base ; « (Sans subdivision) » = vide / NULL.
+        """
+        sc = (structure_code or "").strip()
+        if not sc:
+            return 0
+        old_l = (old_label or "").strip()
+        new_l = (new_label or "").strip()
+        old_empty = old_l in ("", "(Sans subdivision)")
+        new_empty = new_l in ("", "(Sans subdivision)")
+        new_val = None if new_empty else new_l
+
+        with self._conn_factory.connect() as conn:
+            cur = conn.cursor()
+            if old_empty:
+                cur.execute(
+                    """
+                    UPDATE ListeGenerale SET SubArme = ?
+                    WHERE Structure = ? AND (SubArme IS NULL OR SubArme = '')
+                    """,
+                    (new_val, sc),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE ListeGenerale SET SubArme = ?
+                    WHERE Structure = ? AND SubArme = ?
+                    """,
+                    (new_val, sc, old_l),
+                )
+            return int(cur.rowcount or 0)
+
 
 def _is_present(padmin: str | None) -> bool:
     if not padmin:

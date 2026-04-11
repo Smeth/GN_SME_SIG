@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "options": {
+    "titre_ligne_feuille": "LISTE DES DETACHES PAR STRUCTURES",
+    "lieu_defaut": "BRAZZAVILLE",
+    "libelle_bloc_non_reference": "— PERSONNEL : SIGLE NON CONFIGURÉ (SUBDIVISION ARME) —",
+    "sigle_presidence": ""
+  },
+  "structures": []
+}

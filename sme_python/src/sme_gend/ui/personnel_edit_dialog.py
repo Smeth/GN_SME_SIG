@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from sme_gend.models.liste_generale import ListeGeneraleRow
 from sme_gend.services.referentiel_service import ReferentielService
+from sme_gend.ui.confirm_dialogs import confirm_yes_no
 
 
 def _fmt_dt(v: datetime | None) -> str:
@@ -283,6 +284,14 @@ class PersonnelEditDialog(QDialog):
         noms = self._noms.text().strip()
         if not noms:
             QMessageBox.warning(self, "Saisie", "Le nom est obligatoire.")
+            return
+
+        if not confirm_yes_no(
+            self,
+            "Enregistrer",
+            "Enregistrer les modifications de cette fiche dans la base Access ?",
+            default_no=True,
+        ):
             return
 
         self._result = ListeGeneraleRow(

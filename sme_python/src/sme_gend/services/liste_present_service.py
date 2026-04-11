@@ -58,14 +58,29 @@ def _ordered_subdivision_keys(
     if not subdivision_order:
         return _default_subdivision_key_order(present_keys)
     by_key = set(present_keys)
+    # Casse Access / saisie JSON : associer une clé normalisée à la valeur réelle des effectifs
+    fold_to_actual: dict[str, str] = {}
+    for k in present_keys:
+        f = k.casefold()
+        if f not in fold_to_actual:
+            fold_to_actual[f] = k
     seen: set[str] = set()
     out: list[str] = []
     for label in subdivision_order:
         lbl = (label or "").strip()
-        if not lbl or lbl not in by_key or lbl in seen:
+        if not lbl:
             continue
-        out.append(lbl)
-        seen.add(lbl)
+        actual: str | None = None
+        if lbl in by_key:
+            actual = lbl
+        else:
+            cand = fold_to_actual.get(lbl.casefold())
+            if cand is not None:
+                actual = cand
+        if actual is None or actual in seen:
+            continue
+        out.append(actual)
+        seen.add(actual)
     remaining = [k for k in present_keys if k not in seen]
     out.extend(_default_subdivision_key_order(remaining))
     return out

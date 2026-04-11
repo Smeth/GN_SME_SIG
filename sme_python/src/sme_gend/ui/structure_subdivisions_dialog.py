@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from sme_gend.models.structure import StructureRow
 from sme_gend.services.referentiel_service import ReferentielService
+from sme_gend.ui.confirm_dialogs import confirm_yes_no
 
 
 class StructureSubdivisionsDialog(QDialog):
@@ -63,7 +64,7 @@ class StructureSubdivisionsDialog(QDialog):
         self._list.setMinimumHeight(200)
 
         self._btn_refresh = QPushButton("Actualiser la liste")
-        self._btn_refresh.clicked.connect(self._reload_list)
+        self._btn_refresh.clicked.connect(lambda: self._reload_list(silent=False))
         self._btn_edit_struct = QPushButton("Modifier la structure…")
         self._btn_edit_struct.clicked.connect(self._open_edit_structure)
 
@@ -85,9 +86,17 @@ class StructureSubdivisionsDialog(QDialog):
         lay.addWidget(self._list, stretch=1)
         lay.addWidget(bb)
 
-        self._reload_list()
+        self._reload_list(silent=True)
 
-    def _reload_list(self) -> None:
+    def _reload_list(self, *, silent: bool = False) -> None:
+        if not silent:
+            if not confirm_yes_no(
+                self,
+                "Actualiser",
+                "Recharger la liste des subdivisions depuis la base Access ?",
+                default_no=False,
+            ):
+                return
         self._list.clear()
         try:
             subs = self._service.subdivisions_arme_for_structure(self._structure.code)
@@ -117,6 +126,13 @@ class StructureSubdivisionsDialog(QDialog):
 
             QMessageBox.warning(self, "Structure", "La désignation est obligatoire.")
             return
+        if not confirm_yes_no(
+            self,
+            "Confirmer",
+            f"Enregistrer les modifications de la structure « {code} » dans TabStructure (Access) ?",
+            default_no=True,
+        ):
+            return
         try:
             self._service.structure_update(code, designation, ordre)
         except Exception as e:
@@ -126,6 +142,6 @@ class StructureSubdivisionsDialog(QDialog):
             return
         self._structure = StructureRow(code=code, designation=designation, ordre_tri=ordre)
         self.setWindowTitle(f"Subdivisions d'arme — {code}")
-        self._reload_list()
+        self._reload_list(silent=True)
         if self._on_structure_changed is not None:
             self._on_structure_changed()

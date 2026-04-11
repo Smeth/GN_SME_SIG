@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from sme_gend.config.settings import Settings
 from sme_gend.config.user_paths import load_user_paths, save_user_paths, user_paths_config_file
+from sme_gend.ui.confirm_dialogs import confirm_yes_no
 
 
 class ConfigPathsDialog(QDialog):
@@ -46,13 +47,27 @@ class ConfigPathsDialog(QDialog):
                 if settings.template_liste_present_path
                 else ""
             )
+            tnum_init = (
+                str(settings.template_numerique_path)
+                if settings.template_numerique_path
+                else ""
+            )
+            tdet_init = (
+                str(settings.template_detaches_path)
+                if settings.template_detaches_path
+                else ""
+            )
         else:
             db_init = user.database_path or ""
             tpl_init = user.template_excel_path or ""
+            tnum_init = user.template_numerique_path or ""
+            tdet_init = user.template_detaches_path or ""
 
         hint = QLabel(
-            "Priorité : variables d’environnement <b>SMEDB_PATH</b> et "
-            "<b>SME_TEMPLATE_PATH</b> (si définies), puis les chemins ci‑dessous. "
+            "Priorité : variables d’environnement <b>SMEDB_PATH</b>, "
+            "<b>SME_TEMPLATE_PATH</b>, <b>SME_NUMERIQUE_TEMPLATE_PATH</b>, "
+            "<b>SME_DETACHES_PATH</b> (si définies), "
+            "puis les chemins ci‑dessous. "
             "Les chemins réseau (UNC, ex. \\\\serveur\\partage\\fichier.mdb) sont acceptés."
         )
         hint.setWordWrap(True)
@@ -74,9 +89,27 @@ class ConfigPathsDialog(QDialog):
         row_tpl.addWidget(self._tpl, stretch=1)
         row_tpl.addWidget(btn_tpl)
 
+        self._tnum = QLineEdit(tnum_init)
+        self._tnum.setPlaceholderText("Optionnel — gabarit situation numérique (numerique.xlsx)")
+        btn_tnum = QPushButton("Parcourir…")
+        btn_tnum.clicked.connect(self._browse_tnum)
+        row_tnum = QHBoxLayout()
+        row_tnum.addWidget(self._tnum, stretch=1)
+        row_tnum.addWidget(btn_tnum)
+
+        self._tdet = QLineEdit(tdet_init)
+        self._tdet.setPlaceholderText("Optionnel — fichier officiel DETACHES.xlsx (module détachés)")
+        btn_tdet = QPushButton("Parcourir…")
+        btn_tdet.clicked.connect(self._browse_tdet)
+        row_tdet = QHBoxLayout()
+        row_tdet.addWidget(self._tdet, stretch=1)
+        row_tdet.addWidget(btn_tdet)
+
         form = QFormLayout()
         form.addRow("Base Access (.mdb / .accdb) :", row_db)
         form.addRow("Maquette Excel (liste présents) :", row_tpl)
+        form.addRow("Gabarit Excel (situation numérique) :", row_tnum)
+        form.addRow("Fichier officiel détachés (DETACHES.xlsx) :", row_tdet)
 
         grp = QGroupBox("Fichiers")
         grp_lay = QVBoxLayout(grp)
@@ -121,9 +154,31 @@ class ConfigPathsDialog(QDialog):
         if path:
             self._tpl.setText(path)
 
+    def _browse_tnum(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Gabarit situation numérique",
+            self._tnum.text() or str(Path.home()),
+            "Excel (*.xlsx *.xlsm);;Tous les fichiers (*)",
+        )
+        if path:
+            self._tnum.setText(path)
+
+    def _browse_tdet(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Fichier DETACHES.xlsx",
+            self._tdet.text() or str(Path.home()),
+            "Excel (*.xlsx *.xlsm);;Tous les fichiers (*)",
+        )
+        if path:
+            self._tdet.setText(path)
+
     def _on_accept(self) -> None:
         db_raw = self._db.text().strip()
         tpl_raw = self._tpl.text().strip()
+        tnum_raw = self._tnum.text().strip()
+        tdet_raw = self._tdet.text().strip()
 
         if db_raw:
             p = Path(db_raw)
@@ -145,8 +200,39 @@ class ConfigPathsDialog(QDialog):
                 )
                 return
 
+        if tnum_raw:
+            p = Path(tnum_raw)
+            if not p.is_file():
+                QMessageBox.warning(
+                    self,
+                    "Gabarit numérique",
+                    f"Le fichier gabarit n’existe pas ou n’est pas accessible :\n{p}",
+                )
+                return
+
+        if tdet_raw:
+            p = Path(tdet_raw)
+            if not p.is_file():
+                QMessageBox.warning(
+                    self,
+                    "Fichier détachés",
+                    f"Le fichier DETACHES.xlsx n’existe pas ou n’est pas accessible :\n{p}",
+                )
+                return
+
+        if not confirm_yes_no(
+            self,
+            "Enregistrer les chemins",
+            "Enregistrer ces chemins dans le fichier de configuration utilisateur ?\n\n"
+            "Un redémarrage de l'application est nécessaire pour appliquer les nouveaux chemins.",
+            default_no=True,
+        ):
+            return
+
         save_user_paths(
             database_path=db_raw if db_raw else None,
             template_excel_path=tpl_raw if tpl_raw else None,
+            template_numerique_path=tnum_raw if tnum_raw else None,
+            template_detaches_path=tdet_raw if tdet_raw else None,
         )
         self.accept()

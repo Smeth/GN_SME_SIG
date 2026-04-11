@@ -46,9 +46,33 @@ def _candidate_template_paths() -> list[Path]:
     ]
 
 
+def _candidate_numerique_template_paths() -> list[Path]:
+    """Gabarit `numerique.xlsx` (situation numérique + états)."""
+    root = _project_root()
+    return [
+        root / "data" / "templates" / "numerique.xlsx",
+        root.parent / "numerique.xlsx",
+        root.parent / "numérique.xlsx",
+    ]
+
+
+def _candidate_detaches_paths() -> list[Path]:
+    """Fichier officiel `DETACHES.xlsx` (liste des détachés)."""
+    root = _project_root()
+    return [
+        root / "data" / "templates" / "DETACHES.xlsx",
+        root.parent / "DETACHES.xlsx",
+    ]
+
+
 def liste_layout_config_path() -> Path:
     """Fichier JSON : ordre des sections, titres, liaison structures."""
     return _project_root() / "data" / "liste_present_layout.json"
+
+
+def detaches_config_path() -> Path:
+    """Fichier JSON : sigles → titres Excel, ordre, options génération feuille DETACHE."""
+    return _project_root() / "data" / "detaches_config.json"
 
 
 def _resolve_database_path(user: UserPathsOverrides) -> Path:
@@ -116,6 +140,52 @@ def _resolve_template_path(user: UserPathsOverrides) -> Path | None:
     return None
 
 
+def _resolve_numerique_template_path(user: UserPathsOverrides) -> Path | None:
+    """
+    Ordre :
+    1. SME_NUMERIQUE_TEMPLATE_PATH
+    2. paths.json → template_numerique_path
+    3. data/templates/numerique.xlsx, dossier parent, etc.
+    """
+    env = os.environ.get("SME_NUMERIQUE_TEMPLATE_PATH", "").strip()
+    if env:
+        p = Path(env).expanduser()
+        return p if p.is_file() else None
+
+    if user.template_numerique_path:
+        p = Path(user.template_numerique_path).expanduser()
+        if p.is_file():
+            return p
+
+    for candidate in _candidate_numerique_template_paths():
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _resolve_detaches_path(user: UserPathsOverrides) -> Path | None:
+    """
+    Ordre :
+    1. SME_DETACHES_PATH
+    2. paths.json → template_detaches_path
+    3. data/templates/DETACHES.xlsx, dossier parent, etc.
+    """
+    env = os.environ.get("SME_DETACHES_PATH", "").strip()
+    if env:
+        p = Path(env).expanduser()
+        return p if p.is_file() else None
+
+    if user.template_detaches_path:
+        p = Path(user.template_detaches_path).expanduser()
+        if p.is_file():
+            return p
+
+    for candidate in _candidate_detaches_paths():
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     """Paramètres runtime (immutables)."""
@@ -125,6 +195,12 @@ class Settings:
 
     template_liste_present_path: Path | None = None
     """Maquette Excel `resultat.xlsx` si trouvée (`data/` ou dossier Impression)."""
+
+    template_numerique_path: Path | None = None
+    """Gabarit `numerique.xlsx` (situation numérique) si trouvé."""
+
+    template_detaches_path: Path | None = None
+    """Fichier officiel `DETACHES.xlsx` (détachés) si trouvé."""
 
     odbc_driver: str = "Microsoft Access Driver (*.mdb, *.accdb)"
 
@@ -141,8 +217,19 @@ def get_settings() -> Settings:
     Base : SMEDB_PATH → paths.json (LOCALAPPDATA) → data/smegend.mdb.
 
     Maquette : SME_TEMPLATE_PATH → paths.json → data/resultat.xlsx.
+
+    Gabarit numérique : SME_NUMERIQUE_TEMPLATE_PATH → paths.json → data/templates/numerique.xlsx.
+
+    Détachés : SME_DETACHES_PATH → paths.json → data/templates/DETACHES.xlsx.
     """
     user = load_user_paths()
     db_path = _resolve_database_path(user)
     tpl = _resolve_template_path(user)
-    return Settings(database_path=db_path, template_liste_present_path=tpl)
+    tnum = _resolve_numerique_template_path(user)
+    tdet = _resolve_detaches_path(user)
+    return Settings(
+        database_path=db_path,
+        template_liste_present_path=tpl,
+        template_numerique_path=tnum,
+        template_detaches_path=tdet,
+    )

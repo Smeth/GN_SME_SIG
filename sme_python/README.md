@@ -21,10 +21,13 @@ pip install -e .
 |---------|------------------------|----------------------|
 | **smegend.mdb** | `sme_python/data/` | `SMEDB_PATH` |
 | **resultat.xlsx** (maquette liste présents) | `data/` ou dossier **Impression** | `SME_TEMPLATE_PATH` |
+| **numerique.xlsx** (situation numérique) | `data/templates/` ou **Impression** | `SME_NUMERIQUE_TEMPLATE_PATH` |
 
 Ordre **base** : `SMEDB_PATH` → fichier enregistré dans le menu **Fichier → Chemins des fichiers de données…** (`%LOCALAPPDATA%\SME_Gendarmerie\paths.json`) → `data/smegend.mdb` → `Impression/smegend.mdb`.
 
 Ordre **maquette Excel** : `SME_TEMPLATE_PATH` → même fichier `paths.json` → `data/resultat.xlsx` → `Impression/resultat.xlsx`.
+
+Ordre **gabarit situation numérique** : `SME_NUMERIQUE_TEMPLATE_PATH` → `paths.json` → `data/templates/numerique.xlsx` → `Impression/numerique.xlsx` (ou `numérique.xlsx`).
 
 ## Lancer
 
@@ -41,6 +44,7 @@ ou `sme-gend` si le dossier Scripts est dans le `PATH`.
 - **Mise en page liste** : ordre des **sections** (glisser-déposer), titres personnalisés, option *regroupement par subdivision* — fichier `data/liste_present_layout.json`
 - **Structures** : `TabStructure`, couples (structure ↔ SubArme) liste générale, hiérarchie Secun→Secdeux→Sectrois ; **Grades**, **Fonctions**
 - **Liste des présents** : aperçu HTML + export Excel **fidèle à la maquette** (styles copiés depuis `resultat.xlsx`, feuille `Liste_SME`)
+- **Situation numérique** (menu latéral dédié) : aperçus HTML **Matrice** et **Indispo par structure** (données Access), export Excel complet (`numerique.xlsx`)
 
 Voir **`docs/PLAN_SME.md`** pour la feuille de route.
 

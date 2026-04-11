@@ -28,6 +28,8 @@ class UserPathsOverrides:
 
     database_path: str | None = None
     template_excel_path: str | None = None
+    template_numerique_path: str | None = None
+    template_detaches_path: str | None = None
 
 
 def load_user_paths() -> UserPathsOverrides:
@@ -42,15 +44,21 @@ def load_user_paths() -> UserPathsOverrides:
         return UserPathsOverrides()
     db = raw.get("database_path")
     tpl = raw.get("template_excel_path")
+    tnum = raw.get("template_numerique_path")
+    tdet = raw.get("template_detaches_path")
     return UserPathsOverrides(
         database_path=str(db).strip() if db else None,
         template_excel_path=str(tpl).strip() if tpl else None,
+        template_numerique_path=str(tnum).strip() if tnum else None,
+        template_detaches_path=str(tdet).strip() if tdet else None,
     )
 
 
 def save_user_paths(
     database_path: str | None,
     template_excel_path: str | None,
+    template_numerique_path: str | None = None,
+    template_detaches_path: str | None = None,
 ) -> None:
     """
     Enregistre les chemins. Chaînes vides ou None : la clé n'est pas stockée.
@@ -62,6 +70,10 @@ def save_user_paths(
         data["database_path"] = str(database_path).strip()
     if template_excel_path and str(template_excel_path).strip():
         data["template_excel_path"] = str(template_excel_path).strip()
+    if template_numerique_path and str(template_numerique_path).strip():
+        data["template_numerique_path"] = str(template_numerique_path).strip()
+    if template_detaches_path and str(template_detaches_path).strip():
+        data["template_detaches_path"] = str(template_detaches_path).strip()
     if not data:
         if path.is_file():
             path.unlink()

@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 
 from sme_gend.config.settings import Settings, liste_layout_config_path
 from sme_gend.services.dashboard_service import DashboardService
+from sme_gend.ui.confirm_dialogs import confirm_yes_no
 
 _PALETTE = [
     "#1a237e",
@@ -107,7 +108,7 @@ def _make_chart_view(chart: QChart) -> QChartView:
     return view
 
 
-def _pie_presence(presents: int, hors: int) -> QChartView:
+def _pie_presence(presents: int, indisponibles: int) -> QChartView:
     series = QPieSeries()
     series.setHoleSize(0.45)
     series.setPieSize(0.85)
@@ -115,11 +116,11 @@ def _pie_presence(presents: int, hors: int) -> QChartView:
         sl = series.append("Présents", float(presents))
         sl.setBrush(QColor("#1a237e"))
         sl.setLabelColor(QColor("#ffffff"))
-    if hors > 0:
-        sl = series.append("Hors « présent »", float(hors))
+    if indisponibles > 0:
+        sl = series.append("Indisponibles", float(indisponibles))
         sl.setBrush(QColor("#c62828"))
         sl.setLabelColor(QColor("#ffffff"))
-    if presents == 0 and hors == 0:
+    if presents == 0 and indisponibles == 0:
         series.append("Aucune donnée", 1.0)
     for s in series.slices():
         s.setLabelVisible(True)
@@ -286,7 +287,7 @@ class HomeView(QWidget):
 
         self._btn_refresh = QPushButton("Actualiser les indicateurs")
         self._btn_refresh.setObjectName("dashRefresh")
-        self._btn_refresh.clicked.connect(self._reload_stats)
+        self._btn_refresh.clicked.connect(lambda: self._reload_stats(silent=False))
 
         head = QHBoxLayout()
         head.addWidget(title, alignment=Qt.AlignmentFlag.AlignLeft)
@@ -363,7 +364,7 @@ class HomeView(QWidget):
         pl.setSpacing(8)
         pl.addWidget(QLabel("<b>Raccourcis fichiers</b>", textFormat=Qt.TextFormat.RichText))
         self._path_labels: list[QLabel] = []
-        for _ in range(4):
+        for _ in range(6):
             lab = QLabel()
             lab.setObjectName("dashPathLabel")
             lab.setWordWrap(True)
@@ -419,7 +420,7 @@ class HomeView(QWidget):
         root.setContentsMargins(24, 20, 24, 20)
         root.addWidget(scroll)
 
-        self._reload_stats()
+        self._reload_stats(silent=True)
 
     def _clear_layout(self, layout: QGridLayout) -> None:
         while layout.count():
@@ -437,7 +438,15 @@ class HomeView(QWidget):
                 w.setParent(None)
                 w.deleteLater()
 
-    def _reload_stats(self) -> None:
+    def _reload_stats(self, *, silent: bool = False) -> None:
+        if not silent:
+            if not confirm_yes_no(
+                self,
+                "Actualiser les indicateurs",
+                "Recharger le tableau de bord depuis la base Access ?",
+                default_no=False,
+            ):
+                return
         try:
             s = self._dashboard.snapshot()
         except Exception as e:
@@ -487,7 +496,7 @@ class HomeView(QWidget):
 
         c1 = _card("Effectifs enregistrés", str(s.total_effectifs))
         c2 = _card("Présents", str(s.presents))
-        c3 = _card("Hors « présent »", str(s.hors_present), accent=True)
+        c3 = _card("Indisponibles", str(s.indisponibles), accent=True)
         c4 = _card("Structures (liste générale)", str(s.structures_distinctes_effectifs))
         c5 = _card("Structures (référentiel)", str(s.nb_structures_referentiel))
         c6 = _card("Grades (référentiel)", str(s.nb_grades_referentiel))
@@ -501,7 +510,7 @@ class HomeView(QWidget):
             row, col = divmod(i, 4)
             self._pos_grid.addWidget(_pos_card(pos, str(n)), row, col)
 
-        self._charts_layout.addWidget(_pie_presence(s.presents, s.hors_present), 0, 0)
+        self._charts_layout.addWidget(_pie_presence(s.presents, s.indisponibles), 0, 0)
         self._charts_layout.addWidget(
             _hbar_grouped_multi(s.positions, "Positions administratives (effectifs)"),
             0,
@@ -540,14 +549,28 @@ class HomeView(QWidget):
 
         tpl = self._settings.template_liste_present_path
         tpl_txt = str(tpl) if tpl else "(aucune — placez resultat.xlsx dans data/ ou Impression/)"
+        tnum = self._settings.template_numerique_path
+        tnum_txt = (
+            str(tnum)
+            if tnum
+            else "(aucune — placez numerique.xlsx dans data/templates/ ou Impression/)"
+        )
+        tdet = self._settings.template_detaches_path
+        tdet_txt = (
+            str(tdet)
+            if tdet
+            else "(aucune — placez DETACHES.xlsx ou configurez le chemin)"
+        )
         lay_txt = str(liste_layout_config_path().resolve())
         db = Path(self._settings.database_path).resolve()
 
         texts = [
             f"<b>Base Access</b><br/>{html_escape(str(db))}",
             f"<b>Maquette Excel (liste des présents)</b><br/>{html_escape(tpl_txt)}",
+            f"<b>Gabarit Excel (situation numérique)</b><br/>{html_escape(tnum_txt)}",
+            f"<b>Fichier officiel détachés</b><br/>{html_escape(tdet_txt)}",
             f"<b>Configuration mise en page (JSON)</b><br/>{html_escape(lay_txt)}",
-            "Utilisez la barre latérale pour la liste générale, la mise en page des sections et l’export liste des présents.",
+            "Barre latérale : effectifs, détachés, situation numérique, référentiels.",
         ]
         for lab, txt in zip(self._path_labels, texts):
             lab.setText(txt)

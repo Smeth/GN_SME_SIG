@@ -67,11 +67,11 @@ def _sort_key_mois(mois: str) -> tuple:
 
 @dataclass(frozen=True, slots=True)
 class DashboardSnapshot:
-    """Instantané tableau de bord. grades_effectifs_detail : (grade, effectif, % total, écart vs uniforme)."""
+    """Instantané tableau de bord. indisponibles = effectifs hors position « présent ». grades_effectifs_detail : (grade, effectif, % total, écart vs uniforme)."""
 
     total_effectifs: int
     presents: int
-    hors_present: int
+    indisponibles: int
     taux_presence_pct: float
     positions: list[tuple[str, int]]
     structures_distinctes_effectifs: int
@@ -98,7 +98,7 @@ class DashboardService:
         rows = self._liste.fetch_all()
         total = len(rows)
         presents = sum(1 for r in rows if _is_present(r.position_admin))
-        hors = total - presents
+        indispo = total - presents
         taux = (100.0 * presents / total) if total else 0.0
 
         positions_counter: Counter[str] = Counter()
@@ -148,7 +148,7 @@ class DashboardService:
         return DashboardSnapshot(
             total_effectifs=total,
             presents=presents,
-            hors_present=hors,
+            indisponibles=indispo,
             taux_presence_pct=taux,
             positions=positions,
             structures_distinctes_effectifs=structs_eff,

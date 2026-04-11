@@ -22,6 +22,7 @@ from sme_gend.models.grade_ref import GradeRefRow
 from sme_gend.models.structure import StructureRow
 from sme_gend.repositories.subdivision_repository import SubdivisionFlatRow
 from sme_gend.services.referentiel_service import ReferentielService
+from sme_gend.ui.confirm_dialogs import confirm_yes_no
 from sme_gend.ui.ref_table_model import RefTableModel
 from sme_gend.ui.structure_subdivisions_dialog import StructureSubdivisionsDialog
 
@@ -299,6 +300,13 @@ class StructuresView(QWidget):
         if not code or not designation:
             QMessageBox.warning(self, "Structure", "Code et désignation sont obligatoires.")
             return
+        if not confirm_yes_no(
+            self,
+            "Confirmer",
+            f"Créer la structure « {code} » dans TabStructure (Access) ?",
+            default_no=True,
+        ):
+            return
         try:
             self._service.structure_insert(code, designation, ordre)
         except Exception as e:
@@ -318,6 +326,13 @@ class StructuresView(QWidget):
         if not designation:
             QMessageBox.warning(self, "Structure", "La désignation est obligatoire.")
             return
+        if not confirm_yes_no(
+            self,
+            "Confirmer",
+            f"Enregistrer les modifications de la structure « {code} » dans Access ?",
+            default_no=True,
+        ):
+            return
         try:
             self._service.structure_update(code, designation, ordre)
         except Exception as e:
@@ -331,14 +346,11 @@ class StructuresView(QWidget):
             QMessageBox.information(self, "Structure", "Sélectionnez une ligne.")
             return
         code = self._rows[row].code
-        if (
-            QMessageBox.question(
-                self,
-                "Supprimer",
-                f"Supprimer la structure « {code} » ?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            != QMessageBox.StandardButton.Yes
+        if not confirm_yes_no(
+            self,
+            "Supprimer",
+            f"Supprimer définitivement la structure « {code} » de TabStructure ?",
+            default_no=True,
         ):
             return
         try:
@@ -465,6 +477,13 @@ class GradesView(QWidget):
         if not code or not libelle:
             QMessageBox.warning(self, "Grade", "Code et libellé sont obligatoires.")
             return
+        if not confirm_yes_no(
+            self,
+            "Confirmer",
+            f"Créer le grade « {code} » dans TabGrade (Access) ?",
+            default_no=True,
+        ):
+            return
         try:
             self._service.grade_insert(code, libelle, pref, eff)
         except Exception as e:
@@ -484,6 +503,13 @@ class GradesView(QWidget):
         if not libelle:
             QMessageBox.warning(self, "Grade", "Le libellé est obligatoire.")
             return
+        if not confirm_yes_no(
+            self,
+            "Confirmer",
+            f"Enregistrer les modifications du grade « {code} » dans Access ?",
+            default_no=True,
+        ):
+            return
         try:
             self._service.grade_update(code, libelle, pref, eff)
         except Exception as e:
@@ -497,14 +523,11 @@ class GradesView(QWidget):
             QMessageBox.information(self, "Grade", "Sélectionnez une ligne.")
             return
         code = self._rows[row].code
-        if (
-            QMessageBox.question(
-                self,
-                "Supprimer",
-                f"Supprimer le grade « {code} » ?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            != QMessageBox.StandardButton.Yes
+        if not confirm_yes_no(
+            self,
+            "Supprimer",
+            f"Supprimer définitivement le grade « {code} » de TabGrade ?",
+            default_no=True,
         ):
             return
         try:
