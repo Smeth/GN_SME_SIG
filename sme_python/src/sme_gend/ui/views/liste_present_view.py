@@ -40,7 +40,8 @@ class ListePresentView(QWidget):
             "<code>liste_present_layout.json</code>. "
             "Aperçu aligné sur la <b>maquette</b> (18 colonnes comme "
             "<code>resultat.xlsx</code>), titres par structure puis sous-blocs "
-            "par <b>subdivision d'arme</b>. La recherche filtre les personnes "
+            "par <b>subdivision d'arme</b> (ordre alphabétique ou liste par structure "
+            "dans <b>Mise en page liste</b>). La recherche filtre les personnes "
             "affichées sans modifier la base."
         )
         self._info.setWordWrap(True)

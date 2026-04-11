@@ -22,9 +22,9 @@ pip install -e .
 | **smegend.mdb** | `sme_python/data/` | `SMEDB_PATH` |
 | **resultat.xlsx** (maquette liste présents) | `data/` ou dossier **Impression** | `SME_TEMPLATE_PATH` |
 
-Ordre **base** : `SMEDB_PATH` → `data/smegend.mdb` → `Impression/smegend.mdb`.
+Ordre **base** : `SMEDB_PATH` → fichier enregistré dans le menu **Fichier → Chemins des fichiers de données…** (`%LOCALAPPDATA%\SME_Gendarmerie\paths.json`) → `data/smegend.mdb` → `Impression/smegend.mdb`.
 
-Ordre **maquette Excel** : `SME_TEMPLATE_PATH` → `data/resultat.xlsx` → `Impression/resultat.xlsx`.
+Ordre **maquette Excel** : `SME_TEMPLATE_PATH` → même fichier `paths.json` → `data/resultat.xlsx` → `Impression/resultat.xlsx`.
 
 ## Lancer
 

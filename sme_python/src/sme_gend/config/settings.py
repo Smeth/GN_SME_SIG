@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from sme_gend.config.user_paths import UserPathsOverrides, load_user_paths
+
 
 def _project_root() -> Path:
-    """Racine du projet `sme_python` (dossier qui contient `src/` et `data/`)."""
+    """
+    Racine applicative : dossier qui contient `data/`.
+
+    En développement : répertoire `sme_python` (parent de `src/`).
+    Avec PyInstaller (portable) : dossier où se trouve l’exécutable `.exe`.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[3]
 
 
@@ -41,11 +51,65 @@ def liste_layout_config_path() -> Path:
     return _project_root() / "data" / "liste_present_layout.json"
 
 
-def _resolve_template_path() -> Path | None:
+def _resolve_database_path(user: UserPathsOverrides) -> Path:
+    """
+    Ordre de priorité :
+    1. Variable d'environnement SMEDB_PATH (déploiement / administrateur)
+    2. Fichier utilisateur paths.json (menu Configuration — pratique en réseau UNC)
+    3. Emplacements par défaut (data/smegend.mdb, etc.)
+    """
+    env = os.environ.get("SMEDB_PATH", "").strip()
+    if env:
+        path = Path(env).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"SMEDB_PATH ne pointe pas vers un fichier valide :\n{path}"
+            )
+        return path
+
+    if user.database_path:
+        p = Path(user.database_path).expanduser()
+        if p.is_file():
+            return p
+
+    default = _default_mdb_path()
+    if default is None:
+        data_dir = _project_root() / "data"
+        cfg = user_paths_config_file_hint()
+        raise FileNotFoundError(
+            "Base Access introuvable.\n\n"
+            f"• Placez smegend.mdb dans :\n  {data_dir}\n"
+            "• Ou définissez le chemin dans le menu Fichier → Chemins des fichiers de données…\n"
+            "\n"
+            "• Ou variable d'environnement SMEDB_PATH vers le fichier .mdb.\n\n"
+            f"Fichier de configuration utilisateur : {cfg}"
+        )
+    return default
+
+
+def user_paths_config_file_hint() -> str:
+    from sme_gend.config.user_paths import user_paths_config_file
+
+    return str(user_paths_config_file())
+
+
+def _resolve_template_path(user: UserPathsOverrides) -> Path | None:
+    """
+    Ordre :
+    1. SME_TEMPLATE_PATH
+    2. chemins enregistrés dans paths.json
+    3. data/resultat.xlsx, etc.
+    """
     env = os.environ.get("SME_TEMPLATE_PATH", "").strip()
     if env:
         p = Path(env).expanduser()
         return p if p.is_file() else None
+
+    if user.template_excel_path:
+        p = Path(user.template_excel_path).expanduser()
+        if p.is_file():
+            return p
+
     for candidate in _candidate_template_paths():
         if candidate.is_file():
             return candidate
@@ -74,27 +138,11 @@ def get_settings() -> Settings:
     """
     Charge la configuration.
 
-    Base : `SMEDB_PATH`, puis `data/smegend.mdb`, puis `Impression/smegend.mdb`.
+    Base : SMEDB_PATH → paths.json (LOCALAPPDATA) → data/smegend.mdb.
 
-    Maquette liste présents : `SME_TEMPLATE_PATH`, puis `data/resultat.xlsx`,
-    puis `Impression/resultat.xlsx`.
+    Maquette : SME_TEMPLATE_PATH → paths.json → data/resultat.xlsx.
     """
-    env = os.environ.get("SMEDB_PATH", "").strip()
-    if env:
-        path = Path(env).expanduser()
-        if not path.is_file():
-            raise FileNotFoundError(f"SMEDB_PATH ne pointe pas vers un fichier valide : {path}")
-        db_path = path
-    else:
-        default = _default_mdb_path()
-        if default is None:
-            data_dir = _project_root() / "data"
-            raise FileNotFoundError(
-                "Base Access introuvable. Placez smegend.mdb dans le dossier :\n"
-                f"  {data_dir}\n"
-                "ou définissez la variable d'environnement SMEDB_PATH vers le fichier .mdb."
-            )
-        db_path = default
-
-    tpl = _resolve_template_path()
+    user = load_user_paths()
+    db_path = _resolve_database_path(user)
+    tpl = _resolve_template_path(user)
     return Settings(database_path=db_path, template_liste_present_path=tpl)

@@ -265,6 +265,7 @@ class ShellWindow(QMainWindow):
         lay.addWidget(self._stack, stretch=1)
         self.setCentralWidget(central)
 
+        self._settings = settings
         self._build_menu_bar()
 
         status = QStatusBar()
@@ -302,6 +303,14 @@ class ShellWindow(QMainWindow):
         bar.setNativeMenuBar(False)
 
         m_file = bar.addMenu("&Fichier")
+        act_paths = QAction("Chemins des fichiers de données…", self)
+        act_paths.setToolTip(
+            "Base Access et maquette Excel (chemins locaux ou réseau UNC). "
+            "Enregistrés dans le profil utilisateur ; redémarrage nécessaire."
+        )
+        act_paths.triggered.connect(self._open_paths_config)
+        m_file.addAction(act_paths)
+        m_file.addSeparator()
         act_quit = QAction("Quitter", self)
         act_quit.setShortcut(QKeySequence.StandardKey.Quit)
         act_quit.triggered.connect(self.close)
@@ -337,6 +346,21 @@ class ShellWindow(QMainWindow):
         act_about.setMenuRole(QAction.MenuRole.NoRole)
         act_about.triggered.connect(self._about)
         m_help.addAction(act_about)
+
+    def _open_paths_config(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        from sme_gend.ui.config_paths_dialog import ConfigPathsDialog
+
+        dlg = ConfigPathsDialog(self, self._settings)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        QMessageBox.information(
+            self,
+            "Chemins enregistrés",
+            "Redémarrez l’application pour appliquer les nouveaux chemins "
+            "(base Access et liste des présents).",
+        )
 
     def _refresh_dashboard_if_visible(self) -> None:
         if self._stack.currentIndex() != 0:

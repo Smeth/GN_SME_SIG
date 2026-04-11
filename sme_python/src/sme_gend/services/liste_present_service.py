@@ -45,6 +45,32 @@ def _row_matches(row: ListeGeneraleRow, needle: str) -> bool:
     return needle in blob
 
 
+def _default_subdivision_key_order(keys: list[str]) -> list[str]:
+    """Tri historique : alphabétique, « (Sans subdivision) » en dernier."""
+    return sorted(keys, key=lambda s: (s == "(Sans subdivision)", s))
+
+
+def _ordered_subdivision_keys(
+    present_keys: list[str],
+    subdivision_order: list[str] | None,
+) -> list[str]:
+    """Applique la liste explicite puis complète avec le tri par défaut pour les libellés restants."""
+    if not subdivision_order:
+        return _default_subdivision_key_order(present_keys)
+    by_key = set(present_keys)
+    seen: set[str] = set()
+    out: list[str] = []
+    for label in subdivision_order:
+        lbl = (label or "").strip()
+        if not lbl or lbl not in by_key or lbl in seen:
+            continue
+        out.append(lbl)
+        seen.add(lbl)
+    remaining = [k for k in present_keys if k not in seen]
+    out.extend(_default_subdivision_key_order(remaining))
+    return out
+
+
 class ListePresentService:
     """Présents ; ordre des sections piloté par `liste_present_layout.json`."""
 
@@ -72,6 +98,7 @@ class ListePresentService:
         self,
         rows: list[ListeGeneraleRow],
         group_by_subdivision: bool,
+        subdivision_order: list[str] | None = None,
     ) -> list[tuple[str, list[ListeGeneraleRow]]]:
         if not group_by_subdivision:
             rows = sorted(rows, key=lambda x: (x.ordre_tri or 0, x.noms or ""))
@@ -81,7 +108,7 @@ class ListePresentService:
         for r in rows:
             sub_key = (r.subdivision_arme or "").strip() or "(Sans subdivision)"
             by_sub[sub_key].append(r)
-        sub_keys = sorted(by_sub.keys(), key=lambda s: (s == "(Sans subdivision)", s))
+        sub_keys = _ordered_subdivision_keys(list(by_sub.keys()), subdivision_order)
         blocks: list[tuple[str, list[ListeGeneraleRow]]] = []
         for sub in sub_keys:
             lst = by_sub[sub]
@@ -124,7 +151,11 @@ class ListePresentService:
                 title_main = (sec.title_main_override or code).strip().upper()
                 title_sub = (sec.title_sub_override or code).strip()
 
-            blocks = self._blocks_for_rows(rows, sec.group_by_subdivision)
+            blocks = self._blocks_for_rows(
+                rows,
+                sec.group_by_subdivision,
+                sec.subdivision_order,
+            )
             out.append((title_main, title_sub, code, blocks))
 
         return out

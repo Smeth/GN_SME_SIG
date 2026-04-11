@@ -17,6 +17,8 @@ class SectionBlock:
     title_main_override: str | None = None
     title_sub_override: str | None = None
     group_by_subdivision: bool = True
+    # Ordre des libellés SubArme pour cette structure ; None = tri alphabétique (comportement historique).
+    subdivision_order: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -26,10 +28,19 @@ class SectionBlock:
             "title_main_override": self.title_main_override,
             "title_sub_override": self.title_sub_override,
             "group_by_subdivision": self.group_by_subdivision,
+            "subdivision_order": self.subdivision_order,
         }
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> SectionBlock:
+        raw_order = d.get("subdivision_order")
+        sub_order: list[str] | None
+        if raw_order is None:
+            sub_order = None
+        else:
+            sub_order = [str(x).strip() for x in raw_order if str(x).strip()]
+            if not sub_order:
+                sub_order = None
         return cls(
             id=str(d.get("id") or uuid.uuid4()),
             order=int(d.get("order", 0)),
@@ -37,6 +48,7 @@ class SectionBlock:
             title_main_override=d.get("title_main_override"),
             title_sub_override=d.get("title_sub_override"),
             group_by_subdivision=bool(d.get("group_by_subdivision", True)),
+            subdivision_order=sub_order,
         )
 
 

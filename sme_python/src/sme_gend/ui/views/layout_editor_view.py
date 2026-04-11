@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -45,12 +46,22 @@ class LayoutEditorView(QWidget):
         self._title_sub.setPlaceholderText("Vide = code structure (sous-titre)")
         self._grp_sub = QCheckBox("Regrouper par subdivision d'arme")
         self._grp_sub.setChecked(True)
+        self._grp_sub.stateChanged.connect(lambda _: self._update_sub_order_widget_state())
+
+        self._sub_order = QPlainTextEdit()
+        self._sub_order.setPlaceholderText(
+            "Une ligne = un libellé de subdivision (exactement comme en base). "
+            "Vide = ordre alphabétique pour cette structure."
+        )
+        self._sub_order.setMaximumHeight(110)
+        self._sub_order.setTabChangesFocus(True)
 
         form = QFormLayout()
         form.addRow("Structure (code) :", self._code)
         form.addRow("Titre principal (override) :", self._title_main)
         form.addRow("Sous-titre (override) :", self._title_sub)
         form.addRow(self._grp_sub)
+        form.addRow("Ordre des subdivisions (cette structure) :", self._sub_order)
 
         grp = QGroupBox("Section sélectionnée")
         grp.setLayout(form)
@@ -74,7 +85,10 @@ class LayoutEditorView(QWidget):
 
         self._hint = QLabel(
             f"Fichier : <code>{self._svc.path()}</code><br/>"
-            "Glissez-déposez les lignes pour changer l'ordre d'impression des blocs structure."
+            "Glissez-déposez les lignes pour l'ordre des <b>structures</b>. "
+            "Pour chaque section : optionnellement, listez l'ordre des <b>subdivisions d'arme</b> "
+            "(libellés tels qu'en base) ; les subdivisions non listées sont ajoutées à la fin "
+            "(tri alphabétique, « (Sans subdivision) » en dernier)."
         )
         self._hint.setWordWrap(True)
         self._hint.setTextFormat(Qt.TextFormat.RichText)
@@ -89,6 +103,11 @@ class LayoutEditorView(QWidget):
         self._populate_list()
         if self._list.count():
             self._list.setCurrentRow(0)
+        self._update_sub_order_widget_state()
+
+    def _update_sub_order_widget_state(self) -> None:
+        sec = self._current_section()
+        self._sub_order.setEnabled(bool(sec and self._grp_sub.isChecked()))
 
     def _populate_list(self) -> None:
         self._list.clear()
@@ -116,6 +135,9 @@ class LayoutEditorView(QWidget):
         self._title_main.setText(sec.title_main_override or "")
         self._title_sub.setText(sec.title_sub_override or "")
         self._grp_sub.setChecked(sec.group_by_subdivision)
+        so = sec.subdivision_order
+        self._sub_order.setPlainText("\n".join(so) if so else "")
+        self._update_sub_order_widget_state()
 
     def _apply_fields(self) -> None:
         sec = self._current_section()
@@ -126,6 +148,10 @@ class LayoutEditorView(QWidget):
         sec.title_main_override = tm or None
         sec.title_sub_override = ts or None
         sec.group_by_subdivision = self._grp_sub.isChecked()
+        if self._grp_sub.isChecked():
+            lines = [ln.strip() for ln in self._sub_order.toPlainText().splitlines()]
+            lines = [ln for ln in lines if ln]
+            sec.subdivision_order = lines if lines else None
         QMessageBox.information(self, "Section", "Modifications appliquées (pensez à Enregistrer).")
 
     def _reorder_sections_from_ui(self) -> None:

@@ -6,7 +6,7 @@ import sys
 
 
 def main() -> int:
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
     from sme_gend.config import get_settings
     from sme_gend.services.dashboard_service import DashboardService
@@ -14,6 +14,7 @@ def main() -> int:
     from sme_gend.services.liste_present_service import ListePresentService
     from sme_gend.services.personnel_service import PersonnelService
     from sme_gend.services.referentiel_service import ReferentielService
+    from sme_gend.ui.config_paths_dialog import ConfigPathsDialog
     from sme_gend.ui.resources import load_app_icon
     from sme_gend.ui.shell_window import ShellWindow
     from sme_gend.ui.theme import apply_app_theme
@@ -24,17 +25,30 @@ def main() -> int:
     apply_app_theme(app)
     app.setWindowIcon(load_app_icon())
 
-    try:
-        settings = get_settings()
-    except FileNotFoundError as e:
-        from PySide6.QtWidgets import QMessageBox
-
-        QMessageBox.critical(
-            None,
-            "Base de données",
-            f"{e}\n\nDéfinissez la variable d'environnement SMEDB_PATH vers le fichier .mdb.",
-        )
-        return 1
+    settings = None
+    while settings is None:
+        try:
+            settings = get_settings()
+        except FileNotFoundError as e:
+            box = QMessageBox()
+            box.setIcon(QMessageBox.Icon.Critical)
+            box.setWindowTitle("Base de données")
+            box.setText(str(e))
+            box.setInformativeText(
+                "Vous pouvez indiquer le chemin du fichier Access (y compris un partage réseau) "
+                "via le bouton ci‑dessous. Les variables SMEDB_PATH / SME_TEMPLATE_PATH restent prioritaires."
+            )
+            btn_cfg = box.addButton(
+                "Configurer le chemin…",
+                QMessageBox.ButtonRole.ActionRole,
+            )
+            box.addButton("Quitter", QMessageBox.ButtonRole.RejectRole)
+            box.exec()
+            if box.clickedButton() != btn_cfg:
+                return 1
+            dlg = ConfigPathsDialog(None, settings=None, focus_database=True)
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return 1
 
     personnel = PersonnelService(settings)
     referentiel = ReferentielService(settings)
