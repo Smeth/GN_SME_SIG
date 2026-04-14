@@ -12,18 +12,20 @@ from sme_gend.models.liste_layout import ListeLayoutConfig
 from sme_gend.models.structure import StructureRow
 from sme_gend.repositories.liste_generale_repository import ListeGeneraleRepository
 from sme_gend.repositories.structure_repository import StructureRepository
+from sme_gend.repositories.subdivision_repository import SubdivisionRepository
 from sme_gend.services.excel_template_exporter import (
     export_liste_fidele,
     export_simple_fallback,
 )
 from sme_gend.services.layout_config_service import LayoutConfigService
-from sme_gend.services.resultat_format import RESULTAT_HEADERS, row_to_resultat_cells
-
-
-def _is_present(padmin: str | None) -> bool:
-    if not padmin:
-        return False
-    return "present" in padmin.strip().lower().replace("é", "e").replace("è", "e")
+from sme_gend.padmin_present import padmin_counts_as_present
+from sme_gend.services.resultat_format import (
+    RESULTAT_DOCUMENT_TITLE,
+    RESULTAT_HEADER_HTML,
+    RESULTAT_HEADERS,
+    row_to_resultat_cells,
+)
+from sme_gend.services.subdivision_label_format import format_subdivision_arme_display
 
 
 def _row_matches(row: ListeGeneraleRow, needle: str) -> bool:
@@ -99,7 +101,7 @@ class ListePresentService:
         return {s.code: s for s in self._structures.fetch_all()}
 
     def _presents_by_structure(self, search_filter: str | None = None) -> dict[str, list[ListeGeneraleRow]]:
-        presents = [r for r in self._liste.fetch_all() if _is_present(r.position_admin)]
+        presents = [r for r in self._liste.fetch_all() if padmin_counts_as_present(r.position_admin)]
         needle = (search_filter or "").strip().lower()
         if needle:
             presents = [r for r in presents if _row_matches(r, needle)]
@@ -142,7 +144,7 @@ class ListePresentService:
         """
         Sections ordonnées selon la config (titres, subdivisions).
         Retourne : (title_main, title_sub, structure_code, blocks).
-        Données : table Access ListeGenerale, filtre position « présent » (Padmin) ;
+        Données : table Access ListeGenerale, filtre présents / stage interne (Padmin) ;
         `search_filter` restreint l’aperçu / export aux lignes correspondantes.
         """
         if layout is None:
@@ -178,6 +180,7 @@ class ListePresentService:
     def build_preview_html(self, search_filter: str | None = None) -> str:
         """Aperçu HTML aligné sur la même donnée que l’export (ordre config)."""
         sections = self.build_sections_data(search_filter=search_filter)
+        flat = SubdivisionRepository(self._settings).fetch_flat_hierarchy()
         ncols = len(RESULTAT_HEADERS)
 
         css = """
@@ -197,12 +200,12 @@ class ListePresentService:
             css,
             "</style></head><body>",
             "<table class='maquette'>",
-            f"<tr><td class='title' colspan='{ncols}'>{html.escape('LISTE DES PRÉSENTS')}</td></tr>",
+            f"<tr><td class='title' colspan='{ncols}'>{html.escape(RESULTAT_DOCUMENT_TITLE)}</td></tr>",
             f"<tr><td colspan='{ncols}' style='height:8px;border:none;'></td></tr>",
             "<tr class='hdr'>",
         ]
-        for h in RESULTAT_HEADERS:
-            parts.append(f"<th>{html.escape(h)}</th>")
+        for label, cspan in RESULTAT_HEADER_HTML:
+            parts.append(f"<th colspan='{cspan}'>{html.escape(label)}</th>")
         parts.append("</tr>")
 
         n_global = 0
@@ -214,16 +217,22 @@ class ListePresentService:
                 f"<tr class='sec2'><td colspan='{ncols}'>{html.escape(title_sub)}</td></tr>"
             )
             for sub_label, personnes in blocks:
-                sub_line = f"Subdivision d'arme : {sub_label}"
+                sub_disp = format_subdivision_arme_display(sub_label, flat)
                 parts.append(
-                    f"<tr class='subdiv'><td colspan='{ncols}'>{html.escape(sub_line)}</td></tr>"
+                    f"<tr class='subdiv'><td colspan='{ncols}'>{html.escape(sub_disp)}</td></tr>"
                 )
                 n_interne = 0
                 for r in personnes:
                     n_global += 1
                     n_interne += 1
                     parts.append("<tr class='data'>")
-                    for cell in row_to_resultat_cells(r, n_global, n_interne):
+                    sub_cell = format_subdivision_arme_display(r.subdivision_arme, flat)
+                    for cell in row_to_resultat_cells(
+                        r,
+                        n_global,
+                        n_interne,
+                        subdivision_arme_display=sub_cell,
+                    ):
                         parts.append(f"<td>{html.escape(cell)}</td>")
                     parts.append("</tr>")
 
@@ -236,8 +245,34 @@ class ListePresentService:
         layout = self._layout_config.load()
         sections = self.build_sections_data(layout, search_filter=search_filter)
         tpl = self._settings.template_liste_present_path
+        flat = SubdivisionRepository(self._settings).fetch_flat_hierarchy()
+        sections_disp = [
+            (
+                title_main,
+                title_sub,
+                code,
+                [
+                    (format_subdivision_arme_display(raw_sub, flat), people)
+                    for raw_sub, people in blocks
+                ],
+            )
+            for title_main, title_sub, code, blocks in sections
+        ]
+
+        def _sub_row(pr: ListeGeneraleRow) -> str:
+            return format_subdivision_arme_display(pr.subdivision_arme, flat)
 
         if tpl is not None and tpl.is_file():
-            export_liste_fidele(tpl, layout, sections, dest)
+            export_liste_fidele(
+                tpl,
+                layout,
+                sections_disp,
+                dest,
+                subdivision_display_for_row=_sub_row,
+            )
         else:
-            export_simple_fallback(dest, sections)
+            export_simple_fallback(
+                dest,
+                sections_disp,
+                subdivision_display_for_row=_sub_row,
+            )

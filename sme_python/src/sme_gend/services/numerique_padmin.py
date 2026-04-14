@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from sme_gend.models.liste_generale import ListeGeneraleRow
+from sme_gend.padmin_present import padmin_counts_as_present
 
 
 def _norm(s: str | None) -> str:
@@ -12,9 +13,8 @@ def _norm(s: str | None) -> str:
 
 
 def is_present_strict(row: ListeGeneraleRow) -> bool:
-    """Comme la liste des présents : sous-chaîne « présent » (accents neutralisés). Stage interne exclu."""
-    p = _norm(row.position_admin).lower().replace("é", "e").replace("è", "e")
-    return "present" in p
+    """Prédicat rubrique « présents » (matrice NUMERIQUE, blocs dérivés)."""
+    return padmin_counts_as_present(row.position_admin)
 
 
 def _eq_padmin(row: ListeGeneraleRow, code: str) -> bool:

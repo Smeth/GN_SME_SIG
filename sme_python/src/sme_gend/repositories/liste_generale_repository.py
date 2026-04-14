@@ -5,6 +5,7 @@ from __future__ import annotations
 from sme_gend.config.settings import Settings
 from sme_gend.models.liste_generale import ListeGeneraleRow
 from sme_gend.repositories.access_connection import AccessConnection
+from sme_gend.padmin_present import padmin_counts_as_present
 
 # Ordre des colonnes = ordre du SELECT (évite les ambiguïtés de noms Access).
 SELECT_LISTE_GENERALE = """
@@ -64,9 +65,9 @@ class ListeGeneraleRepository:
             return [ListeGeneraleRow.from_sequence(r) for r in cursor.fetchall()]
 
     def fetch_presents(self) -> list[ListeGeneraleRow]:
-        """Personnes dont la position administrative est « présent » (tolérance accents)."""
+        """Personnes comptées présentes : « présent » dans Padmin ou stage interne (voir padmin_counts_as_present)."""
         rows = self.fetch_all()
-        return [r for r in rows if _is_present(r.position_admin)]
+        return [r for r in rows if padmin_counts_as_present(r.position_admin)]
 
     def fetch_distinct_padmin(self) -> list[str]:
         """Valeurs distinctes de position administrative (liste générale)."""
@@ -211,10 +212,4 @@ class ListeGeneraleRepository:
                     """,
                     (new_val, sc, old_l),
                 )
-            return int(cur.rowcount or 0)
-
-
-def _is_present(padmin: str | None) -> bool:
-    if not padmin:
-        return False
-    return "present" in padmin.strip().lower().replace("é", "e").replace("è", "e")
+                return int(cur.rowcount or 0)

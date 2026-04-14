@@ -8,11 +8,27 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 from sme_gend.config.settings import Settings
+from sme_gend.models.liste_generale import ListeGeneraleRow
 from sme_gend.repositories.liste_generale_repository import ListeGeneraleRepository
+from sme_gend.repositories.numerique_satellite_repository import NumeriqueSatelliteRepository
 from sme_gend.services.numerique_excel_export import (
     INDISPO_SHEET,
+    SHEET_DESERTEUR,
+    SHEET_MALADE,
+    SHEET_STAGE_EXT,
+    SHEET_STAGE_LOC,
     collect_indispo_structure_meta,
     read_numerique_grades_from_template,
+    read_satellite_grade_columns_from_template,
+    satellite_grade_count_pairs,
+    sorted_rows_for_padmin,
+)
+from sme_gend.services.numerique_padmin import (
+    PADMIN_DESERTEUR,
+    PADMIN_MALADE,
+    PADMIN_MISSION,
+    PADMIN_STAGE_EX,
+    PADMIN_STAGE_LOCAL,
 )
 from sme_gend.services.numerique_stats import (
     INDISPO_CATEGORY_SPECS,
@@ -143,7 +159,7 @@ class NumeriquePreviewService:
             "</style></head><body>",
             f"<h2>{html.escape(title)}</h2>",
             f"<p class='meta'>Effectifs : {len(rows)} ligne(s) — source <b>ListeGenerale</b> (Access). "
-            "« Présents » = position administrative contenant « présent » (comme la liste des présents). "
+            "« Présents » = Padmin contenant « présent » ou libellé « stage interne » (liste des présents / effectifs). "
             "Les tableaux de droite du gabarit sont recalculés ici comme les formules Excel (sauf la colonne "
             "<b>mois figé</b>, lue depuis le gabarit si disponible).</p>",
             "<h3>1. Matrice principale (rubrique × grade)</h3>",
@@ -322,4 +338,173 @@ class NumeriquePreviewService:
         parts.append(f"<td class='tot'>{int(sum(col_totals))}</td></tr>")
 
         parts.append("</tbody></table></body></html>")
+        return "".join(parts)
+
+    def build_html_satellite_etats(self) -> str:
+        """Aperçu des feuilles MISSION, MALADE, DESERTEUR, STAGE-LOC, STAGE-EXT (comme l’export Excel)."""
+        rows = self._repo.fetch_all()
+        tpl = self._settings.template_numerique_path
+
+        sat = NumeriqueSatelliteRepository(self._settings)
+        missions = sat.load_missions()
+        malades = sat.load_malades()
+        deserteurs = sat.load_deserteurs()
+        stages_loc = sat.load_stages_loc()
+        stages_ex = sat.load_stages_ex()
+
+        def td_val(v: object | None) -> str:
+            if v is None:
+                return "<td></td>"
+            s = str(v).strip()
+            if not s:
+                return "<td></td>"
+            return f"<td>{html.escape(s)}</td>"
+
+        parts: list[str] = [
+            "<!DOCTYPE html><html><head><meta charset='utf-8'><style>",
+            _CSS,
+            "</style></head><body>",
+            "<h2>Listes détail — mission, malade, déserteur, stages (aperçu)</h2>",
+            f"<p class='meta'>{len(rows)} ligne(s) dans <b>ListeGenerale</b> — même filtre "
+            "<b>Padmin</b> et jointure sur les tables <b>Tab*</b> que l’export Excel. "
+            "Sans ligne satellite : identité et structure affichées, détails vides.</p>",
+        ]
+        if tpl is None or not Path(tpl).is_file():
+            parts.append(
+                "<p class='meta'><b>Note :</b> indiquez le gabarit « numerique.xlsx » "
+                "(Fichier → Chemins…) pour aligner les bandeaux par grade sur les colonnes Excel.</p>"
+            )
+
+        # --- MISSION ---
+        mission_rows = sorted_rows_for_padmin(rows, PADMIN_MISSION)
+        parts.append("<h3>MISSION</h3>")
+        parts.append(f"<p class='section-note'>{len(mission_rows)} personnel(s) — position « Mission ».</p>")
+        parts.append("<table class='grid'><thead><tr>")
+        for h in (
+            "N°",
+            "Grade",
+            "Nom",
+            "Structure",
+            "Nature mission",
+            "Lieu",
+            "Réf. NDS",
+            "Date départ",
+        ):
+            parts.append(f"<th>{html.escape(h)}</th>")
+        parts.append("</tr></thead><tbody>")
+        for i, row in enumerate(mission_rows):
+            d = missions.get(row.id)
+            parts.append("<tr>")
+            parts.append(f"<td>{i + 1}</td>")
+            parts.append(td_val(row.grade))
+            parts.append(td_val(row.noms))
+            parts.append(td_val(row.structure))
+            parts.append(td_val(d.nature if d else None))
+            parts.append(td_val(d.lieu_mission if d else None))
+            parts.append(td_val(d.refnds if d else None))
+            parts.append(td_val(d.date_depart if d else None))
+            parts.append("</tr>")
+        parts.append("</tbody></table>")
+
+        def _grade_banner_html(sheet: str, filt: list[ListeGeneraleRow]) -> None:
+            gc = read_satellite_grade_columns_from_template(tpl, sheet)
+            pairs = satellite_grade_count_pairs(gc, filt)
+            if not pairs:
+                return
+            parts.append("<p class='section-note'>Effectifs par grade (bandeau gabarit, ligne 2) :</p>")
+            parts.append("<table class='grid'><thead><tr>")
+            for g, _ in pairs:
+                parts.append(f"<th>{html.escape(g)}</th>")
+            parts.append("</tr></thead><tbody><tr>")
+            for _, n in pairs:
+                parts.append(f"<td>{int(n)}</td>")
+            parts.append("</tr></tbody></table>")
+
+        # --- MALADE ---
+        malade_rows = sorted_rows_for_padmin(rows, PADMIN_MALADE)
+        parts.append("<h3>MALADE</h3>")
+        parts.append(f"<p class='section-note'>{len(malade_rows)} personnel(s) — position « Malade ».</p>")
+        _grade_banner_html(SHEET_MALADE, malade_rows)
+        parts.append("<table class='grid'><thead><tr>")
+        for h in ("N°", "Grade", "Nom", "Structure", "Date constat", "Pathologie", "Obs."):
+            parts.append(f"<th>{html.escape(h)}</th>")
+        parts.append("</tr></thead><tbody>")
+        for i, row in enumerate(malade_rows):
+            d = malades.get(row.id)
+            parts.append("<tr>")
+            parts.append(f"<td>{i + 1}</td>")
+            parts.append(td_val(row.grade))
+            parts.append(td_val(row.noms))
+            parts.append(td_val(row.structure))
+            parts.append(td_val(d.date_constat if d else None))
+            parts.append(td_val(d.pathologie if d else None))
+            parts.append(td_val(d.obs if d else None))
+            parts.append("</tr>")
+        parts.append("</tbody></table>")
+
+        # --- DESERTEUR ---
+        desert_rows = sorted_rows_for_padmin(rows, PADMIN_DESERTEUR)
+        parts.append("<h3>DESERTEUR</h3>")
+        parts.append(f"<p class='section-note'>{len(desert_rows)} personnel(s) — position « Déserteur ».</p>")
+        _grade_banner_html(SHEET_DESERTEUR, desert_rows)
+        parts.append("<table class='grid'><thead><tr>")
+        for h in ("N°", "Grade", "Nom", "Structure", "Date désertion"):
+            parts.append(f"<th>{html.escape(h)}</th>")
+        parts.append("</tr></thead><tbody>")
+        for i, row in enumerate(desert_rows):
+            d = deserteurs.get(row.id)
+            parts.append("<tr>")
+            parts.append(f"<td>{i + 1}</td>")
+            parts.append(td_val(row.grade))
+            parts.append(td_val(row.noms))
+            parts.append(td_val(row.structure))
+            parts.append(td_val(d.dat_desertion if d else None))
+            parts.append("</tr>")
+        parts.append("</tbody></table>")
+
+        # --- STAGE-LOC ---
+        sl_rows = sorted_rows_for_padmin(rows, PADMIN_STAGE_LOCAL)
+        parts.append("<h3>STAGE-LOC</h3>")
+        parts.append(f"<p class='section-note'>{len(sl_rows)} personnel(s) — position « StageLocal ».</p>")
+        _grade_banner_html(SHEET_STAGE_LOC, sl_rows)
+        parts.append("<table class='grid'><thead><tr>")
+        for h in ("N°", "Grade", "Nom", "Structure", "Nature stage", "Lieu", "Dates début / fin"):
+            parts.append(f"<th>{html.escape(h)}</th>")
+        parts.append("</tr></thead><tbody>")
+        for i, row in enumerate(sl_rows):
+            d = stages_loc.get(row.id)
+            parts.append("<tr>")
+            parts.append(f"<td>{i + 1}</td>")
+            parts.append(td_val(row.grade))
+            parts.append(td_val(row.noms))
+            parts.append(td_val(row.structure))
+            parts.append(td_val(d.nature_stage if d else None))
+            parts.append(td_val(d.lieu_stage if d else None))
+            parts.append(td_val(d.date_debut_fin if d else None))
+            parts.append("</tr>")
+        parts.append("</tbody></table>")
+
+        # --- STAGE-EXT ---
+        se_rows = sorted_rows_for_padmin(rows, PADMIN_STAGE_EX)
+        parts.append("<h3>STAGE-EXT</h3>")
+        parts.append(f"<p class='section-note'>{len(se_rows)} personnel(s) — position « StageEx ».</p>")
+        _grade_banner_html(SHEET_STAGE_EXT, se_rows)
+        parts.append("<table class='grid'><thead><tr>")
+        for h in ("N°", "Grade", "Nom", "Structure", "Nature stage", "Lieu", "Dates début / fin"):
+            parts.append(f"<th>{html.escape(h)}</th>")
+        parts.append("</tr></thead><tbody>")
+        for i, row in enumerate(se_rows):
+            d = stages_ex.get(row.id)
+            parts.append("<tr>")
+            parts.append(f"<td>{i + 1}</td>")
+            parts.append(td_val(row.grade))
+            parts.append(td_val(row.noms))
+            parts.append(td_val(row.structure))
+            parts.append(td_val(d.nature_stage if d else None))
+            parts.append(td_val(d.lieu_stage if d else None))
+            parts.append(td_val(d.date_debut_fin if d else None))
+            parts.append("</tr>")
+        parts.append("</tbody></table>")
+
+        parts.append("</body></html>")
         return "".join(parts)

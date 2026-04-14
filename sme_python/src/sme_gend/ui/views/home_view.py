@@ -40,6 +40,7 @@ from sme_gend.services.dashboard_service import (
     DashboardService,
     DashboardSnapshot,
 )
+from sme_gend.ui.bg_task import run_with_progress
 from sme_gend.ui.confirm_dialogs import confirm_yes_no
 
 _PALETTE = [
@@ -735,13 +736,13 @@ class HomeView(QWidget):
                 default_no=False,
             ):
                 return
-        try:
-            s = self._dashboard.snapshot()
-        except Exception as e:
-            for lab in self._path_labels:
-                lab.setText("")
-            if self._path_labels:
-                self._path_labels[0].setText(f"<b>Erreur</b><br/>{e}")
+        s = run_with_progress(
+            self,
+            "Tableau de bord",
+            "Chargement des indicateurs depuis la base…",
+            self._dashboard.snapshot,
+        )
+        if s is None:
             self._grade_table.setRowCount(0)
             self._clear_hbox(self._rep_cards_lay)
             return

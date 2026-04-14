@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from sme_gend.config.settings import Settings, user_paths_config_file_hint
 from sme_gend.services.numerique_excel_export import export_numerique_workbook
 from sme_gend.services.numerique_preview_service import NumeriquePreviewService
+from sme_gend.ui.bg_task import run_with_progress
 from sme_gend.ui.confirm_dialogs import confirm_overwrite_file, confirm_yes_no
 
 
@@ -66,10 +67,13 @@ class NumeriqueIndispoView(QWidget):
                 default_no=False,
             ):
                 return
-        try:
-            html = self._preview.build_html_indispo()
-        except Exception as e:
-            QMessageBox.critical(self, "Aperçu", str(e))
+        html = run_with_progress(
+            self,
+            "Situation numérique",
+            "Préparation de l'aperçu HTML…",
+            self._preview.build_html_indispo,
+        )
+        if html is None:
             return
         self._browser.setHtml(html)
 
@@ -100,9 +104,17 @@ class NumeriqueIndispoView(QWidget):
             return
         if not confirm_overwrite_file(self, dest):
             return
-        try:
-            export_numerique_workbook(self._settings, tpl, Path(dest))
-        except Exception as e:
-            QMessageBox.critical(self, "Export", str(e))
+        dest_p = Path(dest)
+
+        def _work() -> bool:
+            export_numerique_workbook(self._settings, tpl, dest_p)
+            return True
+
+        if run_with_progress(
+            self,
+            "Export Excel",
+            "Génération du classeur situation numérique…",
+            _work,
+        ) is None:
             return
         QMessageBox.information(self, "Export", f"Fichier enregistré :\n{dest}")

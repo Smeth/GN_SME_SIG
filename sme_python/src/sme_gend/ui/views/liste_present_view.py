@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from sme_gend.services.liste_present_service import ListePresentService
+from sme_gend.ui.bg_task import run_with_progress
 from sme_gend.ui.confirm_dialogs import confirm_overwrite_file, confirm_yes_no
 
 
@@ -48,12 +49,12 @@ class ListePresentView(QWidget):
 
         self._info = QLabel(
             "Données : table Access <b>ListeGenerale</b>, lignes dont la position "
-            "administrative (Padmin) est « présent », ordre des sections selon "
+            "administrative (Padmin) est « présent » ou stage interne, ordre des sections selon "
             "<code>liste_present_layout.json</code>. "
             "<b>L'ordre des blocs (structures puis subdivisions)</b> se règle sur la page "
             "<b>Mise en page liste</b> (menu latéral Effectifs & listes, ou bouton ci-dessous). "
-            "Aperçu aligné sur la <b>maquette</b> (18 colonnes comme "
-            "<code>resultat.xlsx</code>), titres par structure puis sous-blocs "
+            "Aperçu aligné sur la <b>maquette</b> <code>resultat.xlsx</code> (18 colonnes, "
+            "mêmes rubriques d'en-tête que la feuille <b>Liste</b>), titres par structure puis sous-blocs "
             "par <b>subdivision d'arme</b> (ordre alphabétique ou liste par structure "
             "dans la mise en page). La recherche filtre les personnes "
             "affichées sans modifier la base."
@@ -106,10 +107,18 @@ class ListePresentView(QWidget):
                 default_no=False,
             ):
                 return
-        try:
-            html = self._service.build_preview_html(self._search.text().strip() or None)
-        except Exception as e:
-            QMessageBox.critical(self, "Aperçu", str(e))
+        needle = self._search.text().strip() or None
+
+        def _build() -> str:
+            return self._service.build_preview_html(needle)
+
+        html = run_with_progress(
+            self,
+            "Liste des présents",
+            "Préparation de l'aperçu HTML…",
+            _build,
+        )
+        if html is None:
             return
         self._browser.setHtml(html)
 
@@ -131,11 +140,13 @@ class ListePresentView(QWidget):
             return
         if not confirm_overwrite_file(self, path):
             return
-        try:
-            self._service.export_excel(
-                Path(path), search_filter=self._search.text().strip() or None
-            )
-        except Exception as e:
-            QMessageBox.critical(self, "Export", str(e))
+        needle = self._search.text().strip() or None
+        dest = Path(path)
+
+        def _export() -> bool:
+            self._service.export_excel(dest, search_filter=needle)
+            return True
+
+        if run_with_progress(self, "Export Excel", "Génération du classeur…", _export) is None:
             return
         QMessageBox.information(self, "Export", f"Fichier enregistré :\n{path}")

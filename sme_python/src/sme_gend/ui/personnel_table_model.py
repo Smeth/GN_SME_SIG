@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+
 from sme_gend.models.liste_generale import ListeGeneraleRow
+from sme_gend.repositories.subdivision_repository import SubdivisionFlatRow
+from sme_gend.services.subdivision_label_format import format_subdivision_arme_display
 
 # Colonnes affichées (ordre fixe — ajustable plus tard).
 _COLUMNS = (
@@ -21,9 +26,16 @@ _COLUMNS = (
 class PersonnelTableModel(QAbstractTableModel):
     """Données tabulaires pour QTableView."""
 
-    def __init__(self, rows: list[ListeGeneraleRow] | None = None, parent=None) -> None:
+    def __init__(
+        self,
+        rows: list[ListeGeneraleRow] | None = None,
+        parent=None,
+        *,
+        subdivision_flat: Sequence[SubdivisionFlatRow] | None = None,
+    ) -> None:
         super().__init__(parent)
         self._rows: list[ListeGeneraleRow] = rows or []
+        self._subdivision_flat: Sequence[SubdivisionFlatRow] | None = subdivision_flat
 
     def set_rows(self, rows: list[ListeGeneraleRow]) -> None:
         self.beginResetModel()
@@ -47,6 +59,11 @@ class PersonnelTableModel(QAbstractTableModel):
         key = _COLUMNS[index.column()][0]
         value = getattr(row, key)
         if role == Qt.ItemDataRole.DisplayRole:
+            if key == "subdivision_arme" and self._subdivision_flat is not None:
+                return format_subdivision_arme_display(
+                    row.subdivision_arme,
+                    self._subdivision_flat,
+                )
             if value is None:
                 return ""
             return str(value)

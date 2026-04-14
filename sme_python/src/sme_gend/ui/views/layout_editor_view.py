@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -70,16 +72,50 @@ class LayoutEditorView(QWidget):
         self._sub_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self._sub_list.setDefaultDropAction(Qt.DropAction.MoveAction)
         self._sub_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self._sub_list.setMinimumHeight(120)
-        self._sub_list.setMaximumHeight(200)
+        self._sub_list.setMinimumHeight(220)
+        self._sub_list.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+
+        self._sub_filter = QLineEdit()
+        self._sub_filter.setPlaceholderText("Filtrer les libellés (recherche)…")
+        self._sub_filter.setClearButtonEnabled(True)
+        self._sub_filter.textChanged.connect(self._apply_sub_filter)
+
+        self._sub_count = QLabel()
+        self._sub_count.setObjectName("pageSubtitle")
 
         self._sub_help = QLabel(
-            "Glissez-déposez les lignes pour l’ordre des blocs <b>SubArme</b>. "
-            "Une ligne = un libellé comme en base (y compris « (Sans subdivision) » si besoin). "
-            "Liste vide = ordre alphabétique ; les libellés en base non listés sont ajoutés en fin de rendu."
+            "<b>Ordre des SubArme</b> : glisser-déposer, ou boutons <b>Monter</b> / <b>Descendre</b> "
+            "(raccourcis <b>Ctrl+↑</b> / <b>Ctrl+↓</b> lorsque la liste a le focus). "
+            "Utilisez le <b>filtre</b> pour retrouver une ligne dans les longues listes. "
+            "<b>Trier A→Z</b> : ordre alphabétique ; « (Sans subdivision) » reste en dernier si présente. "
+            "Une ligne = un libellé comme en base. Liste vide = ordre alphabétique automatique au rendu."
         )
         self._sub_help.setWordWrap(True)
         self._sub_help.setTextFormat(Qt.TextFormat.RichText)
+
+        self._btn_sub_up = QPushButton("Monter")
+        self._btn_sub_up.setToolTip("Déplacer la ligne sélectionnée vers le haut (Ctrl+↑)")
+        self._btn_sub_up.clicked.connect(lambda: self._move_sub_item(-1))
+
+        self._btn_sub_down = QPushButton("Descendre")
+        self._btn_sub_down.setToolTip("Déplacer la ligne sélectionnée vers le bas (Ctrl+↓)")
+        self._btn_sub_down.clicked.connect(lambda: self._move_sub_item(1))
+
+        self._btn_sub_sort = QPushButton("Trier A→Z")
+        self._btn_sub_sort.setToolTip(
+            "Tri alphabétique de toutes les lignes ; « (Sans subdivision) » en fin de liste."
+        )
+        self._btn_sub_sort.clicked.connect(self._sort_sub_list_alpha)
+
+        sc_up = QShortcut(QKeySequence("Ctrl+Up"), self._sub_list)
+        sc_up.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        sc_up.activated.connect(lambda: self._move_sub_item(-1))
+        sc_dn = QShortcut(QKeySequence("Ctrl+Down"), self._sub_list)
+        sc_dn.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        sc_dn.activated.connect(lambda: self._move_sub_item(1))
 
         self._btn_fill_sub = QPushButton("Remplir depuis la base…")
         self._btn_fill_sub.setToolTip(
@@ -111,7 +147,18 @@ class LayoutEditorView(QWidget):
         self._sub_block = QGroupBox("Ordre des subdivisions d’arme (cette structure)")
         sub_lay = QVBoxLayout(self._sub_block)
         sub_lay.addWidget(self._sub_help)
-        sub_lay.addWidget(self._sub_list)
+        sub_filter_row = QHBoxLayout()
+        sub_filter_row.addWidget(QLabel("Filtre :"))
+        sub_filter_row.addWidget(self._sub_filter, stretch=1)
+        sub_filter_row.addWidget(self._sub_count)
+        sub_lay.addLayout(sub_filter_row)
+        sub_lay.addWidget(self._sub_list, stretch=1)
+        btn_move = QHBoxLayout()
+        btn_move.addWidget(self._btn_sub_up)
+        btn_move.addWidget(self._btn_sub_down)
+        btn_move.addWidget(self._btn_sub_sort)
+        btn_move.addStretch()
+        sub_lay.addLayout(btn_move)
         btn_sub = QHBoxLayout()
         btn_sub.addWidget(self._btn_fill_sub)
         btn_sub.addWidget(self._btn_sub_add)
@@ -153,7 +200,8 @@ class LayoutEditorView(QWidget):
         self._hint = QLabel(
             f"Fichier : <code>{self._svc.path()}</code><br/>"
             "<b>Structures</b> : glisser-déposer la liste du haut. "
-            "<b>Subdivisions</b> : glisser-déposer dans le cadre ci-dessous. "
+            "<b>Subdivisions</b> : filtre de recherche, boutons Monter / Descendre "
+            "(<b>Ctrl+↑</b> / <b>Ctrl+↓</b>), tri <b>A→Z</b>, ou glisser-déposer. "
             "Cliquez <b>Enregistrer le fichier JSON</b> pour appliquer l’ordre des structures "
             "et, pour la section sélectionnée, titres + ordre des subdivisions (prise en compte "
             "immédiate à l’aperçu / export après actualisation). "
@@ -167,12 +215,13 @@ class LayoutEditorView(QWidget):
         lay = QVBoxLayout(self)
         lay.addWidget(self._hint)
         lay.addWidget(QLabel("<b>Sections (ordre = ordre du document)</b>"))
-        lay.addWidget(self._list, stretch=1)
-        lay.addWidget(grp)
+        lay.addWidget(self._list, stretch=2)
+        lay.addWidget(grp, stretch=3)
         lay.addLayout(bar)
 
         self._populate_list()
         self._update_sub_order_widget_state()
+        self._apply_sub_filter()
 
     def _patch_detaches_sigle(self, old_label: str, new_label: str) -> None:
         """Si un sigle DETACHES correspond à l’ancien libellé, le remplace."""
@@ -253,6 +302,59 @@ class LayoutEditorView(QWidget):
             s = (lb or "").strip()
             if s:
                 self._sub_list.addItem(QListWidgetItem(s))
+        self._apply_sub_filter()
+
+    def _apply_sub_filter(self) -> None:
+        needle = self._sub_filter.text().strip().lower()
+        n_visible = 0
+        for i in range(self._sub_list.count()):
+            it = self._sub_list.item(i)
+            text = (it.text() if it else "").lower()
+            match = not needle or needle in text
+            self._sub_list.setRowHidden(i, not match)
+            if match:
+                n_visible += 1
+        total = self._sub_list.count()
+        if total == 0:
+            self._sub_count.setText("")
+        elif needle:
+            self._sub_count.setText(f"{n_visible} / {total} visibles")
+        else:
+            self._sub_count.setText(f"{total} subdivision(s)")
+
+    def _move_sub_item(self, delta: int) -> None:
+        if not self._current_section() or not self._grp_sub.isChecked():
+            return
+        row = self._sub_list.currentRow()
+        if row < 0:
+            QMessageBox.information(
+                self,
+                "Subdivision",
+                "Sélectionnez une ligne dans la liste.",
+            )
+            return
+        new_row = row + delta
+        if new_row < 0 or new_row >= self._sub_list.count():
+            return
+        item = self._sub_list.takeItem(row)
+        self._sub_list.insertItem(new_row, item)
+        self._sub_list.setCurrentRow(new_row)
+        self._sub_list.setFocus()
+        self._apply_sub_filter()
+
+    def _sort_sub_list_alpha(self) -> None:
+        if not self._current_section() or not self._grp_sub.isChecked():
+            return
+        labels = self._sub_labels_from_list()
+        if len(labels) < 2:
+            return
+        sans = "(Sans subdivision)"
+        rest = [x for x in labels if x != sans]
+        sorted_rest = sorted(rest, key=lambda s: str(s).lower())
+        out = sorted_rest
+        if sans in labels:
+            out = sorted_rest + [sans]
+        self._set_sub_list_labels(out)
 
     def _fill_sub_from_db(self) -> None:
         sec = self._current_section()
@@ -310,6 +412,7 @@ class LayoutEditorView(QWidget):
         ):
             return
         self._sub_list.addItem(QListWidgetItem(s))
+        self._apply_sub_filter()
 
     def _remove_sub_line(self) -> None:
         row = self._sub_list.currentRow()
@@ -327,6 +430,7 @@ class LayoutEditorView(QWidget):
         ):
             return
         self._sub_list.takeItem(row)
+        self._apply_sub_filter()
 
     def _rename_subarme_in_db(self) -> None:
         sec = self._current_section()
@@ -383,6 +487,7 @@ class LayoutEditorView(QWidget):
             return
         self._patch_detaches_sigle(old_label, new_label)
         item.setText(new_label)
+        self._apply_sub_filter()
         QMessageBox.information(
             self,
             "OK",
@@ -505,12 +610,15 @@ class LayoutEditorView(QWidget):
     def _on_select(self) -> None:
         sec = self._current_section()
         if not sec:
+            self._sub_filter.clear()
+            self._apply_sub_filter()
             self._update_sub_order_widget_state()
             return
         self._code.setText(sec.structure_code)
         self._title_main.setText(sec.title_main_override or "")
         self._title_sub.setText(sec.title_sub_override or "")
         self._grp_sub.setChecked(sec.group_by_subdivision)
+        self._sub_filter.clear()
         so = sec.subdivision_order
         self._set_sub_list_labels(list(so) if so else [])
         self._update_sub_order_widget_state()

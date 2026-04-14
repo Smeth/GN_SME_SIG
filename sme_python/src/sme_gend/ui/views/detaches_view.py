@@ -20,6 +20,7 @@ from sme_gend.config.settings import Settings, user_paths_config_file_hint
 from sme_gend.services.detaches_config_service import DetachesConfigService
 from sme_gend.services.detaches_excel_export import export_detaches_workbook, export_detaches_workbook_full
 from sme_gend.services.detaches_preview_service import DetachesPreviewService
+from sme_gend.ui.bg_task import run_with_progress
 from sme_gend.ui.confirm_dialogs import confirm_overwrite_file, confirm_yes_no
 
 
@@ -114,10 +115,13 @@ class DetachesView(QWidget):
                 default_no=False,
             ):
                 return
-        try:
-            html = self._preview.build_html()
-        except Exception as e:
-            QMessageBox.critical(self, "Détachés", str(e))
+        html = run_with_progress(
+            self,
+            "Détachés",
+            "Préparation de l'aperçu HTML…",
+            self._preview.build_html,
+        )
+        if html is None:
             return
         self._browser.setHtml(html)
         self._refresh_official_path_label()
@@ -166,17 +170,24 @@ class DetachesView(QWidget):
             default_no=True,
         ):
             return
-        try:
+        def _work() -> tuple[int, int]:
             cfg = self._detaches_cfg.load()
-            n_pers, n_blocs = export_detaches_workbook_full(
+            return export_detaches_workbook_full(
                 self._settings,
                 path,
                 cfg,
                 use_template=True,
             )
-        except Exception as e:
-            QMessageBox.critical(self, "Mise à jour", str(e))
+
+        out = run_with_progress(
+            self,
+            "Mise à jour",
+            "Écriture du classeur Excel…",
+            _work,
+        )
+        if out is None:
             return
+        n_pers, n_blocs = out
         QMessageBox.information(
             self,
             "Mise à jour",
@@ -197,10 +208,16 @@ class DetachesView(QWidget):
             default_no=True,
         ):
             return
-        try:
+        def _work() -> bool:
             export_detaches_workbook(self._settings, path, use_template=True)
-        except Exception as e:
-            QMessageBox.critical(self, "Mise à jour", str(e))
+            return True
+
+        if run_with_progress(
+            self,
+            "Mise à jour",
+            "Régénération de la feuille SME…",
+            _work,
+        ) is None:
             return
         QMessageBox.information(
             self,
@@ -237,10 +254,13 @@ class DetachesView(QWidget):
                 default_no=True,
             ):
                 return
-        try:
-            export_detaches_workbook(self._settings, Path(dest), use_template=use_tpl)
-        except Exception as e:
-            QMessageBox.critical(self, "Export", str(e))
+        dest_p = Path(dest)
+
+        def _work() -> bool:
+            export_detaches_workbook(self._settings, dest_p, use_template=use_tpl)
+            return True
+
+        if run_with_progress(self, "Export Excel", "Génération du classeur…", _work) is None:
             return
         msg = (
             f"Fichier enregistré :\n{dest}\n\n"
@@ -280,17 +300,26 @@ class DetachesView(QWidget):
             return
         if not confirm_overwrite_file(self, dest):
             return
-        try:
+        dest_p = Path(dest)
+
+        def _work() -> tuple[int, int]:
             cfg = self._detaches_cfg.load()
-            n_pers, n_blocs = export_detaches_workbook_full(
+            return export_detaches_workbook_full(
                 self._settings,
-                Path(dest),
+                dest_p,
                 cfg,
                 use_template=use_tpl,
             )
-        except Exception as e:
-            QMessageBox.critical(self, "Export", str(e))
+
+        out = run_with_progress(
+            self,
+            "Export Excel",
+            "Génération des feuilles DETACHE et SME…",
+            _work,
+        )
+        if out is None:
             return
+        n_pers, n_blocs = out
         QMessageBox.information(
             self,
             "Export",

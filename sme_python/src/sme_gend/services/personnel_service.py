@@ -23,7 +23,7 @@ class PersonnelService:
         return sort_liste_generale_default_order(raw, grades)
 
     def liste_presents(self) -> list[ListeGeneraleRow]:
-        """Personnes en position « présent » (liste des présents — base)."""
+        """Personnes comptées présentes : Padmin « présent » ou stage interne (liste des présents — base)."""
         return self._repo.fetch_presents()
 
     def get_by_id(self, row_id: str) -> ListeGeneraleRow | None:

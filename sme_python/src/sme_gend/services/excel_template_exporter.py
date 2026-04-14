@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import copy
 from pathlib import Path
 
@@ -11,7 +12,11 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from sme_gend.models.liste_generale import ListeGeneraleRow
 from sme_gend.models.liste_layout import ListeLayoutConfig
-from sme_gend.services.resultat_format import RESULTAT_HEADERS, row_to_resultat_cells
+from sme_gend.services.resultat_format import (
+    RESULTAT_DOCUMENT_TITLE,
+    RESULTAT_HEADERS,
+    row_to_resultat_cells,
+)
 
 
 def _apply_cell_style(src, dst) -> None:
@@ -61,6 +66,8 @@ def export_liste_fidele(
     layout: ListeLayoutConfig,
     sections_data: list[tuple[str, str, str, list[tuple[str, list[ListeGeneraleRow]]]]],
     destination: Path,
+    *,
+    subdivision_display_for_row: Callable[[ListeGeneraleRow], str] | None = None,
 ) -> None:
     """
     Crée un classeur à partir de la maquette : lignes 1–3 identiques (titre, vide, en-têtes),
@@ -113,14 +120,24 @@ def export_liste_fidele(
             out_ws.merge_cells(start_row=cur, start_column=1, end_row=cur, end_column=ncol)
             for c in range(1, ncol + 1):
                 _apply_cell_style(tpl_ws.cell(r_sub, c), out_ws.cell(cur, c))
-            out_ws.cell(cur, 1, value=f"Subdivision d'arme : {sub_label}")
+            out_ws.cell(cur, 1, value=sub_label)
             cur += 1
 
             n_interne = 0
             for pr in personnes:
                 n_global += 1
                 n_interne += 1
-                vals = row_to_resultat_cells(pr, n_global, n_interne)
+                sub_disp = (
+                    subdivision_display_for_row(pr)
+                    if subdivision_display_for_row is not None
+                    else None
+                )
+                vals = row_to_resultat_cells(
+                    pr,
+                    n_global,
+                    n_interne,
+                    subdivision_arme_display=sub_disp,
+                )
                 for col_idx, val in enumerate(vals, start=1):
                     cell = out_ws.cell(cur, col_idx, value=val)
                     _apply_cell_style(tpl_ws.cell(r_dat, col_idx), cell)
@@ -136,6 +153,8 @@ def export_liste_fidele(
 def export_simple_fallback(
     destination: Path,
     sections_data: list[tuple[str, str, str, list[tuple[str, list[ListeGeneraleRow]]]]],
+    *,
+    subdivision_display_for_row: Callable[[ListeGeneraleRow], str] | None = None,
 ) -> None:
     """Sans maquette : classeur minimal (même logique que l’ancien export)."""
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -153,7 +172,7 @@ def export_simple_fallback(
 
     row = 1
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=ncols)
-    ws.cell(row=row, column=1, value="LISTE DES PRÉSENTS").font = Font(bold=True, size=14)
+    ws.cell(row=row, column=1, value=RESULTAT_DOCUMENT_TITLE).font = Font(bold=True, size=14)
     row += 2
     for col, title in enumerate(RESULTAT_HEADERS, start=1):
         cell = ws.cell(row=row, column=col, value=title)
@@ -174,13 +193,24 @@ def export_simple_fallback(
         row += 1
         for sub_label, personnes in blocks:
             ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=ncols)
-            ws.cell(row=row, column=1, value=f"Subdivision d'arme : {sub_label}").fill = fill_sub
+            ws.cell(row=row, column=1, value=sub_label).fill = fill_sub
             row += 1
             n_interne = 0
             for pr in personnes:
                 n_global += 1
                 n_interne += 1
-                for col_idx, val in enumerate(row_to_resultat_cells(pr, n_global, n_interne), start=1):
+                sub_disp = (
+                    subdivision_display_for_row(pr)
+                    if subdivision_display_for_row is not None
+                    else None
+                )
+                cells = row_to_resultat_cells(
+                    pr,
+                    n_global,
+                    n_interne,
+                    subdivision_arme_display=sub_disp,
+                )
+                for col_idx, val in enumerate(cells, start=1):
                     ws.cell(row=row, column=col_idx, value=val).border = border
                 row += 1
 

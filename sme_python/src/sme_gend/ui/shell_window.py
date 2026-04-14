@@ -41,6 +41,7 @@ from sme_gend.ui.views.layout_editor_view import LayoutEditorView
 from sme_gend.ui.views.liste_present_view import ListePresentView
 from sme_gend.ui.views.numerique_indispo_view import NumeriqueIndispoView
 from sme_gend.ui.views.numerique_matrice_view import NumeriqueMatriceView
+from sme_gend.ui.views.numerique_satellite_view import NumeriqueSatelliteView
 from sme_gend.ui.views.personnel_list_view import PersonnelListView
 from sme_gend.ui.views.referentiel_views import FonctionsView, GradesView, StructuresView
 
@@ -107,6 +108,10 @@ class ShellWindow(QMainWindow):
             "Indispo par structure",
             NumeriqueIndispoView(settings, numerique_preview),
         )
+        register_page(
+            "Listes détail (situation num.)",
+            NumeriqueSatelliteView(settings, numerique_preview),
+        )
 
         # Icônes réelles (register_page a mis des QIcon() vides pour index 0)
         icons: list[QIcon] = [
@@ -135,6 +140,7 @@ class ShellWindow(QMainWindow):
                     QStyle.StandardPixmap.SP_CommandLink,
                 ),
             ),
+            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogListView),
         ]
 
         self._nav = QTreeWidget()
@@ -198,6 +204,7 @@ class ShellWindow(QMainWindow):
         )
         add_leaf(f_num, "Matrice (effectifs)", 9)
         add_leaf(f_num, "Indispo par structure", 10)
+        add_leaf(f_num, "Listes détail (situation num.)", 11)
 
         f_ref = add_folder(
             "Référentiels",
@@ -401,9 +408,10 @@ class ShellWindow(QMainWindow):
             "Config. fichier DETACHES",
             "Matrice (situation numérique)",
             "Indispo par structure",
+            "Listes détail (situation num.)",
         ]
         for idx, label in enumerate(nav_entries):
-            if idx == 9:
+            if idx in (9, 11):
                 m_nav.addSeparator()
             act = QAction(label, self)
             act.triggered.connect(lambda checked=False, i=idx: self._go_page(i))

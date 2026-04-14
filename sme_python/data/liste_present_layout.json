@@ -15,7 +15,10 @@
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "Commandement Gendarmerie",
+        "Direction"
+      ]
     },
     {
       "id": "auto-CAB-COMGEND-1",
@@ -24,7 +27,9 @@
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "CABINET COMGEND"
+      ]
     },
     {
       "id": "auto-EM-GEND-2",
@@ -51,11 +56,7 @@
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": [
-        "SECRETARIAT",
-        "DIVISION ENTRAINEMENT ET EMPLOI DES FORCES",
-        "DIVISION POLICE ADMINISTRATIVE ET ORDRE PUBLIC"
-      ]
+      "subdivision_order": null
     },
     {
       "id": "auto-DPF-5",
@@ -64,7 +65,14 @@
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "SECRETARIAT",
+        "SECTION FINANCES",
+        "SECTION INFORMATIQUE",
+        "DIVISION GESTION DU PERSONNEL",
+        "DIVISION RECRUTEMENT ET FORMATION",
+        "DIVISION ACTION SOCIALE ET CHANCELLERIE"
+      ]
     },
     {
       "id": "auto-DSF-6",
@@ -73,7 +81,12 @@
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "DIVISON ORDINAIRE ET ORGANISMES D'INTERET PRIVE",
+        "DIVISION TRESORERIE",
+        "DIVISION BUDGET ET PROSPECTIVES BUDGETAIRES",
+        "DIVISION ADMINISTRATION GENERALE, SOLDE ET PENSIONS"
+      ]
     },
     {
       "id": "auto-DTRJD-7",
@@ -82,7 +95,10 @@
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "DIVISION POLICE JUDICIAIRE-POLICE ADMINISTRATIVE",
+        "DIVISION DOCUMENTATION"
+      ]
     },
     {
       "id": "auto-DIRTRANS-8",
@@ -91,7 +107,11 @@
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "DIVISION ETUDES ET EXPERIMENTATION",
+        "DIVISION EXPLOITATION ET EMPLOI",
+        "DIVISION INFORMATIQUE ET TELECOMMUNICATION"
+      ]
     },
     {
       "id": "auto-DIRMAT-9",
@@ -100,7 +120,14 @@
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "ETAT-MAJOR",
+        "DIVISION TRANSPORT ET MOYENS NAUTIQUES",
+        "DIVISION MAINTENANCE AUTOS ET ENGINS BLINDES",
+        "DIVISION HABILLEMENT COUCHAGE CAMPEMENT ET AMEUBLEMENT",
+        "DIVISION ARMEMENTS MUNITIONS ET MATERIELS SPECIFIQUES",
+        "DIVISION ARMEMENT MUNITIONS ET MATERIELS SPECIFIQUES"
+      ]
     },
     {
       "id": "auto-DDT-10",
@@ -109,61 +136,107 @@
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "SECRETARIAT - DDT",
+        "DIVISION TRAVAUX - DDT",
+        "DIVISION ETUDES ET PLANIFICATION - DDT",
+        "DIVISION DOMAINE - DDT",
+        "Atélier bois - DDT"
+      ]
     },
     {
-      "id": "auto-GIGN-11",
+      "id": "auto-CRO-11",
       "order": 11,
-      "structure_code": "GIGN",
-      "title_main_override": null,
-      "title_sub_override": null,
-      "group_by_subdivision": true,
-      "subdivision_order": null
-    },
-    {
-      "id": "auto-CRO-12",
-      "order": 12,
       "structure_code": "CRO",
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "COMMANDEMENT"
+      ]
     },
     {
-      "id": "auto-CS-DPF-13",
+      "id": "auto-OCR-12",
+      "order": 12,
+      "structure_code": "OCR",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true,
+      "subdivision_order": [
+        "COMMANDEMENT OCR",
+        "SECRETARIAT",
+        "ETAT-MAJOR"
+      ]
+    },
+    {
+      "id": "auto-EGN-13",
       "order": 13,
-      "structure_code": "CS-DPF",
-      "title_main_override": null,
-      "title_sub_override": null,
-      "group_by_subdivision": true,
-      "subdivision_order": null
-    },
-    {
-      "id": "auto-GE-GQG-14",
-      "order": 14,
-      "structure_code": "GE-GQG",
-      "title_main_override": null,
-      "title_sub_override": null,
-      "group_by_subdivision": true,
-      "subdivision_order": null
-    },
-    {
-      "id": "auto-EGN-15",
-      "order": 15,
       "structure_code": "EGN",
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "PROTOCOLE-EGN",
+        "ETAT-MAJOR EGN",
+        "CCS_EGN",
+        "SCE ADM",
+        "INFIRMERIE_EGN"
+      ]
     },
     {
-      "id": "auto-GGTA-16",
-      "order": 16,
-      "structure_code": "GGTA",
+      "id": "auto-GIGN-14",
+      "order": 14,
+      "structure_code": "GIGN",
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "COMMANDEMENT GIGN",
+        "ETAT-MAJOR GIGN",
+        "SERVICE ADM",
+        "CELLULE RENS",
+        "ARMURERIE",
+        "ORDINAIRE",
+        "ANTENNE MEDICALE",
+        "COMPAGNIE D'INTERVENTION",
+        "1ère SECTION INTERVENTION",
+        "2e SECTION INTERVENTION",
+        "3e SECTION INTERVENTION",
+        "4e SECTION INTERVENTION"
+      ]
+    },
+    {
+      "id": "auto-CIK-15",
+      "order": 15,
+      "structure_code": "CIK",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true,
+      "subdivision_order": [
+        "SECRETARIAT",
+        "SERVICES ADMINISTRATIF CIK",
+        "DIVISION DES ENSEIGNEMENTS",
+        "COMPAGNIE DE COMMANDEMENT ET DE SERVICES"
+      ]
+    },
+    {
+      "id": "auto-GE-GQG-16",
+      "order": 16,
+      "structure_code": "GE-GQG",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true,
+      "subdivision_order": [
+        "GROUPE D'ESCADRONS DU GRAND QUARTIER GENERAL",
+        "COMMANDEMENT GEGQG",
+        "ETAT-MAJOR GE-GQG",
+        "SERVICE GENERAL",
+        "PELOTON HORS RANG",
+        "ESCADRON D'HONNEURS ET MUSIQUE",
+        "ESCADRON DE SECURITE ET PROTECTION 1",
+        "ESCADRON DE SECURITE ET PROTECTION 2",
+        "ESCADRON DES PERSONNELS DETACHES"
+      ]
     },
     {
       "id": "auto-GGF-17",
@@ -172,20 +245,24 @@
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "COMMANDEMENT GGF",
+        "ETAT-MAJOR",
+        "SECRETARIAT GGF",
+        "SERVICE ADMINISTRATIFS",
+        "SECTION JUDICIAIRE",
+        "1er_ESCADRON",
+        "2e_ESCADRON",
+        "3e_ESCADRON",
+        "CGF_DOLISIE",
+        "CGF_BRAZZAVILLE",
+        "CFG-BZV",
+        "DETACHEMENT FERROVIAIRE DE LOUTETE"
+      ]
     },
     {
-      "id": "auto-GSR-18",
+      "id": "auto-GGMF-18",
       "order": 18,
-      "structure_code": "GSR",
-      "title_main_override": null,
-      "title_sub_override": null,
-      "group_by_subdivision": true,
-      "subdivision_order": null
-    },
-    {
-      "id": "auto-GGMF-19",
-      "order": 19,
       "structure_code": "GGMF",
       "title_main_override": null,
       "title_sub_override": null,
@@ -193,171 +270,479 @@
       "subdivision_order": null
     },
     {
-      "id": "auto-RG-BZV-20",
+      "id": "auto-GGTA-19",
+      "order": 19,
+      "structure_code": "GGTA",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true,
+      "subdivision_order": [
+        "GROUPEMENT GENDARMERIE DES TRANSPORTS AERIENS",
+        "COMMANDEMENT GGTA",
+        "COMPAGNIE GGTA BRAZZAVILLE",
+        "COMPAGNIE GGTA POINTE-NOIRE",
+        "COMPAGNIE GGTA OLLOMBO"
+      ]
+    },
+    {
+      "id": "auto-GSR-20",
       "order": 20,
+      "structure_code": "GSR",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true,
+      "subdivision_order": [
+        "COMMANDEMENT GSR",
+        "ETAT-MAJOR GSR",
+        "ESR BRAZZAVILLE",
+        "ESR POINTE-NOIRE",
+        "ESR DOLISIE",
+        "ESR OUESSO",
+        "ESR MADINGOU",
+        "ESR MENGO",
+        "ESR NGO",
+        "ESR OWANDO",
+        "ESR YIE",
+        "ESR-MENGO",
+        "ETAT-MAJOR"
+      ]
+    },
+    {
+      "id": "auto-RG-BZV-21",
+      "order": 21,
       "structure_code": "RG-BZV",
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "REGION DE GENDARMERIE DE BRAZZAVILLE",
+        "COMMANDEMENT RG-BZV",
+        "ETAT-MAJOR RG-BZV",
+        "SECTION DE RECHERCHES JUDICIAIRE RG-BZV",
+        "INFIRMERIE-CAMP MILICE",
+        "ONU",
+        "DETACHEMENT DE GENDARMERIE DU PALAIS DE JUSTICE",
+        "COUR DE COMPTES ET DE DISCIPLINE BUDGETAIRE",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE BRAZZAVILLE 1",
+        "BRIGADE DE RECHERCHE COMPAGNIE DE GENDARMERIE TERRITORIALE BRAZZAVILLE 1",
+        "BRIGADE TERRITORIALE DE BACONGO",
+        "BRIGADE TERRITORIALE DE MADIBOU",
+        "BRIGADE TERRITORIALE DE MAKELEKELE",
+        "BRIGADE TERRITORIALE DE MFILOU",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE BRAZZAVILLE 2",
+        "BRIGADE DE RECHERCHE COMPAGNIE DE GENDARMERIE TERRITORIALE BRAZZAVILLE 2",
+        "BRIGADE TERRITORIALE DE POTO POTO",
+        "BRIGADE TERRITORIALE DE MOUNGALI",
+        "BRIGADE TERRITORIALE DE OUENZE",
+        "BRIGADE TERRITORIALE DE TALANGAI",
+        "BRIGADE TERRITORIALE DE DJIRI",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE BRAZZAVILLE 3",
+        "BRIGADE TERRITORIALE DE LISSANGA",
+        "BRIGADE TERRITORIALE DE LOUBASSOU",
+        "BRIGADE TERRITORIALE MBAMOU",
+        "BRIGADE TERRITORIALE MOTOU YA NGOMBE",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE KINTELE",
+        "BRIGADE TERRITORIALE DE KINTELE",
+        "PSIG COMPAGNIE DE GENDARMERIE TERRITORIALE BZV-1",
+        "PSIG COMPAGNIE DE GENDARMERIE TERRITORIALE BZV-2",
+        "PSIG COMPAGNIE DE GENDARMERIE TERRITORIALE DE KINTELE"
+      ]
     },
     {
-      "id": "auto-1er GGM-21",
-      "order": 21,
+      "id": "auto-1er_GGM-22",
+      "order": 22,
       "structure_code": "1er GGM",
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "COMMANDEMENT 1er GGM"
+      ]
     },
     {
-      "id": "auto-RG-POO-22",
-      "order": 22,
+      "id": "auto-RG-POO-23",
+      "order": 23,
       "structure_code": "RG-POO",
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "REGION DE GENDARMERIE DU POOL",
+        "COMMANDEMENT RG-POO",
+        "ETAT-MAJOR RG-POO",
+        "DIVISION INSTRUCTION EMPLOI ET RENSEIGNEMENTS",
+        "DIVISION ADMINISTRATION ET PERSONNEL",
+        "DIVISION LOGISTIQUE ET FINANCE",
+        "DIVISION POLICE JUDICIAIRE ET POLICE ADMINISTRATIVE",
+        "ESSIG RG-POO",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE KINDAMBA",
+        "BRIGADE TERRITORIALE DE KINDAMBA",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE BOKO",
+        "BRIGADE TERRITORIALE DE BOKO",
+        "POSTE DE LOUINGUI",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE MINDOULI",
+        "BRIGADE TERRITORIALE DE MINDOULI",
+        "BRIGADE TERRITORIALE DE KINKALA"
+      ]
     },
     {
-      "id": "auto-RG-BZA-23",
-      "order": 23,
+      "id": "auto-RG-BZA-24",
+      "order": 24,
       "structure_code": "RG-BZA",
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "REGION DE GENDARMERIE DE LA BOUENZA",
+        "COMMANDEMENT RG-BZA",
+        "ETAT-MAJOR RG-BZA",
+        "SECTION DE RECHERCHES JUDICIAIRES RG-BZA",
+        "ESCADRON DE GENDARMERIE MOBILE",
+        "ESSIG RG-BZA",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE LOUTETE",
+        "BRIGADE DE RECHERCHE DE LOUTETE",
+        "BRIGADE TERRITORIALE DE LOUTETE",
+        "BRIGADE TERRITORIALE DE MADINGOU",
+        "BRIGADE TERRITORIALE DE BOKO-SONGHO",
+        "BRIGADE TERRITORIALE DE MFOUATI",
+        "BRIGADE TERRITORIALE DE BOUANSA",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE MOUYONDZI",
+        "BRIGADE DE RECHERCHE DE MOUYONDZI",
+        "BRIGADE TERRITORIALE DE MOUYONDZI",
+        "BRIGADE TERRITORIALE DE TSIAKI",
+        "BRIGADE TERRITORIALE DE KIGOUE",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE NKAYI",
+        "BRIGADE DE RECHERCHE DE NKAYI",
+        "BRIGADE TERRITORIALE DE LOUDIMA",
+        "BRIGADE TERRITORIALE DE NKAYI",
+        "PSIG"
+      ]
     },
     {
-      "id": "auto-RG-LEK-24",
-      "order": 24,
+      "id": "auto-RG-LEK-25",
+      "order": 25,
       "structure_code": "RG-LEK",
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "REGION DE GENDARMERIE DE LA LEKOUMOU",
+        "COMMANDEMENT RG-LEK",
+        "ETAT-MAJOR RG-LEK",
+        "SECTION DE RECHERCHES JUDICIAIRES RG-LEK",
+        "ESCADRON DE GENDARMERIE MOBILE RG-LEK",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE KOMONO",
+        "BRIGADE TERRITORIALE DE KOMONO",
+        "BRIGADE TERRITORIALE DE MAYEYE",
+        "BRIGADE TERRITORIALE DE SIBITI",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE ZANAGA",
+        "BRIGADE TERRITORIALE DE ZANAGA",
+        "BRIGADE TERRITORIALE DE BAMBAMA"
+      ]
     },
     {
-      "id": "auto-RG-NRI-25",
-      "order": 25,
+      "id": "auto-RG-NRI-26",
+      "order": 26,
       "structure_code": "RG-NRI",
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "REGION DE GENDARMERIE DU NIARI",
+        "COMMANDEMENT RG-NRI",
+        "ETAT-MAJOR RG-NRI",
+        "SECTION DE RECHERCHES JUDICIAIRES RG-NRI",
+        "ESCADRON DE GENDARMERIE MOBILE RG-NRI",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE MOSSENDJO",
+        "BRIGADE TERRITORIALE DE MOSSENDJO",
+        "BRIGADE TERRITORIALE DE MOUNGOUNDOU",
+        "BRIGADE TERRITORIALE DE MAYOKO",
+        "BRIGADE TERRITORIALE DE MAKABANA",
+        "BRIGADE TERRITORIALE DE MBINDA",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE KIMONGO",
+        "BRIGADE TERRITORIALE DE DOLISIE 3",
+        "BRIGADE TERRITORIALE DE DOLISIE 2",
+        "BRIGADE TERRITORIALE DE DOLISIE 1",
+        "BRIGADE TERRITORIALE DE LONDELA-KAYES",
+        "BRIGADE TERRITORIALE DE LOUVAKOU",
+        "BRIGADE TERRITORIALE DE KIMONGO",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE NYANGA",
+        "BRIGADE TERRITORIALE DE NYANGA",
+        "BRIGADE TERRITORIALE DE DIVENE",
+        "BRIGADE TERRITORIALE DE MOUSSOGOS",
+        "BRIGADE TERRITORIALE DE MOUSSOGO",
+        "BRIGADE TERRITORIALE DE KIBANGOU",
+        "BRIGADE TERRITORIALE DE BANDA"
+      ]
     },
     {
-      "id": "auto-RG-KLU-26",
-      "order": 26,
+      "id": "auto-RG-KLU-27",
+      "order": 27,
       "structure_code": "RG-KLU",
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "REGION DE GENDARMERIE DU KOUILOU",
+        "COMMANDEMENT RG-KLU",
+        "ETAT-MAJOR RG-KLU",
+        "SECTION DE RECHERCHES JUDICIAIRES RG-KLU",
+        "ESSIG RG-KLU",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE MADINGOU KAYES",
+        "BRIGADE DE RECHERCHES COMPAGNIE DE GENDARMERIE TERRITORIALE DE MADINGO-KAYES",
+        "BRIGADE TERRITORIALE DE  MADINGO-KAYES",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE_HINDA",
+        "BRIGADE DE RECHERCHES COMPAGNIE DE GENDARMERIE TERRITORIALE DE HINDA",
+        "BRIGADE TERRITORIALE DE  HINDA",
+        "BRIGADE TERRITORIALE DE  KAKAMOUEKA",
+        "BRIGADE TERRITORIALE DE  LOANGO",
+        "BRIGADE TERRITORIALE DE  MENGO",
+        "BRIGADE TERRITORIALE DE  MVOUTI",
+        "BRIGADE TERRITORIALE DE  NZAMBI",
+        "CTM/BL"
+      ]
     },
     {
-      "id": "auto-RG-PNR-27",
-      "order": 27,
+      "id": "auto-RG-PNR-28",
+      "order": 28,
       "structure_code": "RG-PNR",
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "REGION DE GENDARMERIE DE POINTE-NOIRE",
+        "COMMANDEMENT RG-PNR",
+        "ETAT-MAJOR RG-PNR",
+        "SECTION DE RECHERCHES JUDICIAIRES RG-PNR",
+        "TRIBUNAL DE GRANDE INSTANCE DE POINTE NOIRE",
+        "ESSIG RG-PNR",
+        "DET. CA-PNR",
+        "Det. CA-PNR",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE POINTE NOIRE 1",
+        "BRIGADE DE RECHERCHE COMPAGNIE DE GENDARMERIE TERRITORIALE POINTE NOIRE 1",
+        "BRIGADE TERRITORIALE DE LUMUMBA",
+        "BRIGADE TERRITORIALE DE MVOU MVOU",
+        "BRIGADE TERRITORIALE DE LOANDJILI",
+        "BRIGADE TERRITORIALE DE MONGO MPOUKOU",
+        "BRIGADE TERRITORIALE DE LA CÔTIERE",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE POINTE NOIRE 2",
+        "BRIGADE DE RECHERCHE COMPAGNIE DE GENDARMERIE TERRITORIALE POINTE NOIRE 2",
+        "BRIGADE TERRITORIALE DE NGOYO",
+        "BRIGADE TERRITORIALE DE DJENO",
+        "BRIGADE TERRITORIALE DE TIE TIE",
+        "BRIGADE TERRITORIALE DE PATRA",
+        "BRIGADE TERRITORIALE DE NZASSI"
+      ]
     },
     {
-      "id": "auto-2e GGM-28",
-      "order": 28,
+      "id": "auto-2e_GGM-29",
+      "order": 29,
       "structure_code": "2e GGM",
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "COMMANDEMENT 2e GGM"
+      ]
     },
     {
-      "id": "auto-RG-PLT-29",
-      "order": 29,
-      "structure_code": "RG-PLT",
-      "title_main_override": null,
-      "title_sub_override": null,
-      "group_by_subdivision": true,
-      "subdivision_order": null
-    },
-    {
-      "id": "auto-RG-CVO-30",
+      "id": "auto-RG-DJL-30",
       "order": 30,
-      "structure_code": "RG-CVO",
-      "title_main_override": null,
-      "title_sub_override": null,
-      "group_by_subdivision": true,
-      "subdivision_order": null
-    },
-    {
-      "id": "auto-RG-CUV-31",
-      "order": 31,
-      "structure_code": "RG-CUV",
-      "title_main_override": null,
-      "title_sub_override": null,
-      "group_by_subdivision": true,
-      "subdivision_order": null
-    },
-    {
-      "id": "auto-RG-SGH-32",
-      "order": 32,
-      "structure_code": "RG-SGH",
-      "title_main_override": null,
-      "title_sub_override": null,
-      "group_by_subdivision": true,
-      "subdivision_order": null
-    },
-    {
-      "id": "auto-RG-LIK-33",
-      "order": 33,
-      "structure_code": "RG-LIK",
-      "title_main_override": null,
-      "title_sub_override": null,
-      "group_by_subdivision": true,
-      "subdivision_order": null
-    },
-    {
-      "id": "auto-RG-COB-34",
-      "order": 34,
-      "structure_code": "RG-COB",
-      "title_main_override": null,
-      "title_sub_override": null,
-      "group_by_subdivision": true,
-      "subdivision_order": null
-    },
-    {
-      "id": "auto-RG-NKA-35",
-      "order": 35,
-      "structure_code": "RG-NKA",
-      "title_main_override": null,
-      "title_sub_override": null,
-      "group_by_subdivision": true,
-      "subdivision_order": null
-    },
-    {
-      "id": "auto-RG-DJL-36",
-      "order": 36,
       "structure_code": "RG-DJL",
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "REGION DE GENDARMERIE DU DJOUE-LEFINI",
+        "COMMANDEMENT RG-DJL",
+        "ETAT-MAJOR RG-DJL",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE D'IGNIE",
+        "BRIGADE TERRITORIALE DE  ODZIBA",
+        "BRIGADE TERRITORIALE DE MAYAMA",
+        "BRIGADE TERRITORIALE DE NGABE",
+        "BRIGADE TERRITORIALE D'IGNIE"
+      ]
     },
     {
-      "id": "auto-OCR-37",
-      "order": 37,
-      "structure_code": "OCR",
+      "id": "auto-RG-PLT-31",
+      "order": 31,
+      "structure_code": "RG-PLT",
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "REGION DE GENDARMERIE DES PLATEAUX",
+        "COMMANDEMENT RG-PLT",
+        "ETAT-MAJOR RG-PLT",
+        "ESCADRON SPECIALISE DE SECURITE ET D'INTERVENTION DE LA GENDARMERIE (ESSIG RG-PLT)",
+        "ESSIG RG-PLT",
+        "PELOTON DE SURVEILLANCE ET D'INTERVENTION DE LA GENDARMERIE; PSIG RG-PLT",
+        "PSIG RG-PLT",
+        "SECTION DE RECHERCHES JUDICIAIRES RG-PLT",
+        "ESCADRON DE SECURITE ROUTIERE DE NGO",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE LEKANA",
+        "BRIGADE TERRITORIALE DE LEKANA",
+        "BRIGADE TERRITORIALE DE DJAMBALA",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE NGO",
+        "BRIGADE TERRITORIALE DE NGO",
+        "BRIGADE TERRITORIALE DE BOUEMBA"
+      ]
     },
     {
-      "id": "auto-CIK-38",
+      "id": "auto-RG-NKA-32",
+      "order": 32,
+      "structure_code": "RG-NKA",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true,
+      "subdivision_order": [
+        "REGION DE GENDARMERIE DE LA NKENI-ALIMA",
+        "COMMANDEMENT RG-NKA",
+        "ETAT-MAJOR RG-NKA",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE GAMBOMA",
+        "BRIGADE TERRITORIALE DE  ABALA",
+        "BRIGADE TERRITORIALE DE  NGANIA",
+        "BRIGADE TERRITORIALE DE  ONGOGNI",
+        "BRIGADE TERRITORIALE DE GAMBOMA",
+        "BRIGADE TERRITORIALE DE MAKOTIPOKO",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE D'OLLOMBO",
+        "BRIGADE TERRITORIALE DE  OLLOMBO",
+        "GROUPEMENT TERRITORIALE DE GENDARMERIE D'OLLOMBO",
+        "ESCADRON DE GENDARMERIE MOBILE D'OLLOMBO"
+      ]
+    },
+    {
+      "id": "auto-RG-CUV-33",
+      "order": 33,
+      "structure_code": "RG-CUV",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true,
+      "subdivision_order": [
+        "REGION DE GENDARMERIE DE LA CUVETTE",
+        "COMMANDEMENT RG-CUV",
+        "ETAT-MAJOR RG-CUV",
+        "SECTION DE RECHERCHES JUDICIAIRES RG-CUV",
+        "ESSIG RG-CUV",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE BOUNDJI",
+        "BRIGADE TERRITORIALE DE BOUNDJI",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE MAKOUA",
+        "BRIGADE TERRITORIALE DE MAKOUA",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE NGOKO",
+        "BRIGADE TERRITORIALE DE NGOKO",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE NTOKOU",
+        "BRIGADE TERRITORIALE DE NTOKOU",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE OWANDO",
+        "BRIGADE TERRITORIALE DE OWANDO",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE OYO",
+        "BRIGADE TERRITORIALE DE OYO",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE TCHIKAPIKA"
+      ]
+    },
+    {
+      "id": "auto-RG-CVO-34",
+      "order": 34,
+      "structure_code": "RG-CVO",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true,
+      "subdivision_order": [
+        "REGION DE GENDARMERIE DE LA CUVETTE OUEST",
+        "COMMANDEMENT RG-CVO",
+        "ETAT-MAJOR RG-CVO",
+        "SECTION DE RECHERCHES JUDICIAIRES RG-CVO",
+        "ESSIG RG-CVO",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE KELLE",
+        "BRIGADE TERRITORIALE DE KELLE",
+        "PSIG KELLE",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE OKOYO",
+        "BRIGADE TERRITORIALE DE OKOYO",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE D'ETOUMBI",
+        "BRIGADE TERRITORIALE DE ETOUMBI",
+        "BRIGADE TERRITORIALE DE EWO",
+        "BRIGADE TERRITORIALE DE MBOMO",
+        "BRIGADE TERRITORIALE DE YABA MBETI",
+        "PSIG EWO"
+      ]
+    },
+    {
+      "id": "auto-RG-COB-35",
+      "order": 35,
+      "structure_code": "RG-COB",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true,
+      "subdivision_order": [
+        "REGION DE GENDARMERIE DU CONGO-OUBANGUI",
+        "COMMANDEMENT RG-COB",
+        "ETAT-MAJOR RG-COB",
+        "COMPAGNIE DEGENDARMERIE TERRITORIALE DE MOSSAKA",
+        "BRIGADE TERRITORIALE DE MOSSAKA",
+        "BRIGADE TERRITORIALE DE BOKOMA",
+        "BRIGADE TERRITORIALE DE LIRANGA",
+        "BRIGADE TERRITORIALE DE LOUKOLELA"
+      ]
+    },
+    {
+      "id": "auto-RG-SGH-36",
+      "order": 36,
+      "structure_code": "RG-SGH",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true,
+      "subdivision_order": [
+        "REGION DE GENDARMERIE DE LA SANGHA",
+        "COMMANDEMENT RG-SGH",
+        "ETAT-MAJOR RG-SGH",
+        "SECTION DE RECHERCHES JUDICIAIRES RG-SGH",
+        "ESCADRON DE GENDARMERIE MOBILE RG-SGH",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE POKOLA",
+        "BRIGADE TERRITORIALE DE POKOLA",
+        "BRIGADE TERRITORIALE DE OUESSO",
+        "BRIGADE TERRITORIALE DE MOKEKO",
+        "BRIGADE TERRITORIALE DE NGOMBE",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE SEMBE",
+        "BRIGADE TERRITORIALE DE SEMBE",
+        "BRIGADE TERRITORIALE DE SOUANKE",
+        "BRIGADE TERRITORIALE DE TALA-TALA"
+      ]
+    },
+    {
+      "id": "auto-RG-LIK-37",
+      "order": 37,
+      "structure_code": "RG-LIK",
+      "title_main_override": null,
+      "title_sub_override": null,
+      "group_by_subdivision": true,
+      "subdivision_order": [
+        "REGION DE GENDARMERIE DE LA LIKOUALA",
+        "COMMANDEMENT RG-LIK",
+        "ETAT-MAJOR RG-LIK",
+        "PELOTON DE SURVEILLANCE ET D'INTERVENTION DE LA GENDARMERIE; PSIG RG-LIK",
+        "PSIG RG-LIK",
+        "BRIGADE DE RECHERCHES RG-LIK",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE D'EPENA",
+        "BRIGADE TERRITORIALE D'EPENA",
+        "BRIGADE TERRITORIALE D'IMPFONDO",
+        "BRIGADE TERRITORIALE DE BOUANELA",
+        "COMPAGNIE DE GENDARMERIE D'ENYELLE",
+        "BRIGADE TERRITORIALE D'ENYELLE",
+        "BRIGADE TERRITORIALE DE DONGOU",
+        "BRIGADE TERRITORIALE DE BETOU",
+        "BRIGADE TERRITORIALE DE MOKABI",
+        "POSTE LOMBO",
+        "POSTE BOYELE",
+        "POSTE YANGA-TONDO",
+        "POSTE GONGO",
+        "POSTE MOUALE",
+        "POSTE SAMBALA",
+        "POSTE THANRY"
+      ]
+    },
+    {
+      "id": "auto-CS-DPF-38",
       "order": 38,
-      "structure_code": "CIK",
+      "structure_code": "CS-DPF",
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,

@@ -14,13 +14,8 @@ from sme_gend.repositories.grade_repository import GradeRepository
 from sme_gend.repositories.liste_generale_repository import ListeGeneraleRepository
 from sme_gend.repositories.sme_repository import SmeRepository
 from sme_gend.repositories.structure_repository import StructureRepository
+from sme_gend.padmin_present import padmin_counts_as_present
 from sme_gend.services import numerique_padmin as npa
-
-
-def _is_present(padmin: str | None) -> bool:
-    if not padmin:
-        return False
-    return "present" in padmin.strip().lower().replace("é", "e").replace("è", "e")
 
 
 def _top_n_with_other(counter: Counter[str], n: int) -> list[tuple[str, int]]:
@@ -111,7 +106,7 @@ def build_main_kpi_cards(
     Cartes « indicateurs principaux » : effectifs + répartition Padmin (données ListeGenerale).
     Aligné sur les codes utilisés pour la situation numérique (numerique_padmin).
     """
-    c_present = sum(1 for r in rows if _is_present(r.position_admin))
+    c_present = sum(1 for r in rows if padmin_counts_as_present(r.position_admin))
     c_det = sum(1 for r in rows if _padmin_eq(r.position_admin, npa.PADMIN_DETACHE))
     c_si = sum(1 for r in rows if _is_stage_interne(r.position_admin))
     c_miss = sum(1 for r in rows if _padmin_eq(r.position_admin, npa.PADMIN_MISSION))
@@ -223,7 +218,7 @@ def build_main_kpi_cards(
 
 @dataclass(frozen=True, slots=True)
 class DashboardSnapshot:
-    """Instantané tableau de bord. indisponibles = effectifs hors position « présent ». grades_effectifs_detail : (grade, effectif, % total, écart vs uniforme)."""
+    """Instantané tableau de bord. indisponibles = effectifs hors « présent » / stage interne (voir padmin_counts_as_present). grades_effectifs_detail : (grade, effectif, % total, écart vs uniforme)."""
 
     total_effectifs: int
     presents: int
@@ -254,7 +249,7 @@ class DashboardService:
     def snapshot(self) -> DashboardSnapshot:
         rows = self._liste.fetch_all()
         total = len(rows)
-        presents = sum(1 for r in rows if _is_present(r.position_admin))
+        presents = sum(1 for r in rows if padmin_counts_as_present(r.position_admin))
         indispo = total - presents
         taux = (100.0 * presents / total) if total else 0.0
 

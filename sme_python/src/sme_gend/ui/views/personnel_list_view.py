@@ -7,6 +7,7 @@ import csv
 from PySide6.QtCore import QSize, QSortFilterProxyModel, Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut, QShowEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QMenu,
+    QProgressDialog,
     QPushButton,
     QSizePolicy,
     QStackedWidget,
@@ -32,6 +34,7 @@ from PySide6.QtWidgets import (
 from sme_gend.models.liste_generale import ListeGeneraleRow
 from sme_gend.services.personnel_service import PersonnelService
 from sme_gend.services.referentiel_service import ReferentielService
+from sme_gend.ui.bg_task import run_with_progress
 from sme_gend.ui.confirm_dialogs import confirm_overwrite_file, confirm_yes_no
 from sme_gend.ui.personnel_edit_dialog import PersonnelEditDialog
 from sme_gend.ui.personnel_table_model import PersonnelTableModel
@@ -58,7 +61,9 @@ class PersonnelListView(QWidget):
         self._referentiel = referentiel
         self._all_rows: list[ListeGeneraleRow] = []
 
-        self._model = PersonnelTableModel()
+        self._model = PersonnelTableModel(
+            subdivision_flat=self._referentiel.subdivisions_flat(),
+        )
         self._proxy = QSortFilterProxyModel(self)
         self._proxy.setSourceModel(self._model)
         self._proxy.setSortCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
@@ -435,6 +440,12 @@ class PersonnelListView(QWidget):
         self._search.blockSignals(False)
         self._apply_filter()
 
+    def _apply_loaded_rows(self, rows: list[ListeGeneraleRow]) -> None:
+        self._all_rows = rows
+        self._filter_debounce.stop()
+        self._populate_structural_combos()
+        self._apply_filter()
+
     def _refresh_all(self, *, silent: bool = False) -> None:
         if not silent:
             if not confirm_yes_no(
@@ -444,14 +455,15 @@ class PersonnelListView(QWidget):
                 default_no=False,
             ):
                 return
-        try:
-            self._all_rows = self._service.liste_complete()
-        except Exception as e:
-            QMessageBox.critical(self, "Erreur base", str(e))
+        rows = run_with_progress(
+            self,
+            "Liste générale",
+            "Chargement depuis la base Access…",
+            self._service.liste_complete,
+        )
+        if rows is None:
             return
-        self._filter_debounce.stop()
-        self._populate_structural_combos()
-        self._apply_filter()
+        self._apply_loaded_rows(rows)
 
     def _show_all(self) -> None:
         if not confirm_yes_no(
@@ -461,31 +473,33 @@ class PersonnelListView(QWidget):
             default_no=True,
         ):
             return
-        try:
-            self._all_rows = self._service.liste_complete()
-        except Exception as e:
-            QMessageBox.critical(self, "Erreur base", str(e))
+        rows = run_with_progress(
+            self,
+            "Liste générale",
+            "Chargement de la liste complète…",
+            self._service.liste_complete,
+        )
+        if rows is None:
             return
-        self._filter_debounce.stop()
-        self._populate_structural_combos()
-        self._apply_filter()
+        self._apply_loaded_rows(rows)
 
     def _show_presents(self) -> None:
         if not confirm_yes_no(
             self,
             "Présents seulement",
-            "Recharger et n’afficher que les personnels en position « présent » ?",
+            "Recharger et n’afficher que les personnels comptés présents (Padmin « présent » ou stage interne) ?",
             default_no=True,
         ):
             return
-        try:
-            self._all_rows = self._service.liste_presents()
-        except Exception as e:
-            QMessageBox.critical(self, "Erreur base", str(e))
+        rows = run_with_progress(
+            self,
+            "Liste générale",
+            "Chargement des personnels « présents »…",
+            self._service.liste_presents,
+        )
+        if rows is None:
             return
-        self._filter_debounce.stop()
-        self._populate_structural_combos()
-        self._apply_filter()
+        self._apply_loaded_rows(rows)
 
     def _structural_filter_matches(self, row: ListeGeneraleRow) -> bool:
         p = self._padmin_combo.currentData()
@@ -618,11 +632,23 @@ class PersonnelListView(QWidget):
             self._model.headerData(c, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
             for c in range(self._model.columnCount())
         ]
+        nrows = self._proxy.rowCount()
+        dlg = QProgressDialog("Export CSV en cours…", None, 0, max(1, nrows), self)
+        dlg.setWindowTitle("Export CSV")
+        dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dlg.setCancelButton(None)
+        dlg.setMinimumDuration(0)
+        dlg.setMinimumWidth(320)
+        dlg.show()
+        QApplication.processEvents()
         try:
             with open(path, "w", newline="", encoding="utf-8-sig") as f:
                 w = csv.writer(f, delimiter=";")
                 w.writerow(headers)
-                for pr in range(self._proxy.rowCount()):
+                for pr in range(nrows):
+                    if pr % 25 == 0:
+                        dlg.setValue(pr)
+                        QApplication.processEvents()
                     src = self._proxy.mapToSource(self._proxy.index(pr, 0))
                     if not src.isValid():
                         continue
@@ -632,9 +658,12 @@ class PersonnelListView(QWidget):
                         v = self._model.data(mi, Qt.ItemDataRole.DisplayRole)
                         row_vals.append(v if v is not None else "")
                     w.writerow(row_vals)
+                dlg.setValue(nrows)
         except OSError as e:
             QMessageBox.critical(self, "Export", str(e))
             return
+        finally:
+            dlg.close()
         self._show_status(f"Export enregistré : {path}")
 
 
