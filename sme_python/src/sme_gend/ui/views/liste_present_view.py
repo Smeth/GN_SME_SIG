@@ -48,7 +48,7 @@ class ListePresentView(QWidget):
         self._btn_layout.setVisible(False)
 
         self._info = QLabel(
-            "Données : table Access <b>ListeGenerale</b>, lignes dont la position "
+            "Données : table <b>ListeGenerale</b> (SQLite ou Access selon la configuration), lignes dont la position "
             "administrative (Padmin) est « présent » ou stage interne, ordre des sections selon "
             "<code>liste_present_layout.json</code>. "
             "<b>L'ordre des blocs (structures puis subdivisions)</b> se règle sur la page "
@@ -89,6 +89,9 @@ class ListePresentView(QWidget):
         super().showEvent(event)
         self._refresh(confirm=False)
 
+    def apply_runtime_after_config_change(self) -> None:
+        self._refresh(confirm=False)
+
     def set_open_layout_editor(self, fn: Callable[[], None] | None) -> None:
         """Branche l'ouverture de « Mise en page liste » (appelé par la fenêtre principale)."""
         self._open_layout = fn
@@ -103,7 +106,7 @@ class ListePresentView(QWidget):
             if not confirm_yes_no(
                 self,
                 "Actualiser l'aperçu",
-                "Recharger l'aperçu HTML depuis la base Access ?",
+                "Recharger l'aperçu HTML depuis la base configurée ?",
                 default_no=False,
             ):
                 return

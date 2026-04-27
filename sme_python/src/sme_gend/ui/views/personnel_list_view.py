@@ -36,12 +36,13 @@ from sme_gend.services.personnel_service import PersonnelService
 from sme_gend.services.referentiel_service import ReferentielService
 from sme_gend.ui.bg_task import run_with_progress
 from sme_gend.ui.confirm_dialogs import confirm_overwrite_file, confirm_yes_no
+from sme_gend.ui.personnel_dossier_dialog import PersonnelDossierDialog
 from sme_gend.ui.personnel_edit_dialog import PersonnelEditDialog
 from sme_gend.ui.personnel_table_model import PersonnelTableModel
 
 
 class PersonnelListView(QWidget):
-    """Consultation de la liste générale Access."""
+    """Consultation de la liste générale (SQLite ou Access selon la configuration)."""
 
     _DEBOUNCE_MS = 280
     _FOOTER_DEFAULT_HINT = (
@@ -78,7 +79,7 @@ class PersonnelListView(QWidget):
         self._table.setSortingEnabled(False)
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._on_table_context_menu)
-        self._table.doubleClicked.connect(self._edit_current)
+        self._table.doubleClicked.connect(self._open_dossier)
 
         hdr = self._table.horizontalHeader()
         ncol = self._model.columnCount()
@@ -176,7 +177,7 @@ class PersonnelListView(QWidget):
         else:
             self._btn_refresh.setIcon(_reload_ico)
         self._btn_refresh.setIconSize(QSize(22, 22))
-        self._btn_refresh.setToolTip("Actualiser depuis la base Access (Ctrl+R)")
+        self._btn_refresh.setToolTip("Actualiser depuis la base configurée (Ctrl+R)")
         self._btn_refresh.setAutoRaise(True)
         self._btn_refresh.clicked.connect(lambda: self._refresh_all(silent=False))
 
@@ -195,6 +196,10 @@ class PersonnelListView(QWidget):
             self._show_presents,
         )
         more_menu.addSeparator()
+        more_menu.addAction(
+            "Fiche dossier (parcours & traçabilité)…",
+            self._open_dossier,
+        )
         more_menu.addAction(
             "Modifier la ligne sélectionnée…",
             self._edit_current,
@@ -254,8 +259,8 @@ class PersonnelListView(QWidget):
         layout.addWidget(self._footer)
 
         QShortcut(QKeySequence("Ctrl+R"), self, lambda: self._refresh_all(silent=False))
-        QShortcut(QKeySequence(Qt.Key.Key_Return), self._table, self._edit_current)
-        QShortcut(QKeySequence(Qt.Key.Key_Enter), self._table, self._edit_current)
+        QShortcut(QKeySequence(Qt.Key.Key_Return), self._table, self._open_dossier)
+        QShortcut(QKeySequence(Qt.Key.Key_Enter), self._table, self._open_dossier)
         QShortcut(QKeySequence(Qt.Key.Key_F2), self._table, self._edit_current)
 
     def showEvent(self, event: QShowEvent) -> None:
@@ -446,19 +451,32 @@ class PersonnelListView(QWidget):
         self._populate_structural_combos()
         self._apply_filter()
 
+    def apply_runtime_after_config_change(self) -> None:
+        """Après enregistrement des chemins : recharge la liste et les subdivisions affichées."""
+        try:
+            rows = self._service.liste_complete()
+        except OSError as e:
+            QMessageBox.warning(self, "Configuration", str(e))
+            return
+        except Exception as e:
+            QMessageBox.warning(self, "Configuration", str(e))
+            return
+        self._model.set_subdivision_flat(self._referentiel.subdivisions_flat())
+        self._apply_loaded_rows(rows)
+
     def _refresh_all(self, *, silent: bool = False) -> None:
         if not silent:
             if not confirm_yes_no(
                 self,
                 "Actualiser",
-                "Recharger la liste générale complète depuis la base Access ?",
+                "Recharger la liste générale complète depuis la base configurée ?",
                 default_no=False,
             ):
                 return
         rows = run_with_progress(
             self,
             "Liste générale",
-            "Chargement depuis la base Access…",
+            "Chargement depuis la base…",
             self._service.liste_complete,
         )
         if rows is None:
@@ -569,6 +587,22 @@ class PersonnelListView(QWidget):
             return None
         return self._model.row_at(src.row())
 
+    def _open_dossier(self) -> None:
+        row_obj = self._current_row_object()
+        if row_obj is None:
+            QMessageBox.information(self, "Personnel", "Sélectionnez une ligne.")
+            return
+        fresh = self._service.get_by_id(row_obj.id)
+        if fresh is None:
+            QMessageBox.warning(
+                self,
+                "Personnel",
+                "Ligne introuvable en base (identifiant peut-être obsolète). Actualisez la liste.",
+            )
+            return
+        PersonnelDossierDialog(self, fresh, self._referentiel, self._service).exec()
+        self._refresh_all(silent=True)
+
     def _edit_current(self) -> None:
         row_obj = self._current_row_object()
         if row_obj is None:
@@ -604,6 +638,7 @@ class PersonnelListView(QWidget):
         menu.addAction("Tout afficher (liste complète)", self._show_all)
         menu.addAction("Présents seulement", self._show_presents)
         menu.addSeparator()
+        menu.addAction("Fiche dossier…", self._open_dossier)
         menu.addAction("Modifier…", self._edit_current)
         menu.addAction("Exporter CSV…", self._export_csv)
         menu.addSeparator()

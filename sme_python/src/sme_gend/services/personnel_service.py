@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from sme_gend.config.settings import Settings
+from sme_gend.config.sme_context import mois_actif_courant
 from sme_gend.models.liste_generale import ListeGeneraleRow
 from sme_gend.repositories.grade_repository import GradeRepository
 from sme_gend.repositories.liste_generale_repository import ListeGeneraleRepository
@@ -14,6 +15,13 @@ class PersonnelService:
     """Service principal : liste du personnel (lecture et mise à jour)."""
 
     def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._repo = ListeGeneraleRepository(settings)
+        self._grades = GradeRepository(settings)
+
+    def rebind_settings(self, settings: Settings) -> None:
+        """Recrée les dépôts après changement de chemins (sans redémarrage)."""
+        self._settings = settings
         self._repo = ListeGeneraleRepository(settings)
         self._grades = GradeRepository(settings)
 
@@ -37,10 +45,12 @@ class PersonnelService:
         if not changes:
             return
         self._repo.update_row(after)
+        ctx = (mois_actif_courant() or "").strip() or None
         audit_log.append_personnel_audit(
             action="update",
             personnel_id=after.id,
             changes=changes,
             snapshot_before=audit_log.row_to_audit_dict(before),
             snapshot_after=audit_log.row_to_audit_dict(after),
+            sme_mois_context=ctx,
         )

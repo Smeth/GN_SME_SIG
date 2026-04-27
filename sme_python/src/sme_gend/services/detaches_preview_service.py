@@ -29,6 +29,10 @@ class DetachesPreviewService:
         self._settings = settings
         self._svc = DetachesService(settings)
 
+    def rebind_settings(self, settings: Settings) -> None:
+        self._settings = settings
+        self._svc = DetachesService(settings)
+
     def build_html(self) -> str:
         rows = self._svc.fetch_detaches()
         tpl = self._settings.template_detaches_path
@@ -40,10 +44,10 @@ class DetachesPreviewService:
             "<!DOCTYPE html><html><head><meta charset='utf-8'><style>",
             _CSS,
             "</style></head><body>",
-            "<h2>Détachés — liste issue de la base Access</h2>",
+            "<h2>Détachés — liste issue de la base configurée</h2>",
             "<p class='meta'>Critère : <b>position administrative</b> = « Détaché » (aligné situation numérique). "
             "Le <b>sigle / initiale de structure</b> affiché correspond à la colonne <b>subdivision arme</b> "
-            "(Access).</p>",
+            "(SQLite ou Access selon le mode).</p>",
         ]
 
         if n_off is not None and n_off != n_acc:

@@ -1,0 +1,50 @@
+"""Indices de la QStackedWidget principale — doivent rester alignés sur ShellWindow.register_page."""
+
+from __future__ import annotations
+
+# Ordre strict = ordre d’appel à register_page dans shell_window.py
+PAGE_DASHBOARD = 0
+PAGE_LISTE_GENERALE = 1
+PAGE_LAYOUT_EDITOR = 2
+PAGE_LISTE_PRESENTS = 3
+PAGE_DETACHES = 4
+PAGE_STRUCTURES = 5
+PAGE_GRADES = 6
+PAGE_FONCTIONS = 7
+PAGE_DETACHES_CONFIG = 8
+PAGE_NUMERIQUE_MATRICE = 9
+PAGE_NUMERIQUE_INDISPO = 10
+PAGE_NUMERIQUE_SATELLITE = 11
+PAGE_ARCHIVES_CLOSURE = 12
+PAGE_SETTINGS = 13
+
+PAGE_COUNT = 14
+
+# Séparateurs du menu Navigation (avant ces entrées)
+NAV_MENU_SEPARATOR_BEFORE: frozenset[int] = frozenset(
+    {
+        PAGE_NUMERIQUE_MATRICE,
+        PAGE_NUMERIQUE_SATELLITE,
+        PAGE_ARCHIVES_CLOSURE,
+        PAGE_SETTINGS,
+    }
+)
+
+__all__ = [
+    "NAV_MENU_SEPARATOR_BEFORE",
+    "PAGE_ARCHIVES_CLOSURE",
+    "PAGE_COUNT",
+    "PAGE_DASHBOARD",
+    "PAGE_DETACHES",
+    "PAGE_DETACHES_CONFIG",
+    "PAGE_FONCTIONS",
+    "PAGE_GRADES",
+    "PAGE_LAYOUT_EDITOR",
+    "PAGE_LISTE_GENERALE",
+    "PAGE_LISTE_PRESENTS",
+    "PAGE_NUMERIQUE_INDISPO",
+    "PAGE_NUMERIQUE_MATRICE",
+    "PAGE_NUMERIQUE_SATELLITE",
+    "PAGE_SETTINGS",
+    "PAGE_STRUCTURES",
+]

@@ -18,6 +18,7 @@ sme-gend = "sme_gend.__main__:main"
 
 [project.optional-dependencies]
 build = ["pyinstaller>=6.0"]
+dev = ["pytest>=7.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

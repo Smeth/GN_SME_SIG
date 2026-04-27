@@ -261,6 +261,9 @@ class StructuresView(QWidget):
         self._pairs_panel.reload()
         self._hierarchy_panel.reload()
 
+    def apply_runtime_after_config_change(self) -> None:
+        self.reload()
+
     def _reload_main_table(self) -> None:
         try:
             self._rows = self._service.structures()
@@ -366,7 +369,7 @@ class SubdivisionsView(_RefBase):
         super().__init__(service, parent)
         self._flat_rows: list[SubdivisionFlatRow] = []
         self._hint.setText(
-            "Référentiel <b>Secun → Secdeux → Sectrois</b> (jointure Access). Lecture seule. "
+            "Référentiel <b>Secun → Secdeux → Sectrois</b> (SQLite ou Access selon le mode). Lecture seule. "
             "<b>Double-clic</b> : détail. L’édition des tables pourra être ajoutée ultérieurement."
         )
         self._table.doubleClicked.connect(self._on_double_click)
@@ -465,6 +468,9 @@ class GradesView(QWidget):
         ]
         self._model.set_data(["Code", "Grade", "Préf. ordre", "Effectif"], data)
 
+    def apply_runtime_after_config_change(self) -> None:
+        self.reload()
+
     def _selected_row(self) -> int:
         idx = self._table.selectionModel().currentIndex()
         return idx.row()
@@ -559,6 +565,9 @@ class FonctionsView(_RefBase):
         self._fnames = list(fns)
         data = [[f] for f in fns]
         self._model.set_data(["Fonction"], data)
+
+    def apply_runtime_after_config_change(self) -> None:
+        self.reload()
 
     def _on_double_click(self) -> None:
         idx = self._table.selectionModel().currentIndex()

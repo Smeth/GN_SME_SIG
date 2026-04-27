@@ -38,8 +38,9 @@ def main() -> int:
             box.setWindowTitle("Base de données")
             box.setText(str(e))
             box.setInformativeText(
-                "Vous pouvez indiquer le chemin du fichier Access (y compris un partage réseau) "
-                "via le bouton ci‑dessous. Les variables SMEDB_PATH / SME_TEMPLATE_PATH restent prioritaires."
+                "Vous pouvez activer le <b>mode SQLite</b> (données principales dans le .sqlite) et n’utiliser "
+                "Access que pour l’import, ou indiquer le chemin du .mdb (réseau possible). "
+                "Les variables d’environnement (SMEDB_PATH, SME_SQLITE_LISTE_PATH, …) restent prioritaires."
             )
             btn_cfg = box.addButton(
                 "Configurer le chemin…",

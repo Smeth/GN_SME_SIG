@@ -1,56 +1,28 @@
-"""Lecture hiérarchie subdivisions (Secun / Secdeux / Sectrois)."""
+"""Hiérarchie subdivisions : Access ou SQLite."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Sequence
-
 from sme_gend.config.settings import Settings
-from sme_gend.repositories.access_connection import AccessConnection
+from sme_gend.models.subdivision_flat import SubdivisionFlatRow
+from sme_gend.repositories.subdivision_access_repository import AccessSubdivisionRepository
+from sme_gend.repositories.subdivision_sqlite_repository import SqliteSubdivisionRepository
 
-# Jointure : niveau 1 (U) → 2 (D) → 3 (T)
-SQL_FLAT = """
-SELECT
-    u.CodeU,
-    u.SecuDesign,
-    d.CodeD,
-    d.SecdDesign,
-    t.CodeT,
-    t.SectDesign
-FROM (TabSecun AS u
-INNER JOIN TabSecdeux AS d ON u.CodeU = d.CodeU)
-INNER JOIN TabSectrois AS t ON d.CodeD = t.CodeD
-ORDER BY u.CodeU, d.PriOutD, d.CodeD, t.PriOutT, t.CodeT
-"""
-
-
-@dataclass(slots=True)
-class SubdivisionFlatRow:
-    code_u: str
-    design_u: str
-    code_d: str
-    design_d: str
-    code_t: str
-    design_t: str
-
-    @classmethod
-    def from_sequence(cls, row: Sequence[Any]) -> SubdivisionFlatRow:
-        return cls(
-            code_u=str(row[0] or "").strip(),
-            design_u=str(row[1] or "").strip(),
-            code_d=str(row[2] or "").strip(),
-            design_d=str(row[3] or "").strip(),
-            code_t=str(row[4] or "").strip(),
-            design_t=str(row[5] or "").strip(),
-        )
+__all__ = [
+    "SubdivisionRepository",
+    "SubdivisionFlatRow",
+    "AccessSubdivisionRepository",
+    "SqliteSubdivisionRepository",
+]
 
 
 class SubdivisionRepository:
     def __init__(self, settings: Settings) -> None:
-        self._conn = AccessConnection(settings)
+        if settings.use_sqlite_liste_generale:
+            self._impl: AccessSubdivisionRepository | SqliteSubdivisionRepository = (
+                SqliteSubdivisionRepository(settings)
+            )
+        else:
+            self._impl = AccessSubdivisionRepository(settings)
 
     def fetch_flat_hierarchy(self) -> list[SubdivisionFlatRow]:
-        with self._conn.connect() as conn:
-            cur = conn.cursor()
-            cur.execute(SQL_FLAT)
-            return [SubdivisionFlatRow.from_sequence(r) for r in cur.fetchall()]
+        return self._impl.fetch_flat_hierarchy()

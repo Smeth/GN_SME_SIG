@@ -23,6 +23,15 @@ class ReferentielService:
         self._grades = GradeRepository(settings)
         self._fonctions = FonctionsRepository(settings)
 
+    def rebind_settings(self, settings: Settings) -> None:
+        self._settings = settings
+        self._structures = StructureRepository(settings)
+        self._subdivisions = SubdivisionRepository(settings)
+        self._struct_sub = StructureSubdivisionRepository(settings)
+        self._liste_generale = ListeGeneraleRepository(settings)
+        self._grades = GradeRepository(settings)
+        self._fonctions = FonctionsRepository(settings)
+
     def structures(self) -> list[StructureRow]:
         return self._structures.fetch_all()
 

@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from sme_gend import __version__
+from sme_gend.config import get_settings
 from sme_gend.config.settings import Settings
 from sme_gend.services.dashboard_service import DashboardService
 from sme_gend.services.layout_config_service import LayoutConfigService
@@ -44,6 +45,26 @@ from sme_gend.ui.views.numerique_matrice_view import NumeriqueMatriceView
 from sme_gend.ui.views.numerique_satellite_view import NumeriqueSatelliteView
 from sme_gend.ui.views.personnel_list_view import PersonnelListView
 from sme_gend.ui.views.referentiel_views import FonctionsView, GradesView, StructuresView
+from sme_gend.ui.navigation_pages import (
+    NAV_MENU_SEPARATOR_BEFORE,
+    PAGE_COUNT,
+    PAGE_DASHBOARD,
+    PAGE_ARCHIVES_CLOSURE,
+    PAGE_DETACHES,
+    PAGE_FONCTIONS,
+    PAGE_GRADES,
+    PAGE_LAYOUT_EDITOR,
+    PAGE_LISTE_GENERALE,
+    PAGE_LISTE_PRESENTS,
+    PAGE_NUMERIQUE_INDISPO,
+    PAGE_NUMERIQUE_MATRICE,
+    PAGE_NUMERIQUE_SATELLITE,
+    PAGE_SETTINGS,
+    PAGE_STRUCTURES,
+    PAGE_DETACHES_CONFIG,
+)
+from sme_gend.ui.views.archives_view import ArchivesView
+from sme_gend.ui.views.settings_view import SettingsView
 
 # Données utilisateur sur QTreeWidgetItem : indice pile (-1 = dossier non navigable)
 _ROLE_STACK = Qt.ItemDataRole.UserRole
@@ -68,6 +89,15 @@ class ShellWindow(QMainWindow):
         detaches_cfg: DetachesConfigService,
     ) -> None:
         super().__init__()
+        self._personnel = personnel
+        self._referentiel = referentiel
+        self._liste_present = liste_present
+        self._layout_cfg = layout_cfg
+        self._dashboard = dashboard
+        self._numerique_preview = numerique_preview
+        self._detaches_preview = detaches_preview
+        self._detaches_cfg = detaches_cfg
+
         self.setWindowTitle("SME — Situation mensuelle des effectifs")
         self.resize(1400, 820)
         self.setMinimumSize(1024, 680)
@@ -112,6 +142,13 @@ class ShellWindow(QMainWindow):
             "Listes détail (situation num.)",
             NumeriqueSatelliteView(settings, numerique_preview),
         )
+        register_page("Archives clôture", ArchivesView())
+        register_page("Paramètres", SettingsView(settings))
+
+        assert self._stack.count() == PAGE_COUNT, (
+            f"navigation_pages.PAGE_COUNT={PAGE_COUNT} != pile={self._stack.count()} "
+            "(mettre à jour navigation_pages si l’ordre des pages change)."
+        )
 
         # Icônes réelles (register_page a mis des QIcon() vides pour index 0)
         icons: list[QIcon] = [
@@ -141,6 +178,15 @@ class ShellWindow(QMainWindow):
                 ),
             ),
             _std_icon(style, QStyle.StandardPixmap.SP_FileDialogListView),
+            _std_icon(style, QStyle.StandardPixmap.SP_DirLinkIcon),
+            _std_icon(
+                style,
+                getattr(
+                    QStyle.StandardPixmap,
+                    "SP_FileDialogDetailedView",
+                    QStyle.StandardPixmap.SP_FileDialogInfoView,
+                ),
+            ),
         ]
 
         self._nav = QTreeWidget()
@@ -179,15 +225,16 @@ class ShellWindow(QMainWindow):
             it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             return it
 
-        add_leaf(None, "Tableau de bord", 0)
+        nl = self._nav_labels
+        add_leaf(None, nl[PAGE_DASHBOARD], PAGE_DASHBOARD)
 
         f_eff = add_folder(
             "Effectifs & listes",
             _std_icon(style, QStyle.StandardPixmap.SP_FileDialogNewFolder),
         )
-        add_leaf(f_eff, "Liste générale", 1)
-        add_leaf(f_eff, "Mise en page liste", 2)
-        add_leaf(f_eff, "Liste des présents", 3)
+        add_leaf(f_eff, nl[PAGE_LISTE_GENERALE], PAGE_LISTE_GENERALE)
+        add_leaf(f_eff, nl[PAGE_LAYOUT_EDITOR], PAGE_LAYOUT_EDITOR)
+        add_leaf(f_eff, nl[PAGE_LISTE_PRESENTS], PAGE_LISTE_PRESENTS)
 
         f_det = add_folder(
             "Détachés",
@@ -196,28 +243,31 @@ class ShellWindow(QMainWindow):
                 getattr(QStyle.StandardPixmap, "SP_DriveNetIcon", QStyle.StandardPixmap.SP_DirIcon),
             ),
         )
-        add_leaf(f_det, "Liste & export", 4)
+        add_leaf(f_det, "Liste & export", PAGE_DETACHES)
 
         f_num = add_folder(
             "Situation numérique",
             _std_icon(style, QStyle.StandardPixmap.SP_FileDialogInfoView),
         )
-        add_leaf(f_num, "Matrice (effectifs)", 9)
-        add_leaf(f_num, "Indispo par structure", 10)
-        add_leaf(f_num, "Listes détail (situation num.)", 11)
+        add_leaf(f_num, nl[PAGE_NUMERIQUE_MATRICE], PAGE_NUMERIQUE_MATRICE)
+        add_leaf(f_num, nl[PAGE_NUMERIQUE_INDISPO], PAGE_NUMERIQUE_INDISPO)
+        add_leaf(f_num, nl[PAGE_NUMERIQUE_SATELLITE], PAGE_NUMERIQUE_SATELLITE)
 
         f_ref = add_folder(
             "Référentiels",
             _std_icon(style, QStyle.StandardPixmap.SP_DialogOpenButton),
         )
-        add_leaf(f_ref, "Structures", 5)
-        add_leaf(f_ref, "Grades", 6)
-        add_leaf(f_ref, "Fonctions", 7)
-        add_leaf(f_ref, "Config. fichier DETACHES", 8)
+        add_leaf(f_ref, nl[PAGE_STRUCTURES], PAGE_STRUCTURES)
+        add_leaf(f_ref, nl[PAGE_GRADES], PAGE_GRADES)
+        add_leaf(f_ref, nl[PAGE_FONCTIONS], PAGE_FONCTIONS)
+        add_leaf(f_ref, nl[PAGE_DETACHES_CONFIG], PAGE_DETACHES_CONFIG)
+
+        add_leaf(None, nl[PAGE_ARCHIVES_CLOSURE], PAGE_ARCHIVES_CLOSURE)
+        add_leaf(None, nl[PAGE_SETTINGS], PAGE_SETTINGS)
 
         self._nav.itemClicked.connect(self._on_nav_item_clicked)
-        self._nav.setCurrentItem(self._page_to_item[0])
-        self._stack.setCurrentIndex(0)
+        self._nav.setCurrentItem(self._page_to_item[PAGE_DASHBOARD])
+        self._stack.setCurrentIndex(PAGE_DASHBOARD)
 
         # F1 / aide : QShortcut plus fiable que QAction seul sous Windows (conflits menu / focus)
         self._shortcut_about = QShortcut(QKeySequence("F1"), self)
@@ -332,15 +382,15 @@ class ShellWindow(QMainWindow):
 
         status = QStatusBar()
         self.setStatusBar(status)
-        db = str(settings.database_path)
         status.showMessage("Prêt")
-        status.addPermanentWidget(QLabel(f"Base : {db}"))
+        self._status_data_lbl = QLabel()
+        self._refresh_data_status_label()
+        status.addPermanentWidget(self._status_data_lbl)
 
-        # « Mise en page liste » = index 2 (voir ordre register_page ci-dessus)
         for i in range(self._stack.count()):
             w = self._stack.widget(i)
             if isinstance(w, ListePresentView):
-                w.set_open_layout_editor(lambda: self._go_page(2))
+                w.set_open_layout_editor(lambda: self._go_page(PAGE_LAYOUT_EDITOR))
                 break
 
     def _on_nav_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
@@ -374,8 +424,8 @@ class ShellWindow(QMainWindow):
         m_file = bar.addMenu("&Fichier")
         act_paths = QAction("Chemins des fichiers de données…", self)
         act_paths.setToolTip(
-            "Base Access et maquette Excel (chemins locaux ou réseau UNC). "
-            "Enregistrés dans le profil utilisateur ; redémarrage nécessaire."
+            "SQLite (données principales), Access (import depuis l’ancien .mdb), modèles Excel, "
+            "archives, médias. Enregistrement dans le profil : rechargement immédiat de l’application."
         )
         act_paths.triggered.connect(self._open_paths_config)
         m_file.addAction(act_paths)
@@ -396,22 +446,8 @@ class ShellWindow(QMainWindow):
         m_view.addAction(act_sidebar)
 
         m_nav = bar.addMenu("&Navigation")
-        nav_entries = [
-            "Tableau de bord",
-            "Liste générale",
-            "Mise en page liste",
-            "Liste des présents",
-            "Détachés",
-            "Structures",
-            "Grades",
-            "Fonctions",
-            "Config. fichier DETACHES",
-            "Matrice (situation numérique)",
-            "Indispo par structure",
-            "Listes détail (situation num.)",
-        ]
-        for idx, label in enumerate(nav_entries):
-            if idx in (9, 11):
+        for idx, label in enumerate(self._nav_labels):
+            if idx in NAV_MENU_SEPARATOR_BEFORE:
                 m_nav.addSeparator()
             act = QAction(label, self)
             act.triggered.connect(lambda checked=False, i=idx: self._go_page(i))
@@ -431,17 +467,85 @@ class ShellWindow(QMainWindow):
         dlg = ConfigPathsDialog(self, self._settings)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        QMessageBox.information(
-            self,
-            "Chemins enregistrés",
-            "Redémarrez l’application pour appliquer les nouveaux chemins "
-            "(base Access, maquettes Excel).",
-        )
+        self.reload_runtime_configuration(show_success_dialog=True)
+
+    def _refresh_data_status_label(self) -> None:
+        s = self._settings
+        if s.use_sqlite_liste_generale:
+            sql = str(s.sqlite_liste_path) if s.sqlite_liste_path else "—"
+            acc = str(s.database_path)
+            txt = f"Données : SQLite — {sql} · Access (import) : {acc}"
+        else:
+            txt = f"Données : Access (exploitation) — {s.database_path}"
+        self._status_data_lbl.setText(txt)
+
+    def reload_runtime_configuration(self, *, show_success_dialog: bool = False) -> bool:
+        """Recharge chemins, services et vues après mise à jour de paths.json (sans redémarrage)."""
+        from PySide6.QtWidgets import QMessageBox
+
+        try:
+            new_settings = get_settings()
+        except FileNotFoundError as e:
+            QMessageBox.critical(
+                self,
+                "Configuration",
+                str(e),
+            )
+            return False
+        self._detaches_cfg.rebind_settings(new_settings)
+        self._layout_cfg.rebind_settings(new_settings)
+        self._referentiel.rebind_settings(new_settings)
+        self._personnel.rebind_settings(new_settings)
+        self._liste_present.rebind_settings(new_settings)
+        self._dashboard.rebind_settings(new_settings)
+        self._numerique_preview.rebind_settings(new_settings)
+        self._detaches_preview.rebind_settings(new_settings)
+        self._settings = new_settings
+        self._refresh_data_status_label()
+        self._propagate_runtime_settings_to_views()
+        self._refresh_dashboard_if_visible()
+        if show_success_dialog:
+            QMessageBox.information(
+                self,
+                "Configuration appliquée",
+                "Les chemins et le mode de données ont été rechargés. Les écrans utilisent "
+                "désormais la nouvelle configuration.",
+            )
+        return True
+
+    def _propagate_runtime_settings_to_views(self) -> None:
+        from sme_gend.ui.views.detaches_view import DetachesView
+        from sme_gend.ui.views.home_view import HomeView
+        from sme_gend.ui.views.liste_present_view import ListePresentView
+        from sme_gend.ui.views.numerique_indispo_view import NumeriqueIndispoView
+        from sme_gend.ui.views.numerique_matrice_view import NumeriqueMatriceView
+        from sme_gend.ui.views.numerique_satellite_view import NumeriqueSatelliteView
+        from sme_gend.ui.views.personnel_list_view import PersonnelListView
+        from sme_gend.ui.views.referentiel_views import FonctionsView, GradesView, StructuresView
+        from sme_gend.ui.views.settings_view import SettingsView
+
+        s = self._settings
+        for i in range(self._stack.count()):
+            w = self._stack.widget(i)
+            if isinstance(w, HomeView):
+                w.apply_runtime_settings(s)
+            elif isinstance(w, PersonnelListView):
+                w.apply_runtime_after_config_change()
+            elif isinstance(w, ListePresentView):
+                w.apply_runtime_after_config_change()
+            elif isinstance(w, DetachesView):
+                w.apply_runtime_settings(s)
+            elif isinstance(w, (NumeriqueMatriceView, NumeriqueIndispoView, NumeriqueSatelliteView)):
+                w.apply_runtime_settings(s)
+            elif isinstance(w, (StructuresView, GradesView, FonctionsView)):
+                w.apply_runtime_after_config_change()
+            elif isinstance(w, SettingsView):
+                w.apply_runtime_settings(s)
 
     def _refresh_dashboard_if_visible(self) -> None:
-        if self._stack.currentIndex() != 0:
+        if self._stack.currentIndex() != PAGE_DASHBOARD:
             return
-        w = self._stack.widget(0)
+        w = self._stack.widget(PAGE_DASHBOARD)
         if hasattr(w, "_reload_stats"):
             w._reload_stats()
             self.statusBar().showMessage("Indicateurs actualisés.", 3000)

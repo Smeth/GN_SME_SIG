@@ -35,6 +35,17 @@
 - **Grades** : `TabGrade` (`CodeG`, `Grade`, `PrefOrd`).
 - **SME mensuel** : `TabSme` (`Codsme`, `mois`, `Statut`) — écran dédié à venir.
 
+## Mode SQLite (données locales)
+
+Lorsque l’option **SQLite** est activée (menu *Chemins des fichiers de données*), le fichier `.sqlite` contient en plus de `liste_generale` les tables **référentielles** (`tab_structure`, `tab_grade`, `tab_secun` / `tab_secdeux` / `tab_sectrois`), **TabSme** et les **tables satellites** de la situation numérique (`tab_mission`, `tab_malade`, etc.). L’import **bundle complet** depuis Access remplit ou met à jour ces tables ; la base Access reste le **master** pour l’import et pour tout objet non encore copié.
+
+Variables utiles : `SME_SQLITE_LISTE_PATH`, `SME_USE_SQLITE_LISTE`. L’audit JSONL enregistre les imports et les changements d’option SQLite.
+
+### Piste A — clôture mensuelle (implémentée)
+
+- **Mois actif** : `sme_context.json` ; les modifications de fiches portent `sme_mois_context` dans `personnel_audit.jsonl`.
+- **Clôture** : copies horodatées dans `%LOCALAPPDATA%\SME_Gendarmerie\sme_archives\` (bundle `.sqlite` + JSON mise en page liste si disponibles) ; **TabSme** : lignes du mois clôturé → statut *Fermé*, mois suivant → *Ouvert* (insertion `SME-YYYYMM` si aucune ligne ne correspond au mois suivant mais `YYYY-MM` est déductible) ; audit `sme_month_closure_piste_a`.
+
 ## Liste des présents — export Excel
 
 - **Maquette** : `resultat.xlsx` (feuille `Liste`, lignes 1–3 = en-tête document, lignes 4–6 = styles de section / sous-section / données).

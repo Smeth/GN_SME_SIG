@@ -1,24 +1,26 @@
-"""Valeurs distinctes de fonction (pas de table dédiée dans l'extrait)."""
+"""Fonctions distinctes : Access ou SQLite."""
 
 from __future__ import annotations
 
 from sme_gend.config.settings import Settings
-from sme_gend.repositories.access_connection import AccessConnection
+from sme_gend.repositories.fonctions_access_repository import AccessFonctionsRepository
+from sme_gend.repositories.fonctions_sqlite_repository import SqliteFonctionsRepository
 
-SQL = """
-SELECT DISTINCT Fonction
-FROM ListeGenerale
-WHERE Fonction IS NOT NULL AND Fonction <> ''
-ORDER BY Fonction
-"""
+__all__ = [
+    "FonctionsRepository",
+    "AccessFonctionsRepository",
+    "SqliteFonctionsRepository",
+]
 
 
 class FonctionsRepository:
     def __init__(self, settings: Settings) -> None:
-        self._conn = AccessConnection(settings)
+        if settings.use_sqlite_liste_generale:
+            self._impl: AccessFonctionsRepository | SqliteFonctionsRepository = (
+                SqliteFonctionsRepository(settings)
+            )
+        else:
+            self._impl = AccessFonctionsRepository(settings)
 
     def fetch_distinct(self) -> list[str]:
-        with self._conn.connect() as conn:
-            cur = conn.cursor()
-            cur.execute(SQL)
-            return [str(r[0]).strip() for r in cur.fetchall() if r[0]]
+        return self._impl.fetch_distinct()

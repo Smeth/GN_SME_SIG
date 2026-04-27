@@ -36,4 +36,10 @@ Prérequis Windows
 Notes
 -----
 - Le fichier personnel_audit.jsonl est créé dans data\ lors des modifications (audit).
+- Mode SQLite (option) : menu Fichier → chemins — cocher la case SQLite,
+  fichier type data\liste_generale.sqlite, bouton « Importer Access → SQLite (bundle complet) »
+  (liste + référentiels + TabSme + tables satellites numériques).
+  Variables d’environnement possibles : SME_SQLITE_LISTE_PATH (fichier .sqlite),
+  SME_USE_SQLITE_LISTE=1 ou 0 pour forcer le mode liste (sans ouvrir le dialogue).
+  Les référentiels (structures, grades, etc.) restent lus dans Access tant qu’ils ne sont pas migrés.
 - En cas de message d’erreur au démarrage, vérifiez le chemin de la base et ODBC.

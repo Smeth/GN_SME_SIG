@@ -246,6 +246,13 @@ class DashboardService:
         self._grades = GradeRepository(settings)
         self._sme = SmeRepository(settings)
 
+    def rebind_settings(self, settings: Settings) -> None:
+        self._settings = settings
+        self._liste = ListeGeneraleRepository(settings)
+        self._structures = StructureRepository(settings)
+        self._grades = GradeRepository(settings)
+        self._sme = SmeRepository(settings)
+
     def snapshot(self) -> DashboardSnapshot:
         rows = self._liste.fetch_all()
         total = len(rows)

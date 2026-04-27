@@ -22,6 +22,9 @@ pip install -e .
 | **smegend.mdb** | `sme_python/data/` | `SMEDB_PATH` |
 | **resultat.xlsx** (maquette liste présents) | `data/` ou dossier **Impression** | `SME_TEMPLATE_PATH` |
 | **numerique.xlsx** (situation numérique) | `data/templates/` ou **Impression** | `SME_NUMERIQUE_TEMPLATE_PATH` |
+| **Bundle SQLite** (option) | `data/liste_generale.sqlite` (ou autre) | `SME_SQLITE_LISTE_PATH`, `SME_USE_SQLITE_LISTE` |
+
+En **mode SQLite**, le fichier `.sqlite` regroupe la liste générale, les référentiels (structures, grades, subdivisions), `TabSme` et les tables satellites (mission, malade, …). Utilisez *Fichier → Chemins…* puis **Importer Access → SQLite (bundle complet)**. Un redémarrage est nécessaire après changement des chemins.
 
 Ordre **base** : `SMEDB_PATH` → fichier enregistré dans le menu **Fichier → Chemins des fichiers de données…** (`%LOCALAPPDATA%\SME_Gendarmerie\paths.json`) → `data/smegend.mdb` → `Impression/smegend.mdb`.
 
@@ -45,8 +48,16 @@ ou `sme-gend` si le dossier Scripts est dans le `PATH`.
 - **Structures** : `TabStructure`, couples (structure ↔ SubArme) liste générale, hiérarchie Secun→Secdeux→Sectrois ; **Grades**, **Fonctions**
 - **Liste des présents** : aperçu HTML + export Excel **fidèle à la maquette** (styles copiés depuis `resultat.xlsx`, feuille `Liste_SME`)
 - **Situation numérique** (menu latéral dédié) : aperçus HTML **Matrice** et **Indispo par structure** (données Access), export Excel complet (`numerique.xlsx`)
+- **Clôture mensuelle SME (Piste A)** : sur l’accueil, *Clôturer ce mois et passer au suivant* enregistre des copies dans `%LOCALAPPDATA%\SME_Gendarmerie\sme_archives\` (fichier SQLite bundle et `liste_present_layout.json` si présents), met à jour **TabSme** (Fermé / Ouvert), `sme_context.json` et une ligne d’audit `sme_month_closure_piste_a`.
 
 Voir **`docs/PLAN_SME.md`** pour la feuille de route.
+
+## Tests (développement)
+
+```powershell
+pip install -e ".[dev]"
+python -m pytest tests/
+```
 
 ## Structure du projet
 

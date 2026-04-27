@@ -296,7 +296,7 @@ def fill_mission_sheet(
     data_cols = 8
     for i, row in enumerate(filt):
         r = SATELLITE_DATA_START + i
-        d = missions.get(row.id)
+        d = missions.get(row.satellite_join_key())
         ws.cell(row=r, column=1, value=i + 1)
         ws.cell(row=r, column=2, value=row.grade)
         ws.cell(row=r, column=3, value=row.noms)
@@ -331,7 +331,7 @@ def fill_malade_sheet(
     max_gc = max((c for _, c in grade_cols), default=data_cols)
     for i, row in enumerate(filt):
         r = SATELLITE_DATA_START + i
-        d = malades.get(row.id)
+        d = malades.get(row.satellite_join_key())
         ws.cell(row=r, column=1, value=i + 1)
         ws.cell(row=r, column=2, value=row.grade)
         ws.cell(row=r, column=3, value=row.noms)
@@ -365,7 +365,7 @@ def fill_deserteur_sheet(
     max_gc = max((c for _, c in grade_cols), default=data_cols)
     for i, row in enumerate(filt):
         r = SATELLITE_DATA_START + i
-        d = deserteurs.get(row.id)
+        d = deserteurs.get(row.satellite_join_key())
         ws.cell(row=r, column=1, value=i + 1)
         ws.cell(row=r, column=2, value=row.grade)
         ws.cell(row=r, column=3, value=row.noms)
@@ -396,7 +396,7 @@ def fill_stage_loc_sheet(
     max_gc = max((c for _, c in grade_cols), default=data_cols)
     for i, row in enumerate(filt):
         r = SATELLITE_DATA_START + i
-        d = stages.get(row.id)
+        d = stages.get(row.satellite_join_key())
         ws.cell(row=r, column=1, value=i + 1)
         ws.cell(row=r, column=2, value=row.grade)
         ws.cell(row=r, column=3, value=row.noms)
@@ -430,7 +430,7 @@ def fill_stage_ext_sheet(
     max_gc = max((c for _, c in grade_cols), default=data_cols)
     for i, row in enumerate(filt):
         r = SATELLITE_DATA_START + i
-        d = stages.get(row.id)
+        d = stages.get(row.satellite_join_key())
         ws.cell(row=r, column=1, value=i + 1)
         ws.cell(row=r, column=2, value=row.grade)
         ws.cell(row=r, column=3, value=row.noms)

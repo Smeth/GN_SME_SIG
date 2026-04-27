@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 
 from PySide6.QtCharts import (
@@ -16,17 +17,24 @@ from PySide6.QtCharts import (
     QPieSeries,
     QValueAxis,
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont, QPainter
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QPainter
 from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
     QFrame,
     QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSpinBox,
     QStyle,
     QTableWidget,
     QTableWidgetItem,
@@ -35,6 +43,13 @@ from PySide6.QtWidgets import (
 )
 
 from sme_gend.config.settings import Settings, liste_layout_config_path
+from sme_gend.ui.navigation_pages import PAGE_ARCHIVES_CLOSURE, PAGE_STRUCTURES
+from sme_gend.config.sme_context import load_sme_context, save_sme_context
+from sme_gend.services.sme_month_closure import (
+    extract_yyyy_mm,
+    run_piste_a_month_closure,
+    sme_archives_dir,
+)
 from sme_gend.services.dashboard_service import (
     DashboardKpiCard,
     DashboardService,
@@ -42,6 +57,71 @@ from sme_gend.services.dashboard_service import (
 )
 from sme_gend.ui.bg_task import run_with_progress
 from sme_gend.ui.confirm_dialogs import confirm_yes_no
+
+_SME_MONTHS_FR = (
+    "Janvier",
+    "Février",
+    "Mars",
+    "Avril",
+    "Mai",
+    "Juin",
+    "Juillet",
+    "Août",
+    "Septembre",
+    "Octobre",
+    "Novembre",
+    "Décembre",
+)
+
+
+def _sme_month_combo(*, for_dialog: bool = False) -> QComboBox:
+    cb = QComboBox()
+    cb.setObjectName("smePeriodComboDialog" if for_dialog else "smePeriodCombo")
+    for i, name in enumerate(_SME_MONTHS_FR, start=1):
+        cb.addItem(name, i)
+    cb.setMinimumWidth(170)
+    cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+    return cb
+
+
+def _sme_year_spin(*, for_dialog: bool = False) -> QSpinBox:
+    sp = QSpinBox()
+    sp.setObjectName("smePeriodYearSpinDialog" if for_dialog else "smePeriodYearSpin")
+    sp.setRange(2000, 2100)
+    sp.setValue(date.today().year)
+    sp.setMinimumWidth(96)
+    return sp
+
+
+def _widgets_to_ym(cb: QComboBox, sp: QSpinBox) -> str:
+    m = cb.currentData()
+    y = sp.value()
+    if m is None:
+        return ""
+    return f"{y:04d}-{int(m):02d}"
+
+
+def _ym_to_widgets(ym_hint: str, cb: QComboBox, sp: QSpinBox) -> None:
+    ym = extract_yyyy_mm(ym_hint)
+    if ym:
+        y_s, mo_s = ym.split("-")
+        sp.setValue(int(y_s))
+        cb.setCurrentIndex(int(mo_s) - 1)
+    else:
+        d = date.today()
+        sp.setValue(d.year)
+        cb.setCurrentIndex(d.month - 1)
+
+
+def _next_yyyy_mm(ym: str) -> str:
+    s = extract_yyyy_mm(ym)
+    if not s:
+        return ""
+    y, m = map(int, s.split("-"))
+    if m == 12:
+        return f"{y + 1:04d}-01"
+    return f"{y:04d}-{m + 1:02d}"
+
 
 _PALETTE = [
     "#1a237e",
@@ -400,6 +480,7 @@ class HomeView(QWidget):
         self._sme_frame = QFrame()
         self._sme_frame.setObjectName("dashSmeFrame")
         sme_outer = QVBoxLayout(self._sme_frame)
+        sme_outer.setSpacing(12)
         self._sme_hint = QLabel()
         self._sme_hint.setWordWrap(True)
         self._sme_hint.setObjectName("dashSubtitle")
@@ -412,9 +493,107 @@ class HomeView(QWidget):
         self._sme_trend_holder = QWidget()
         self._sme_trend_lay = QVBoxLayout(self._sme_trend_holder)
         self._sme_trend_lay.setContentsMargins(0, 0, 0, 0)
+
+        self._sme_workflow = QGroupBox("Mois en cours — contexte local")
+        self._sme_workflow.setObjectName("dashSmeWorkflow")
+        sw_lay = QVBoxLayout(self._sme_workflow)
+        sw_lay.setSpacing(10)
+        sw_hint = QLabel(
+            "Choisissez la <b>période SME</b> utilisée pour l’audit des fiches "
+            "(<code>sme_mois_context</code>). La <b>clôture</b> met à jour TabSme et archivera SQLite / "
+            "mise en page si configuré. Réglages des bases : page <b>Paramètres</b>."
+        )
+        sw_hint.setWordWrap(True)
+        sw_hint.setObjectName("dashSubtitle")
+        sw_lay.addWidget(sw_hint)
+
+        self._sme_month = _sme_month_combo()
+        self._sme_year = _sme_year_spin()
+        self._sme_preview = QLabel()
+        self._sme_preview.setObjectName("dashSubtitle")
+        self._sme_preview.setStyleSheet("color: #1a237e; font-weight: 600; font-size: 13px;")
+
+        self._sme_month.currentIndexChanged.connect(lambda: self._sync_sme_preview_label())
+        self._sme_year.valueChanged.connect(self._sync_sme_preview_label)
+
+        self._sme_jour = QSpinBox()
+        self._sme_jour.setObjectName("smePeriodDaySpin")
+        self._sme_jour.setRange(0, 31)
+        self._sme_jour.setSpecialValueText("—")
+        self._sme_jour.setValue(0)
+        self._sme_jour.setToolTip(
+            "Jour de clôture de référence (optionnel, fichier local uniquement)."
+        )
+
+        grid_my = QGridLayout()
+        grid_my.setHorizontalSpacing(14)
+        grid_my.setVerticalSpacing(8)
+        lab_m = QLabel("Mois")
+        lab_y = QLabel("Année")
+        lab_j = QLabel("Jour")
+        for lb in (lab_m, lab_y, lab_j):
+            lb.setStyleSheet("color: #424242; font-weight: 500;")
+        grid_my.addWidget(lab_m, 0, 0)
+        grid_my.addWidget(self._sme_month, 0, 1)
+        grid_my.addWidget(lab_y, 0, 2)
+        grid_my.addWidget(self._sme_year, 0, 3)
+        grid_my.addWidget(lab_j, 0, 4)
+        grid_my.addWidget(self._sme_jour, 0, 5)
+        grid_my.setColumnStretch(6, 1)
+        sw_lay.addLayout(grid_my)
+        sw_lay.addWidget(self._sme_preview)
+
+        sw_actions = QHBoxLayout()
+        sw_actions.setSpacing(10)
+        self._btn_sme_save = QPushButton("Enregistrer le mois actif")
+        self._btn_sme_save.clicked.connect(self._on_sme_save_mois)
+        self._btn_sme_close = QPushButton("Clôturer le mois…")
+        self._btn_sme_close.setToolTip(
+            "Archives locales, mise à jour TabSme (Fermé / Ouvert), nouveau mois actif."
+        )
+        self._btn_sme_close.clicked.connect(self._on_sme_cloture_dialog)
+        self._btn_sme_archives = QPushButton("Dossier archives…")
+        self._btn_sme_archives.setToolTip(
+            "Ouvre le dossier des copies (SQLite, JSON mise en page) dans l’explorateur. "
+            "Pour la liste détaillée : onglet « Archives clôture » dans la barre latérale."
+        )
+        self._btn_sme_archives.clicked.connect(self._on_open_sme_archives_dir)
+
+        self._btn_sme_archives_page = QPushButton("Onglet Archives…")
+        self._btn_sme_archives_page.setToolTip("Affiche la page Archives clôture (liste, ouverture des fichiers).")
+        self._btn_sme_archives_page.clicked.connect(self._on_go_archives_page)
+
+        sw_actions.addWidget(self._btn_sme_save)
+        sw_actions.addWidget(self._btn_sme_close)
+        sw_actions.addWidget(self._btn_sme_archives)
+        sw_actions.addWidget(self._btn_sme_archives_page)
+        sw_actions.addStretch()
+        sw_lay.addLayout(sw_actions)
+
+        self._sme_fermes_label = QLabel()
+        self._sme_fermes_label.setWordWrap(True)
+        self._sme_fermes_label.setObjectName("dashSubtitle")
+        sw_lay.addWidget(self._sme_fermes_label)
+
+        sme_outer.addWidget(self._sme_workflow)
+
+        sep_sme = QFrame()
+        sep_sme.setFrameShape(QFrame.Shape.HLine)
+        sep_sme.setFrameShadow(QFrame.Shadow.Sunken)
+        sep_sme.setStyleSheet("background: #e1e4e8; max-height: 2px; border: none;")
+        sme_outer.addWidget(sep_sme)
+
+        self._sme_tabsme_heading = QLabel(
+            "<b>Historique TabSme</b> — lu depuis la base (Access ou SQLite selon vos paramètres)",
+            textFormat=Qt.TextFormat.RichText,
+        )
+        self._sme_tabsme_heading.setObjectName("dashSubtitle")
+        sme_outer.addWidget(self._sme_tabsme_heading)
         sme_outer.addWidget(self._sme_hint)
         sme_outer.addWidget(self._sme_table)
         sme_outer.addWidget(self._sme_trend_holder)
+
+        self._refresh_sme_workflow_widgets()
 
         self._grid = QGridLayout()
         self._grid.setSpacing(16)
@@ -467,7 +646,7 @@ class HomeView(QWidget):
         pl.setSpacing(8)
         pl.addWidget(QLabel("<b>Raccourcis fichiers</b>", textFormat=Qt.TextFormat.RichText))
         self._path_labels: list[QLabel] = []
-        for _ in range(6):
+        for _ in range(7):
             lab = QLabel()
             lab.setObjectName("dashPathLabel")
             lab.setWordWrap(True)
@@ -480,6 +659,7 @@ class HomeView(QWidget):
         inner_lay.setSpacing(20)
         inner_lay.addLayout(head)
         inner_lay.addWidget(sub)
+
         inner_lay.addWidget(
             QLabel(
                 "<b>Indicateurs principaux</b> — effectifs et positions administratives "
@@ -528,7 +708,10 @@ class HomeView(QWidget):
         inner_lay.addWidget(self._grade_hint)
         inner_lay.addWidget(self._grade_table)
         inner_lay.addWidget(
-            QLabel("<b>SME — période mensuelle (TabSme)</b>", textFormat=Qt.TextFormat.RichText)
+            QLabel(
+                "<b>Situation mensuelle (SME)</b> — mois de travail, TabSme et tendance",
+                textFormat=Qt.TextFormat.RichText,
+            )
         )
         inner_lay.addWidget(self._sme_frame)
         inner_lay.addWidget(QLabel("<b>Tableau détaillé (positions)</b>", textFormat=Qt.TextFormat.RichText))
@@ -547,6 +730,198 @@ class HomeView(QWidget):
 
         self._reload_stats(silent=True)
 
+    def _sync_sme_preview_label(self) -> None:
+        ym = _widgets_to_ym(self._sme_month, self._sme_year)
+        if ym:
+            mo_i = int(self._sme_month.currentData() or 1)
+            nom = _SME_MONTHS_FR[mo_i - 1].lower()
+            self._sme_preview.setText(
+                f"Période SME : {ym} ({nom} {self._sme_year.value()})"
+            )
+        else:
+            self._sme_preview.setText("Période SME : —")
+
+    def _refresh_sme_history_label_only(self) -> None:
+        """Met à jour l’historique des clôtures sans réinitialiser mois / année (ex. après F5)."""
+        ctx = load_sme_context()
+        if ctx.mois_fermes:
+            tail = ctx.mois_fermes[-12:]
+            fermes = ", ".join(tail)
+            suffix = " …" if len(ctx.mois_fermes) > 12 else ""
+            self._sme_fermes_label.setText(
+                f"<b>Mois marqués comme clôturés (historique local)</b> : {fermes}{suffix}"
+            )
+        else:
+            self._sme_fermes_label.setText(
+                "<b>Mois clôturés</b> : aucun enregistré dans ce fichier."
+            )
+
+    def _refresh_sme_workflow_widgets(self) -> None:
+        ctx = load_sme_context()
+        _ym_to_widgets(ctx.mois_actif, self._sme_month, self._sme_year)
+        if ctx.jour_cloture is not None:
+            self._sme_jour.setValue(ctx.jour_cloture)
+        else:
+            self._sme_jour.setValue(0)
+        self._sync_sme_preview_label()
+        self._refresh_sme_history_label_only()
+
+    def _on_open_sme_archives_dir(self) -> None:
+        d = sme_archives_dir().resolve()
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(d))):
+            QMessageBox.warning(
+                self,
+                "Archives",
+                f"Impossible d’ouvrir l’explorateur. Chemin : \n{d}",
+            )
+
+    def _on_go_archives_page(self) -> None:
+        if self._navigate_to_page is not None:
+            self._navigate_to_page(PAGE_ARCHIVES_CLOSURE)
+        else:
+            self._on_open_sme_archives_dir()
+
+    def _on_sme_save_mois(self) -> None:
+        ym = _widgets_to_ym(self._sme_month, self._sme_year)
+        if not ym or extract_yyyy_mm(ym) != ym:
+            QMessageBox.warning(
+                self,
+                "Mois SME",
+                "Choisissez un mois et une année valides.",
+            )
+            return
+        ctx = load_sme_context()
+        ctx.mois_actif = ym
+        jv = self._sme_jour.value()
+        ctx.jour_cloture = None if jv == 0 else jv
+        save_sme_context(ctx)
+        self._refresh_sme_workflow_widgets()
+        jour_txt = f" Jour de clôture : {jv}." if jv else ""
+        QMessageBox.information(
+            self,
+            "Mois SME",
+            f"Le mois actif « {ym} » a été enregistré.{jour_txt} Les prochaines modifications de fiches "
+            "personnel l’indiqueront dans le fichier d’audit (champ sme_mois_context).",
+        )
+
+    def _on_sme_cloture_dialog(self) -> None:
+        ctx0 = load_sme_context()
+        dlg = QDialog(self)
+        dlg.setObjectName("SmeClotureDialog")
+        dlg.setWindowTitle("Clôturer un mois SME (Piste A)")
+        dlg.setMinimumWidth(520)
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(
+            QLabel(
+                "Le mois clôturé est ajouté à l’historique local, le mois suivant devient le mois actif. "
+                "Une copie du <b>fichier SQLite</b> (si présent) et du <b>JSON de mise en page liste</b> "
+                "est enregistrée sous <code>sme_archives</code>. Les lignes <b>TabSme</b> dont la colonne "
+                "<i>mois</i> correspond au mois clôturé passent en statut <b>Fermé</b> ; celles du mois "
+                "suivant en <b>Ouvert</b> (ou insertion <code>SME-YYYYMM</code> si besoin). "
+                "Confirmez que la base (Access ou SQLite) est accessible en écriture pour TabSme."
+            )
+        )
+
+        g1 = QGroupBox("Mois à clôturer")
+        g1.setObjectName("dashSmeWorkflow")
+        f1 = QFormLayout(g1)
+        cb_c = _sme_month_combo(for_dialog=True)
+        sp_c = _sme_year_spin(for_dialog=True)
+        _ym_to_widgets(ctx0.mois_actif, cb_c, sp_c)
+        row_c = QHBoxLayout()
+        row_c.setSpacing(10)
+        row_c.addWidget(QLabel("Mois :"))
+        row_c.addWidget(cb_c)
+        row_c.addWidget(QLabel("Année :"))
+        row_c.addWidget(sp_c)
+        row_c.addStretch()
+        f1.addRow(row_c)
+
+        g2 = QGroupBox("Nouveau mois actif (après clôture)")
+        g2.setObjectName("dashSmeWorkflow")
+        f2 = QFormLayout(g2)
+        cb_s = _sme_month_combo(for_dialog=True)
+        sp_s = _sme_year_spin(for_dialog=True)
+        nxt = _next_yyyy_mm(_widgets_to_ym(cb_c, sp_c))
+        if nxt:
+            _ym_to_widgets(nxt, cb_s, sp_s)
+        else:
+            _ym_to_widgets("", cb_s, sp_s)
+
+        def _sync_suivant_from_cloture() -> None:
+            nn = _next_yyyy_mm(_widgets_to_ym(cb_c, sp_c))
+            if nn:
+                _ym_to_widgets(nn, cb_s, sp_s)
+
+        btn_fill = QPushButton("Remplir avec le mois suivant (automatique)")
+        btn_fill.clicked.connect(_sync_suivant_from_cloture)
+        row_s = QHBoxLayout()
+        row_s.setSpacing(10)
+        row_s.addWidget(QLabel("Mois :"))
+        row_s.addWidget(cb_s)
+        row_s.addWidget(QLabel("Année :"))
+        row_s.addWidget(sp_s)
+        row_s.addStretch()
+        f2.addRow(row_s)
+        f2.addRow(btn_fill)
+
+        lay.addWidget(g1)
+        lay.addWidget(g2)
+        bb = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        cloture = _widgets_to_ym(cb_c, sp_c)
+        suivant = _widgets_to_ym(cb_s, sp_s)
+        if (
+            not cloture
+            or not suivant
+            or extract_yyyy_mm(cloture) != cloture
+            or extract_yyyy_mm(suivant) != suivant
+        ):
+            QMessageBox.warning(
+                self,
+                "Clôture",
+                "Renseignez le mois à clôturer et le nouveau mois actif (mois et année complets).",
+            )
+            return
+        if not confirm_yes_no(
+            self,
+            "Confirmer la clôture",
+            f"Clôturer « {cloture} » et activer « {suivant} » ?\n\n"
+            "Des copies d’archive seront créées ; TabSme sera mise à jour.",
+            default_no=True,
+        ):
+            return
+        try:
+            result = run_piste_a_month_closure(self._settings, cloture, suivant)
+        except OSError as e:
+            QMessageBox.critical(self, "Clôture", str(e))
+            return
+        except Exception as e:
+            QMessageBox.critical(self, "Clôture", str(e))
+            return
+        self._refresh_sme_workflow_widgets()
+        self._reload_stats(silent=True)
+        parts = [
+            f"Mois clôturé : « {cloture} ». Mois actif : « {suivant} ».",
+            f"TabSme : {result.tabsme_rows_closed} ligne(s) → Fermé, "
+            f"{result.tabsme_rows_opened} → Ouvert"
+            + (" (dont 1 insertion auto)" if result.tabsme_inserted_suivant else "")
+            + ".",
+        ]
+        if result.sqlite_archive:
+            parts.append(f"Archive SQLite : {result.sqlite_archive}")
+        if result.layout_archive:
+            parts.append(f"Archive mise en page : {result.layout_archive}")
+        if result.warnings:
+            parts.append("Avertissements :\n• " + "\n• ".join(result.warnings))
+        QMessageBox.information(self, "Clôture terminée", "\n\n".join(parts))
+
     def _clear_hbox(self, lay: QHBoxLayout) -> None:
         while lay.count():
             item = lay.takeAt(0)
@@ -561,7 +936,7 @@ class HomeView(QWidget):
 
     def _open_structures_ref(self) -> None:
         if self._navigate_to_page is not None:
-            self._navigate_to_page(5)
+            self._navigate_to_page(PAGE_STRUCTURES)
 
     def _rep_row_bar(self, label: str, count: int, max_c: int, bar_hex: str) -> QWidget:
         wrap = QWidget()
@@ -727,19 +1102,23 @@ class HomeView(QWidget):
                 w.setParent(None)
                 w.deleteLater()
 
+    def apply_runtime_settings(self, settings: Settings) -> None:
+        self._settings = settings
+        self._reload_stats(silent=True)
+
     def _reload_stats(self, *, silent: bool = False) -> None:
         if not silent:
             if not confirm_yes_no(
                 self,
                 "Actualiser les indicateurs",
-                "Recharger le tableau de bord depuis la base Access ?",
+                "Recharger le tableau de bord depuis la base de données (Access / SQLite selon la configuration) ?",
                 default_no=False,
             ):
                 return
         s = run_with_progress(
             self,
             "Tableau de bord",
-            "Chargement des indicateurs depuis la base…",
+            "Chargement des indicateurs…",
             self._dashboard.snapshot,
         )
         if s is None:
@@ -780,7 +1159,8 @@ class HomeView(QWidget):
         else:
             self._sme_hint.setText(
                 "Table <b>TabSme</b> absente ou inaccessible : créez-la dans Access "
-                "(colonnes typiques : Codsme, mois, Statut) pour activer l’historique mensuel."
+                "(colonnes typiques : Codsme, mois, Statut), ou importez le bundle SQLite depuis Access "
+                "(page <b>Paramètres</b> ou menu Fichier) pour remplir <b>tab_sme</b> en mode local."
             )
             self._sme_table.setRowCount(0)
 
@@ -847,8 +1227,25 @@ class HomeView(QWidget):
         lay_txt = str(liste_layout_config_path().resolve())
         db = Path(self._settings.database_path).resolve()
 
+        self._refresh_sme_history_label_only()
+
+        sql_p = self._settings.sqlite_liste_path
+        sql_mode = "SQLite" if self._settings.use_sqlite_liste_generale else "Access (ListeGenerale)"
+        sql_detail = (
+            "données opérationnelles : liste, référentiels, TabSme, satellites (Access sert aux imports)"
+            if self._settings.use_sqlite_liste_generale
+            else "liste générale sur Access ; référentiels et satellites sur la même base"
+        )
+        sql_path_txt = html_escape(str(sql_p.resolve())) if sql_p else "(non défini)"
+        sql_caption = f"<i>Mode : {sql_mode}</i> — {sql_detail}."
+        acc_title = (
+            "Access (import depuis l’ancien .mdb)"
+            if self._settings.use_sqlite_liste_generale
+            else "Access (base principale — mode historique)"
+        )
         texts = [
-            f"<b>Base Access</b><br/>{html_escape(str(db))}",
+            f"<b>{acc_title}</b><br/>{html_escape(str(db))}",
+            f"<b>Fichier SQLite (données principales)</b><br/>{sql_path_txt}<br/>{sql_caption}",
             f"<b>Maquette Excel (liste des présents)</b><br/>{html_escape(tpl_txt)}",
             f"<b>Gabarit Excel (situation numérique)</b><br/>{html_escape(tnum_txt)}",
             f"<b>Fichier officiel détachés</b><br/>{html_escape(tdet_txt)}",

@@ -114,6 +114,10 @@ class NumeriquePreviewService:
         self._settings = settings
         self._repo = ListeGeneraleRepository(settings)
 
+    def rebind_settings(self, settings: Settings) -> None:
+        self._settings = settings
+        self._repo = ListeGeneraleRepository(settings)
+
     def build_html_matrice(self) -> str:
         rows = self._repo.fetch_all()
         tpl = self._settings.template_numerique_path
@@ -393,7 +397,7 @@ class NumeriquePreviewService:
             parts.append(f"<th>{html.escape(h)}</th>")
         parts.append("</tr></thead><tbody>")
         for i, row in enumerate(mission_rows):
-            d = missions.get(row.id)
+            d = missions.get(row.satellite_join_key())
             parts.append("<tr>")
             parts.append(f"<td>{i + 1}</td>")
             parts.append(td_val(row.grade))
@@ -430,7 +434,7 @@ class NumeriquePreviewService:
             parts.append(f"<th>{html.escape(h)}</th>")
         parts.append("</tr></thead><tbody>")
         for i, row in enumerate(malade_rows):
-            d = malades.get(row.id)
+            d = malades.get(row.satellite_join_key())
             parts.append("<tr>")
             parts.append(f"<td>{i + 1}</td>")
             parts.append(td_val(row.grade))
@@ -452,7 +456,7 @@ class NumeriquePreviewService:
             parts.append(f"<th>{html.escape(h)}</th>")
         parts.append("</tr></thead><tbody>")
         for i, row in enumerate(desert_rows):
-            d = deserteurs.get(row.id)
+            d = deserteurs.get(row.satellite_join_key())
             parts.append("<tr>")
             parts.append(f"<td>{i + 1}</td>")
             parts.append(td_val(row.grade))
@@ -472,7 +476,7 @@ class NumeriquePreviewService:
             parts.append(f"<th>{html.escape(h)}</th>")
         parts.append("</tr></thead><tbody>")
         for i, row in enumerate(sl_rows):
-            d = stages_loc.get(row.id)
+            d = stages_loc.get(row.satellite_join_key())
             parts.append("<tr>")
             parts.append(f"<td>{i + 1}</td>")
             parts.append(td_val(row.grade))
@@ -494,7 +498,7 @@ class NumeriquePreviewService:
             parts.append(f"<th>{html.escape(h)}</th>")
         parts.append("</tr></thead><tbody>")
         for i, row in enumerate(se_rows):
-            d = stages_ex.get(row.id)
+            d = stages_ex.get(row.satellite_join_key())
             parts.append("<tr>")
             parts.append(f"<td>{i + 1}</td>")
             parts.append(td_val(row.grade))

@@ -97,6 +97,11 @@ class ListePresentService:
         self._liste = ListeGeneraleRepository(settings)
         self._structures = StructureRepository(settings)
 
+    def rebind_settings(self, settings: Settings) -> None:
+        self._settings = settings
+        self._liste = ListeGeneraleRepository(settings)
+        self._structures = StructureRepository(settings)
+
     def _structure_index(self) -> dict[str, StructureRow]:
         return {s.code: s for s in self._structures.fetch_all()}
 

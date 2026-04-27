@@ -18,6 +18,11 @@ class LayoutConfigService:
         self._structures = StructureRepository(settings)
         self._liste_generale = ListeGeneraleRepository(settings)
 
+    def rebind_settings(self, settings: Settings) -> None:
+        self._settings = settings
+        self._structures = StructureRepository(settings)
+        self._liste_generale = ListeGeneraleRepository(settings)
+
     def subarme_labels_for_structure(self, structure_code: str) -> list[str]:
         """Libellés SubArme distincts pour une structure (liste générale), triés comme en base."""
         return self._liste_generale.fetch_distinct_subarme_for_structure(structure_code)

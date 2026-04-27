@@ -39,7 +39,7 @@ class NumeriqueMatriceView(QWidget):
         self._btn_export.clicked.connect(self._export)
 
         self._info = QLabel(
-            "Aperçu connecté à la base <b>Access</b> : la feuille <b>NUMERIQUE</b> est restituée en un seul flux "
+            "Aperçu connecté à la <b>base configurée</b> (SQLite ou Access) : la feuille <b>NUMERIQUE</b> est restituée en un seul flux "
             "(matrice centrale, agrégats par catégorie U/AY, synthèse AD, détail présents BH, récap variation CB). "
             "Rubrique <b>Présents</b> : Padmin contenant « présent » ou « stage interne ». "
             "La colonne « mois figé » du récap provient des valeurs <b>CD</b> du gabarit. Actualiser pour recharger."
@@ -59,12 +59,16 @@ class NumeriqueMatriceView(QWidget):
 
         self._refresh(silent=True)
 
+    def apply_runtime_settings(self, settings: Settings) -> None:
+        self._settings = settings
+        self._refresh(silent=True)
+
     def _refresh(self, *, silent: bool = False) -> None:
         if not silent:
             if not confirm_yes_no(
                 self,
                 "Actualiser l'aperçu",
-                "Recharger l'aperçu de la matrice depuis la base Access ?",
+                "Recharger l'aperçu de la matrice depuis la base configurée ?",
                 default_no=False,
             ):
                 return

@@ -13,6 +13,9 @@ class DetachesConfigService:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
+    def rebind_settings(self, settings: Settings) -> None:
+        self._settings = settings
+
     @property
     def settings(self) -> Settings:
         return self._settings

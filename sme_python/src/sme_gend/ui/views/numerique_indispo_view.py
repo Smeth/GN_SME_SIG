@@ -58,6 +58,10 @@ class NumeriqueIndispoView(QWidget):
 
         self._refresh(silent=True)
 
+    def apply_runtime_settings(self, settings: Settings) -> None:
+        self._settings = settings
+        self._refresh(silent=True)
+
     def _refresh(self, *, silent: bool = False) -> None:
         if not silent:
             if not confirm_yes_no(

@@ -42,6 +42,13 @@ class PersonnelTableModel(QAbstractTableModel):
         self._rows = rows
         self.endResetModel()
 
+    def set_subdivision_flat(self, subdivision_flat: Sequence[SubdivisionFlatRow] | None) -> None:
+        self._subdivision_flat = subdivision_flat
+        if not self._rows:
+            return
+        self.beginResetModel()
+        self.endResetModel()
+
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: N802
         if parent.isValid():
             return 0

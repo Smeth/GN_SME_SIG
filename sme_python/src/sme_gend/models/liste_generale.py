@@ -38,6 +38,15 @@ class ListeGeneraleRow:
     obs: str | None
     ordre_tri: int | None
     presseance: int | None
+    # Id Access (ListeGenerale.Id) pour TabMission / malade / … ; None en lecture Access directe.
+    access_join_id: str | None = None
+
+    def satellite_join_key(self) -> str:
+        """Clé pour dictionnaires satellites (missions, malades, …)."""
+        aid = (self.access_join_id or "").strip()
+        if aid:
+            return aid
+        return (self.id or "").strip()
 
     @classmethod
     def from_sequence(cls, row: Sequence[Any]) -> ListeGeneraleRow:

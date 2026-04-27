@@ -1,29 +1,29 @@
-"""Couples (Structure, Subdivision d'arme) distincts depuis ListeGenerale."""
+"""Couples structure / subdivision d'arme : Access ou SQLite."""
 
 from __future__ import annotations
 
 from sme_gend.config.settings import Settings
-from sme_gend.repositories.access_connection import AccessConnection
+from sme_gend.repositories.structure_subdivision_access_repository import (
+    AccessStructureSubdivisionRepository,
+)
+from sme_gend.repositories.structure_subdivision_sqlite_repository import (
+    SqliteStructureSubdivisionRepository,
+)
 
-SQL = """
-SELECT DISTINCT Structure, SubArme
-FROM ListeGenerale
-WHERE Structure IS NOT NULL AND Structure <> ''
-ORDER BY Structure, SubArme
-"""
+__all__ = [
+    "StructureSubdivisionRepository",
+    "AccessStructureSubdivisionRepository",
+    "SqliteStructureSubdivisionRepository",
+]
 
 
 class StructureSubdivisionRepository:
-    """Pour afficher : chaque structure avec les subdivisions d'arme rencontrées."""
-
     def __init__(self, settings: Settings) -> None:
-        self._conn = AccessConnection(settings)
+        if settings.use_sqlite_liste_generale:
+            self._impl: AccessStructureSubdivisionRepository | SqliteStructureSubdivisionRepository
+            self._impl = SqliteStructureSubdivisionRepository(settings)
+        else:
+            self._impl = AccessStructureSubdivisionRepository(settings)
 
     def fetch_distinct_pairs(self) -> list[tuple[str, str]]:
-        with self._conn.connect() as conn:
-            cur = conn.cursor()
-            cur.execute(SQL)
-            return [
-                (str(r[0] or "").strip(), str(r[1] or "").strip())
-                for r in cur.fetchall()
-            ]
+        return self._impl.fetch_distinct_pairs()

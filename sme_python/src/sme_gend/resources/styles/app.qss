@@ -283,6 +283,108 @@ QFrame#dashSmeFrame {
     padding: 8px;
 }
 
+/* Bloc mois SME — sans color sur le QGroupBox (sinon héritage Qt → liste déroulante illisible) */
+QGroupBox#dashSmeWorkflow {
+    font-weight: 600;
+    border: 1px solid #c5cae9;
+    border-radius: 10px;
+    margin-top: 12px;
+    padding: 14px 16px 12px 16px;
+    background-color: #fafbff;
+}
+
+QGroupBox#dashSmeWorkflow::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 8px;
+    background-color: #fafbff;
+    color: #1a237e;
+}
+
+/* Sélecteurs mois / année : texte et popup lisibles (Windows + thème QSS) */
+QComboBox#smePeriodCombo,
+QComboBox#smePeriodComboDialog {
+    color: #212121;
+    background-color: #ffffff;
+    border: 1px solid #b0bec5;
+    border-radius: 6px;
+    padding: 4px 10px 4px 10px;
+    min-height: 28px;
+}
+
+QComboBox#smePeriodCombo:hover,
+QComboBox#smePeriodComboDialog:hover {
+    border-color: #5c6bc0;
+}
+
+QComboBox#smePeriodCombo:focus,
+QComboBox#smePeriodComboDialog:focus {
+    border-color: #3949ab;
+}
+
+QComboBox#smePeriodCombo::drop-down,
+QComboBox#smePeriodComboDialog::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 26px;
+    border-left: 1px solid #e0e0e0;
+}
+
+QComboBox#smePeriodCombo QAbstractItemView,
+QComboBox#smePeriodComboDialog QAbstractItemView {
+    background-color: #ffffff;
+    color: #212121;
+    selection-background-color: #c5cae9;
+    selection-color: #1a237e;
+    border: 1px solid #90a4ae;
+    outline: none;
+    padding: 2px;
+    min-width: 200px;
+}
+
+QSpinBox#smePeriodYearSpin,
+QSpinBox#smePeriodYearSpinDialog,
+QSpinBox#smePeriodDaySpin {
+    color: #212121;
+    background-color: #ffffff;
+    border: 1px solid #b0bec5;
+    border-radius: 6px;
+    padding: 4px 8px;
+    min-height: 28px;
+}
+
+QSpinBox#smePeriodYearSpin:focus,
+QSpinBox#smePeriodYearSpinDialog:focus,
+QSpinBox#smePeriodDaySpin:focus {
+    border-color: #3949ab;
+}
+
+QDialog#SmeClotureDialog {
+    background-color: #fafbfc;
+}
+
+QGroupBox#settingsPathsGroup {
+    font-weight: 600;
+    color: #1a237e;
+    border: 1px solid #e1e4e8;
+    border-radius: 10px;
+    margin-top: 8px;
+    padding-top: 12px;
+    background-color: #ffffff;
+}
+
+QGroupBox#settingsPathsGroup::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 6px;
+}
+
+QLabel#settingsPathsHint {
+    color: #5c6370;
+    font-size: 12px;
+    margin-bottom: 6px;
+}
+
 /* Cartes par position administrative */
 QFrame#dashPosCard {
     background-color: #ffffff;
@@ -338,6 +440,108 @@ QLabel#PersonnelEditHint {
     color: #5c6370;
     font-size: 12px;
     padding: 4px 0 8px 0;
+}
+
+/* Fiche dossier (parcours, traçabilité, médias) */
+QDialog#PersonnelDossierDialog {
+    background-color: #f0f2f5;
+}
+
+QFrame#PersonnelDossierHeader {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1a237e, stop:1 #283593);
+    border: none;
+}
+
+QLabel#PersonnelDossierTitle {
+    color: #ffffff;
+    font-size: 20px;
+    font-weight: 700;
+}
+
+QLabel#PersonnelDossierSubtitle {
+    color: #e8eaf6;
+    font-size: 13px;
+}
+
+QPushButton#PersonnelDossierPrimaryBtn {
+    background-color: #ffd54f;
+    color: #1a237e;
+    font-weight: 600;
+    padding: 8px 20px;
+    border-radius: 8px;
+    border: none;
+}
+
+QPushButton#PersonnelDossierPrimaryBtn:hover {
+    background-color: #ffecb3;
+}
+
+QFrame#PersonnelDossierMediaColumn {
+    background-color: #ffffff;
+    border: 1px solid #e1e4e8;
+    border-radius: 12px;
+}
+
+QLabel#PersonnelDossierPhoto {
+    background-color: #eceff1;
+    border: 1px solid #cfd8dc;
+    border-radius: 8px;
+}
+
+QLabel#PersonnelDossierGradePix {
+    background-color: #fafafa;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+}
+
+QLabel#PersonnelDossierHint {
+    color: #5c6370;
+    font-size: 11px;
+}
+
+QLabel[subheading="true"] {
+    color: #1a237e;
+    font-weight: 600;
+    font-size: 12px;
+}
+
+QFrame#PersonnelDossierTimelineCard {
+    background-color: #ffffff;
+    border: 1px solid #c5cae9;
+    border-left: 4px solid #3949ab;
+    border-radius: 10px;
+}
+
+QLabel#PersonnelDossierEmptyHint {
+    color: #5c6370;
+    padding: 12px;
+    font-size: 13px;
+}
+
+QTabWidget#PersonnelDossierTabs::pane {
+    border: 1px solid #e1e4e8;
+    border-radius: 8px;
+    background: #ffffff;
+    top: -1px;
+    padding: 4px;
+}
+
+QTabWidget#PersonnelDossierTabs QTabBar::tab {
+    padding: 10px 18px;
+    margin-right: 2px;
+    background: #e8eaf6;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+}
+
+QTabWidget#PersonnelDossierTabs QTabBar::tab:selected {
+    background: #ffffff;
+    color: #1a237e;
+    font-weight: 600;
+}
+
+QTabWidget#PersonnelDossierTabs QTabBar::tab:hover:!selected {
+    background: #f5f5f5;
 }
 
 QDialog#PersonnelEditDialog QGroupBox {

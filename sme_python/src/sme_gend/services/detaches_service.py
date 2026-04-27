@@ -35,6 +35,10 @@ class DetachesService:
         self._settings = settings
         self._repo = ListeGeneraleRepository(settings)
 
+    def rebind_settings(self, settings: Settings) -> None:
+        self._settings = settings
+        self._repo = ListeGeneraleRepository(settings)
+
     def fetch_detaches(self) -> list[ListeGeneraleRow]:
         return [r for r in self._repo.fetch_all() if is_detache_row(r)]
 
