@@ -654,3 +654,64 @@ QWidget#personnelFilterPanel QComboBox {
     padding: 4px 8px;
     min-height: 26px;
 }
+
+/* Bandeau période SME (au-dessus du contenu) */
+QFrame#appPeriodBanner {
+    background-color: #e8eaf6;
+    border-bottom: 1px solid #c5cae9;
+}
+
+QLabel#appPeriodBannerLabel {
+    color: #283593;
+    font-size: 13px;
+}
+
+QPushButton#appPeriodBannerBtn {
+    padding: 6px 14px;
+    font-weight: 600;
+    color: #1a237e;
+    background-color: #ffffff;
+    border: 1px solid #9fa8da;
+    border-radius: 6px;
+}
+
+QPushButton#appPeriodBannerBtn:hover {
+    background-color: #f5f5ff;
+    border-color: #7986cb;
+}
+
+/* Boutons navigation mois (◄ ►) dans le bandeau période */
+QToolButton#periodNavBtn {
+    color: #1a237e;
+    font-weight: bold;
+    font-size: 13px;
+    padding: 4px 9px;
+    border-radius: 5px;
+    background-color: rgba(255, 255, 255, 0.65);
+    border: 1px solid #c5cae9;
+    min-width: 28px;
+}
+
+QToolButton#periodNavBtn:hover {
+    background-color: #ffffff;
+    border-color: #7986cb;
+}
+
+QToolButton#periodNavBtn:pressed {
+    background-color: #e8eaf6;
+}
+
+QLabel#periodMonthLabel {
+    color: #1a237e;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 0 6px;
+}
+
+QLabel#periodStatutLabel {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 10px;
+    background-color: rgba(255, 255, 255, 0.5);
+}

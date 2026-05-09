@@ -31,6 +31,7 @@ class StructureSubdivisionsDialog(QDialog):
         structure: StructureRow,
         *,
         on_structure_changed: Callable[[], None] | None = None,
+        allow_edit: bool = True,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Subdivisions d'arme — {structure.code}")
@@ -41,6 +42,7 @@ class StructureSubdivisionsDialog(QDialog):
         self._service = service
         self._structure = structure
         self._on_structure_changed = on_structure_changed
+        self._allow_edit = allow_edit
 
         title = QLabel(structure.designation or structure.code)
         title.setObjectName("modalTitle")
@@ -67,6 +69,7 @@ class StructureSubdivisionsDialog(QDialog):
         self._btn_refresh.clicked.connect(lambda: self._reload_list(silent=False))
         self._btn_edit_struct = QPushButton("Modifier la structure…")
         self._btn_edit_struct.clicked.connect(self._open_edit_structure)
+        self._btn_edit_struct.setVisible(allow_edit)
 
         btn_row = QHBoxLayout()
         btn_row.addWidget(self._btn_refresh)
@@ -115,6 +118,8 @@ class StructureSubdivisionsDialog(QDialog):
             self._list.addItem(s)
 
     def _open_edit_structure(self) -> None:
+        if not self._allow_edit:
+            return
         from sme_gend.ui.views.referentiel_views import _StructureDialog
 
         dlg = _StructureDialog(self, self._structure)

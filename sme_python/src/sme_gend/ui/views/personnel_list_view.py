@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import csv
+import html as _html
+from pathlib import Path
 
 from PySide6.QtCore import QSize, QSortFilterProxyModel, Qt, QTimer
-from PySide6.QtGui import QKeySequence, QShortcut, QShowEvent
+from PySide6.QtGui import QKeySequence, QPageLayout, QShortcut, QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -31,14 +33,50 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from sme_gend.config.settings import Settings
+from sme_gend.config.sme_context import load_sme_context, save_sme_context
 from sme_gend.models.liste_generale import ListeGeneraleRow
 from sme_gend.services.personnel_service import PersonnelService
 from sme_gend.services.referentiel_service import ReferentielService
+from sme_gend.services.sme_editing_policy import evaluate_editing_state
 from sme_gend.ui.bg_task import run_with_progress
-from sme_gend.ui.confirm_dialogs import confirm_overwrite_file, confirm_yes_no
+from sme_gend.ui.confirm_dialogs import confirm_yes_no
+from sme_gend.ui.personnel_action_delegate import (
+    ACT_DELETE,
+    ACT_EDIT,
+    ACT_VIEW,
+    PersonnelActionDelegate,
+)
 from sme_gend.ui.personnel_dossier_dialog import PersonnelDossierDialog
 from sme_gend.ui.personnel_edit_dialog import PersonnelEditDialog
 from sme_gend.ui.personnel_table_model import PersonnelTableModel
+
+
+# Colonnes par défaut masquables (indice → clé). Col 1 (noms) et col 19 (Actions) toujours visibles.
+_HIDEABLE_COLS: dict[int, str] = {
+    0: "id",
+    2: "grade",
+    3: "fonction",
+    4: "subdivision_arme",
+    5: "position_admin",
+    6: "structure",
+    7: "matricule_militaire",
+}
+
+# Colonnes supplémentaires masquées par défaut — affichées seulement si l'utilisateur les active.
+_EXTRA_COLS: dict[int, str] = {
+    8:  "matricule_solde",
+    9:  "date_naissance",
+    10: "lieu_naissance",
+    11: "date_grade",
+    12: "date_service",
+    13: "ndecision",
+    14: "diplome",
+    15: "date_obtention",
+    16: "obs",
+    17: "presseance",
+    18: "ordre_tri",
+}
 
 
 class PersonnelListView(QWidget):
@@ -46,21 +84,25 @@ class PersonnelListView(QWidget):
 
     _DEBOUNCE_MS = 280
     _FOOTER_DEFAULT_HINT = (
-        "Ordre : COMGEND → C2 CEMGEND → INSPECTEUR IT → DIRECTEUR DOE → DPF → DSF → DIRTRANS → "
-        "DTRJD → DIRMAT → DDT, puis toutes les autres fonctions par grade (PrefOrd) ; "
-        "les en-têtes ne réordonnent pas le tableau."
+        "Ordre par défaut : COMGEND → C2 CEMGEND → INSPECTEUR IT → DIRECTEUR DOE → DPF → DSF → "
+        "DIRTRANS → DTRJD → DIRMAT → DDT, puis toutes les autres fonctions par grade (PrefOrd). "
+        "Cliquez sur un en-tête pour trier — utilisez « Réinitialiser l'ordre métier » (menu ⋯) pour restaurer."
     )
 
     def __init__(
         self,
         service: PersonnelService,
         referentiel: ReferentielService,
+        settings: Settings,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self._service = service
         self._referentiel = referentiel
+        self._settings = settings
         self._all_rows: list[ListeGeneraleRow] = []
+        self._only_empty_structure = False
+        self._dirty = True
 
         self._model = PersonnelTableModel(
             subdivision_flat=self._referentiel.subdivisions_flat(),
@@ -74,18 +116,26 @@ class PersonnelListView(QWidget):
         self._table.setModel(self._proxy)
         self._table.setAlternatingRowColors(True)
         self._table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-        self._table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
-        # Tri par colonnes désactivé : l'ordre des lignes suit la règle métier (fonctions prioritaires + grade).
-        self._table.setSortingEnabled(False)
+        self._table.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
+        # Tri interactif activé ; _apply_loaded_rows remet l'ordre métier après chaque rechargement.
+        self._table.setSortingEnabled(True)
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._on_table_context_menu)
         self._table.doubleClicked.connect(self._open_dossier)
 
+        # Délégué boutons Actions sur la dernière colonne
+        self._action_delegate = PersonnelActionDelegate(self._table)
+        self._action_delegate.set_callback(self._on_action_btn)
+        actions_col = self._model.columnCount() - 1
+        self._table.setItemDelegateForColumn(actions_col, self._action_delegate)
+
         hdr = self._table.horizontalHeader()
-        ncol = self._model.columnCount()
-        for c in range(ncol - 1):
-            hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
-        hdr.setSectionResizeMode(ncol - 1, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)  # toutes les colonnes redimensionnables
+        hdr.setSectionResizeMode(actions_col, QHeaderView.ResizeMode.Fixed)
+        hdr.resizeSection(actions_col, PersonnelActionDelegate.ACTIONS_COL_WIDTH)
+        hdr.setMinimumSectionSize(60)
+        hdr.setDefaultSectionSize(120)
+        hdr.setStretchLastSection(False)
 
         self._counter = QLabel()
         self._counter.setObjectName("personnelListCounter")
@@ -140,7 +190,7 @@ class PersonnelListView(QWidget):
 
         self._search = QLineEdit()
         self._search.setPlaceholderText(
-            "Recherche : nom, prénom, matricule, fonction…"
+            "Recherche : nom, grade, fonction, structure, matricule…"
         )
         self._search.setClearButtonEnabled(True)
         self._search.setMinimumWidth(220)
@@ -195,20 +245,57 @@ class PersonnelListView(QWidget):
             "Présents seulement",
             self._show_presents,
         )
+        more_menu.addAction(
+            "Réinitialiser l'ordre métier",
+            self._reset_sort_order,
+        )
         more_menu.addSeparator()
         more_menu.addAction(
             "Fiche dossier (parcours & traçabilité)…",
             self._open_dossier,
         )
-        more_menu.addAction(
+        self._act_edit_row = more_menu.addAction(
             "Modifier la ligne sélectionnée…",
             self._edit_current,
         )
+        more_menu.addSeparator()
+        self._act_new_row = more_menu.addAction(
+            "Nouveau personnel…",
+            self._create_new,
+        )
+        self._act_delete_row = more_menu.addAction(
+            "Supprimer la ligne sélectionnée…",
+            self._delete_current,
+        )
+        more_menu.addSeparator()
         more_menu.addAction(
             "Exporter CSV…",
             self._export_csv,
         )
+        more_menu.addAction(
+            "Exporter Excel (liste filtrée)…",
+            self._export_excel_filtered,
+        )
+        more_menu.addAction(
+            "Exporter Excel par position administrative…",
+            self._export_excel_by_padmin,
+        )
+        more_menu.addSeparator()
+        more_menu.addAction(
+            "Imprimer / Exporter PDF…",
+            self._print_preview,
+        )
+        more_menu.aboutToShow.connect(self._sync_more_menu_edit_enabled)
         self._menu_btn.setMenu(more_menu)
+
+        self._btn_columns = QToolButton()
+        self._btn_columns.setObjectName("personnelColumnsBtn")
+        self._btn_columns.setText("Colonnes")
+        self._btn_columns.setToolTip(
+            "Choisir les colonnes affichées dans le tableau (Ctrl+Maj+C)"
+        )
+        self._btn_columns.setAutoRaise(True)
+        self._btn_columns.clicked.connect(self._on_columns_dialog)
 
         top_bar = QFrame()
         top_bar.setObjectName("personnelListTopBar")
@@ -218,6 +305,7 @@ class PersonnelListView(QWidget):
         top_row.addWidget(self._counter, alignment=Qt.AlignmentFlag.AlignVCenter)
         top_row.addStretch(1)
         top_row.addWidget(self._search, stretch=2)
+        top_row.addWidget(self._btn_columns, alignment=Qt.AlignmentFlag.AlignVCenter)
         top_row.addWidget(self._menu_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
         top_row.addWidget(self._btn_refresh, alignment=Qt.AlignmentFlag.AlignVCenter)
 
@@ -253,20 +341,109 @@ class PersonnelListView(QWidget):
         self._footer.setWordWrap(True)
         self._footer.setText(self._FOOTER_DEFAULT_HINT)
 
+        self._lock_banner = QLabel()
+        self._lock_banner.setWordWrap(True)
+        self._lock_banner.setObjectName("personnelLockBanner")
+        self._lock_banner.setVisible(False)
+        self._lock_banner.setStyleSheet(
+            "background: #fff3e0; color: #e65100; padding: 10px 12px; "
+            "border-radius: 6px; border: 1px solid #ffcc80;"
+        )
+
         layout = QVBoxLayout(self)
+        layout.addWidget(self._lock_banner)
         layout.addWidget(filter_panel)
         layout.addWidget(self._stack, stretch=1)
         layout.addWidget(self._footer)
 
+        QShortcut(QKeySequence("Ctrl+Shift+C"), self, self._on_columns_dialog)
         QShortcut(QKeySequence("Ctrl+R"), self, lambda: self._refresh_all(silent=False))
         QShortcut(QKeySequence(Qt.Key.Key_Return), self._table, self._open_dossier)
         QShortcut(QKeySequence(Qt.Key.Key_Enter), self._table, self._open_dossier)
         QShortcut(QKeySequence(Qt.Key.Key_F2), self._table, self._edit_current)
+        QShortcut(QKeySequence("Ins"), self, self._create_new)
+        QShortcut(QKeySequence("Ctrl+N"), self, self._create_new)
+        QShortcut(QKeySequence(Qt.Key.Key_Delete), self._table, self._delete_current)
+        QShortcut(QKeySequence("Ctrl+F"), self, lambda: self._search.setFocus())
+        QShortcut(QKeySequence("Ctrl+E"), self, self._export_csv)
+        QShortcut(QKeySequence("Ctrl+Shift+E"), self, self._export_excel_filtered)
+        QShortcut(QKeySequence("Ctrl+P"), self, self._print_preview)
 
     def showEvent(self, event: QShowEvent) -> None:
         """Chaque ouverture de l’onglet : rechargement trié depuis la base (ordre métier appliqué)."""
         super().showEvent(event)
+        if event.spontaneous():
+            return
+        self._apply_column_visibility()
         self._refresh_all(silent=True)
+        self._refresh_lock_banner()
+
+    def _refresh_lock_banner(self) -> None:
+        st = evaluate_editing_state(self._settings)
+        if st.locked:
+            self._lock_banner.setText(
+                f"<b>Édition verrouillée</b> — {st.detail}"
+            )
+            self._lock_banner.setTextFormat(Qt.TextFormat.RichText)
+            self._lock_banner.setVisible(True)
+        elif st.detail and not st.mois_actif:
+            self._lock_banner.setText(st.detail)
+            self._lock_banner.setTextFormat(Qt.TextFormat.PlainText)
+            self._lock_banner.setVisible(True)
+        elif st.detail and "Aucune ligne TabSme" in st.detail:
+            self._lock_banner.setText(st.detail)
+            self._lock_banner.setTextFormat(Qt.TextFormat.PlainText)
+            self._lock_banner.setVisible(True)
+        else:
+            self._lock_banner.setVisible(False)
+
+    def apply_structure_filter(self, structure_code: str) -> None:
+        """Filtre la liste sur une structure (appelé depuis « Structures et effectifs »)."""
+        code = (structure_code or "").strip()
+        if code == "(Sans structure)":
+            self._only_empty_structure = True
+            self._structure_combo.blockSignals(True)
+            try:
+                self._structure_combo.setCurrentIndex(0)
+            finally:
+                self._structure_combo.blockSignals(False)
+            self._fill_subarme_combo(preserve_data=None)
+            self._apply_filter()
+            self._show_status("Filtre : personnel sans code structure.", 5000)
+            return
+        self._only_empty_structure = False
+        self._structure_combo.blockSignals(True)
+        try:
+            idx = 0
+            found = False
+            for i in range(self._structure_combo.count()):
+                if self._structure_combo.itemData(i) == code:
+                    idx = i
+                    found = True
+                    break
+            if not found and code:
+                self._structure_combo.addItem(f"{code} — (hors référentiel)", code)
+                idx = self._structure_combo.count() - 1
+            self._structure_combo.setCurrentIndex(idx)
+        finally:
+            self._structure_combo.blockSignals(False)
+        self._fill_subarme_combo(preserve_data=None)
+        self._apply_filter()
+        self._show_status(f"Filtre structure : {code}", 5000)
+
+    def _sync_more_menu_edit_enabled(self) -> None:
+        locked = evaluate_editing_state(self._settings).locked
+        n_sel = len(self._selected_row_objects())
+        if hasattr(self, "_act_edit_row") and self._act_edit_row is not None:
+            self._act_edit_row.setEnabled(not locked)
+        if hasattr(self, "_act_new_row") and self._act_new_row is not None:
+            self._act_new_row.setEnabled(not locked)
+        if hasattr(self, "_act_delete_row") and self._act_delete_row is not None:
+            self._act_delete_row.setEnabled(not locked)
+            if n_sel > 1:
+                self._act_delete_row.setText(f"Supprimer {n_sel} lignes sélectionnées…")
+            else:
+                self._act_delete_row.setText("Supprimer la ligne sélectionnée…")
 
     def _on_toggle_filters(self) -> None:
         self._filters_body.setVisible(not self._filters_body.isVisible())
@@ -409,17 +586,12 @@ class PersonnelListView(QWidget):
         self._sync_subarme_row_visibility()
 
     def _on_structure_filter_changed(self) -> None:
+        self._only_empty_structure = False
         self._fill_subarme_combo(preserve_data=None)
         self._apply_filter()
 
     def _reset_filters(self) -> None:
-        if not confirm_yes_no(
-            self,
-            "Réinitialiser les filtres",
-            "Remettre tous les filtres et la recherche à zéro ?",
-            default_no=True,
-        ):
-            return
+        self._only_empty_structure = False
         self._filter_debounce.stop()
         for cb in (
             self._padmin_combo,
@@ -448,31 +620,27 @@ class PersonnelListView(QWidget):
     def _apply_loaded_rows(self, rows: list[ListeGeneraleRow]) -> None:
         self._all_rows = rows
         self._filter_debounce.stop()
+        self._proxy.sort(-1)  # restaure l'ordre métier après chaque rechargement
         self._populate_structural_combos()
         self._apply_filter()
+        self._resize_columns_to_content()
 
     def apply_runtime_after_config_change(self) -> None:
         """Après enregistrement des chemins : recharge la liste et les subdivisions affichées."""
-        try:
-            rows = self._service.liste_complete()
-        except OSError as e:
-            QMessageBox.warning(self, "Configuration", str(e))
-            return
-        except Exception as e:
-            QMessageBox.warning(self, "Configuration", str(e))
+        self._settings = self._service.settings
+        rows = run_with_progress(
+            self,
+            "Rechargement",
+            "Lecture de la liste générale depuis la nouvelle configuration…",
+            self._service.liste_complete,
+        )
+        if rows is None:
             return
         self._model.set_subdivision_flat(self._referentiel.subdivisions_flat())
         self._apply_loaded_rows(rows)
+        self._refresh_lock_banner()
 
     def _refresh_all(self, *, silent: bool = False) -> None:
-        if not silent:
-            if not confirm_yes_no(
-                self,
-                "Actualiser",
-                "Recharger la liste générale complète depuis la base configurée ?",
-                default_no=False,
-            ):
-                return
         rows = run_with_progress(
             self,
             "Liste générale",
@@ -482,15 +650,9 @@ class PersonnelListView(QWidget):
         if rows is None:
             return
         self._apply_loaded_rows(rows)
+        self._refresh_lock_banner()
 
     def _show_all(self) -> None:
-        if not confirm_yes_no(
-            self,
-            "Liste complète",
-            "Recharger et afficher la liste générale complète depuis la base ?",
-            default_no=True,
-        ):
-            return
         rows = run_with_progress(
             self,
             "Liste générale",
@@ -502,13 +664,6 @@ class PersonnelListView(QWidget):
         self._apply_loaded_rows(rows)
 
     def _show_presents(self) -> None:
-        if not confirm_yes_no(
-            self,
-            "Présents seulement",
-            "Recharger et n’afficher que les personnels comptés présents (Padmin « présent » ou stage interne) ?",
-            default_no=True,
-        ):
-            return
         rows = run_with_progress(
             self,
             "Liste générale",
@@ -520,6 +675,9 @@ class PersonnelListView(QWidget):
         self._apply_loaded_rows(rows)
 
     def _structural_filter_matches(self, row: ListeGeneraleRow) -> bool:
+        if self._only_empty_structure:
+            if (row.structure or "").strip():
+                return False
         p = self._padmin_combo.currentData()
         if p is not None and (row.position_admin or "").strip() != p:
             return False
@@ -541,10 +699,6 @@ class PersonnelListView(QWidget):
             rows = [r for r in rows if _free_text_matches(r, needle)]
         self._model.set_rows(rows)
         self._update_counter_and_empty(len(rows))
-        hdr = self._table.horizontalHeader()
-        ncol = self._model.columnCount()
-        for c in range(ncol - 1):
-            hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
 
     def _update_counter_and_empty(self, displayed: int) -> None:
         total = len(self._all_rows)
@@ -587,34 +741,50 @@ class PersonnelListView(QWidget):
             return None
         return self._model.row_at(src.row())
 
-    def _open_dossier(self) -> None:
-        row_obj = self._current_row_object()
-        if row_obj is None:
-            QMessageBox.information(self, "Personnel", "Sélectionnez une ligne.")
-            return
-        fresh = self._service.get_by_id(row_obj.id)
-        if fresh is None:
-            QMessageBox.warning(
-                self,
-                "Personnel",
-                "Ligne introuvable en base (identifiant peut-être obsolète). Actualisez la liste.",
-            )
-            return
-        PersonnelDossierDialog(self, fresh, self._referentiel, self._service).exec()
-        self._refresh_all(silent=True)
+    def _selected_row_objects(self) -> list[ListeGeneraleRow]:
+        """Toutes les lignes actuellement sélectionnées (multi-select)."""
+        result: list[ListeGeneraleRow] = []
+        seen: set[int] = set()
+        for idx in self._table.selectionModel().selectedRows():
+            src = self._proxy.mapToSource(idx)
+            if src.isValid() and src.row() not in seen:
+                r = self._model.row_at(src.row())
+                if r is not None:
+                    result.append(r)
+                    seen.add(src.row())
+        return result
 
-    def _edit_current(self) -> None:
-        row_obj = self._current_row_object()
-        if row_obj is None:
-            QMessageBox.information(self, "Personnel", "Sélectionnez une ligne.")
+    # ------------------------------------------------------------------ actions boutons / raccourcis
+
+    def _on_action_btn(self, row: ListeGeneraleRow, action: str) -> None:
+        """Callback du délégué Actions — dispatche vers les méthodes directes."""
+        if action == ACT_VIEW:
+            self._open_dossier_for(row)
+        elif action == ACT_EDIT:
+            self._edit_row(row)
+        elif action == ACT_DELETE:
+            self._delete_row(row)
+
+    def _open_dossier_for(self, row_obj: ListeGeneraleRow) -> None:
+        fresh = self._service.get_by_id(row_obj.id)
+        if fresh is None:
+            QMessageBox.warning(self, "Personnel", "Ligne introuvable en base. Actualisez la liste.")
+            return
+        st = evaluate_editing_state(self._settings)
+        PersonnelDossierDialog(
+            self, fresh, self._referentiel, self._service, allow_edit=not st.locked,
+        ).exec()
+        self._refresh_all(silent=True)
+        self._refresh_lock_banner()
+
+    def _edit_row(self, row_obj: ListeGeneraleRow) -> None:
+        st = evaluate_editing_state(self._settings)
+        if st.locked:
+            QMessageBox.warning(self, "Édition verrouillée", st.detail)
             return
         fresh = self._service.get_by_id(row_obj.id)
         if fresh is None:
-            QMessageBox.warning(
-                self,
-                "Personnel",
-                "Ligne introuvable en base (identifiant peut-être obsolète). Actualisez la liste.",
-            )
+            QMessageBox.warning(self, "Personnel", "Ligne introuvable en base. Actualisez la liste.")
             return
         dlg = PersonnelEditDialog(self, fresh, self._referentiel)
         if dlg.exec() != QDialog.DialogCode.Accepted:
@@ -625,47 +795,391 @@ class PersonnelListView(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Enregistrement", str(e))
             return
-        self._show_status(
-            "Modifications enregistrées. Trace ajoutée à data/personnel_audit.jsonl."
-        )
-        self._refresh_all()
+        self._show_status("Modifications enregistrées. Trace ajoutée à data/personnel_audit.jsonl.")
+        self._refresh_all(silent=True)
 
-    def _on_table_context_menu(self, pos) -> None:
-        idx = self._table.indexAt(pos)
-        if idx.isValid():
-            self._table.setCurrentIndex(idx)
-        menu = QMenu(self)
-        menu.addAction("Tout afficher (liste complète)", self._show_all)
-        menu.addAction("Présents seulement", self._show_presents)
-        menu.addSeparator()
-        menu.addAction("Fiche dossier…", self._open_dossier)
-        menu.addAction("Modifier…", self._edit_current)
-        menu.addAction("Exporter CSV…", self._export_csv)
-        menu.addSeparator()
-        menu.addAction("Actualiser", self._refresh_all)
-        menu.exec(self._table.viewport().mapToGlobal(pos))
-
-    def _export_csv(self) -> None:
+    def _delete_row(self, row_obj: ListeGeneraleRow) -> None:
+        st = evaluate_editing_state(self._settings)
+        if st.locked:
+            QMessageBox.warning(self, "Édition verrouillée", st.detail)
+            return
+        name = row_obj.noms or f"Id {row_obj.id}"
         if not confirm_yes_no(
-            self,
-            "Export CSV",
-            "Exporter la liste affichée (filtres appliqués) vers un fichier CSV ?",
+            self, "Supprimer",
+            f"Supprimer définitivement la fiche de « {name} » (Id {row_obj.id}) ?\n\n"
+            "Cette action est irréversible. Un événement d'audit sera enregistré.",
             default_no=True,
         ):
             return
+        try:
+            self._service.delete_personnel(row_obj)
+        except Exception as e:
+            QMessageBox.critical(self, "Suppression", str(e))
+            return
+        self._show_status(f"Fiche supprimée : {name}. Trace dans data/personnel_audit.jsonl.")
+        self._refresh_all(silent=True)
+
+    # ------------------------------------------------------------------ actions via sélection courante
+
+    def _open_dossier(self) -> None:
+        row_obj = self._current_row_object()
+        if row_obj is None:
+            QMessageBox.information(self, "Personnel", "Sélectionnez une ligne.")
+            return
+        self._open_dossier_for(row_obj)
+
+    def _edit_current(self) -> None:
+        row_obj = self._current_row_object()
+        if row_obj is None:
+            QMessageBox.information(self, "Personnel", "Sélectionnez une ligne.")
+            return
+        self._edit_row(row_obj)
+
+    def _create_new(self) -> None:
+        st = evaluate_editing_state(self._settings)
+        if st.locked:
+            QMessageBox.warning(self, "Édition verrouillée", st.detail)
+            return
+        blank = ListeGeneraleRow(
+            id="0", noms=None, date_naissance=None, lieu_naissance=None,
+            grade=None, date_grade=None, date_service=None, ndecision=None,
+            matricule_militaire=None, matricule_solde=None, position_admin=None,
+            fonction=None, subdivision_arme=None, diplome=None, date_obtention=None,
+            structure=None, obs=None, ordre_tri=None, presseance=None,
+        )
+        dlg = PersonnelEditDialog(self, blank, self._referentiel)
+        dlg.setWindowTitle("Nouvelle fiche personnel")
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        new_row = dlg.result_row()
+        if not new_row.noms:
+            QMessageBox.warning(self, "Création", "Le nom est obligatoire.")
+            return
+        try:
+            new_id = self._service.create_personnel(new_row)
+        except Exception as e:
+            QMessageBox.critical(self, "Création", str(e))
+            return
+        self._show_status(f"Personnel créé (id {new_id}). Trace dans data/personnel_audit.jsonl.")
+        self._refresh_all(silent=True)
+
+    def _delete_current(self) -> None:
+        rows = self._selected_row_objects()
+        if not rows:
+            QMessageBox.information(self, "Personnel", "Sélectionnez une ou plusieurs lignes.")
+            return
+        if len(rows) == 1:
+            self._delete_row(rows[0])
+            return
+        st = evaluate_editing_state(self._settings)
+        if st.locked:
+            QMessageBox.warning(self, "Édition verrouillée", st.detail)
+            return
+        preview = ", ".join(r.noms or f"Id {r.id}" for r in rows[:3])
+        if len(rows) > 3:
+            preview += f"… et {len(rows) - 3} autre(s)"
+        if not confirm_yes_no(
+            self, "Supprimer plusieurs fiches",
+            f"Supprimer définitivement {len(rows)} fiche(s) ?\n\n{preview}\n\n"
+            "Cette action est irréversible. Un événement d'audit sera enregistré pour chaque fiche.",
+            default_no=True,
+        ):
+            return
+        errors: list[str] = []
+        for r in rows:
+            try:
+                self._service.delete_personnel(r)
+            except Exception as e:
+                errors.append(f"{r.noms or r.id}: {e}")
+        if errors:
+            QMessageBox.critical(self, "Suppression", "Erreurs :\n" + "\n".join(errors))
+        else:
+            self._show_status(f"{len(rows)} fiche(s) supprimée(s). Traces dans data/personnel_audit.jsonl.")
+        self._refresh_all(silent=True)
+
+    def _on_table_context_menu(self, pos) -> None:
+        idx = self._table.indexAt(pos)
+        has_row = idx.isValid()
+        if has_row:
+            self._table.setCurrentIndex(idx)
+        row_obj = self._current_row_object() if has_row else None
+        selected = self._selected_row_objects()
+        n_sel = len(selected)
+        locked = evaluate_editing_state(self._settings).locked
+        menu = QMenu(self)
+
+        act_view = menu.addAction("Voir la fiche…\tEntrée", self._open_dossier)
+        act_view.setEnabled(n_sel == 1)
+        act_mod = menu.addAction("Modifier…\tF2", self._edit_current)
+        act_mod.setEnabled(n_sel == 1 and not locked)
+        menu.addSeparator()
+        act_new = menu.addAction("Nouveau personnel…\tCtrl+N", self._create_new)
+        act_new.setEnabled(not locked)
+        del_label = f"Supprimer {n_sel} fiche(s)…\tSuppr" if n_sel > 1 else "Supprimer…\tSuppr"
+        act_del = menu.addAction(del_label, self._delete_current)
+        act_del.setEnabled(n_sel > 0 and not locked)
+        menu.addSeparator()
+        act_copy = menu.addAction(
+            "Copier le nom",
+            lambda: self._copy_name(row_obj),
+        )
+        act_copy.setEnabled(n_sel == 1 and row_obj is not None and bool(row_obj.noms))
+        menu.addSeparator()
+        menu.addAction("Tout afficher (liste complète)", self._show_all)
+        menu.addAction("Présents seulement", self._show_presents)
+        menu.addSeparator()
+        menu.addAction("Exporter CSV…\tCtrl+E", self._export_csv)
+        menu.addAction("Exporter Excel (liste)…\tCtrl+Maj+E", self._export_excel_filtered)
+        menu.addAction("Exporter Excel par position…", self._export_excel_by_padmin)
+        menu.addAction("Imprimer / PDF…\tCtrl+P", self._print_preview)
+        menu.addAction("Actualiser\tCtrl+R", lambda: self._refresh_all(silent=False))
+        menu.exec(self._table.viewport().mapToGlobal(pos))
+
+    def _copy_name(self, row_obj: ListeGeneraleRow | None) -> None:
+        if row_obj and row_obj.noms:
+            QApplication.clipboard().setText(row_obj.noms)
+            self._show_status(f"Nom copié : {row_obj.noms}")
+
+    def _apply_column_visibility(self) -> None:
+        ctx = load_sme_context()
+        hidden_set = set(ctx.hidden_columns)
+        extra_shown = set(ctx.extra_columns_shown)
+        for col_idx, key in _HIDEABLE_COLS.items():
+            self._table.setColumnHidden(col_idx, key in hidden_set)
+        for col_idx, key in _EXTRA_COLS.items():
+            self._table.setColumnHidden(col_idx, key not in extra_shown)
+
+    def _on_columns_dialog(self) -> None:
+        from PySide6.QtWidgets import QCheckBox, QDialog, QDialogButtonBox, QVBoxLayout
+
+        from sme_gend.ui.personnel_table_model import _COLUMNS
+
+        ctx = load_sme_context()
+        hidden_set = set(ctx.hidden_columns)
+        extra_shown = set(ctx.extra_columns_shown)
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Colonnes affichées")
+        dlg.setMinimumWidth(340)
+        lay = QVBoxLayout(dlg)
+
+        # ── groupe 1 : colonnes par défaut ───────────────────────────────────
+        g1 = QGroupBox("Colonnes par défaut")
+        g1_lay = QVBoxLayout(g1)
+        default_cbs: dict[str, QCheckBox] = {}
+        for col_idx, key in _HIDEABLE_COLS.items():
+            cb = QCheckBox(_COLUMNS[col_idx][1])
+            cb.setChecked(key not in hidden_set)
+            default_cbs[key] = cb
+            g1_lay.addWidget(cb)
+        lay.addWidget(g1)
+
+        # ── groupe 2 : colonnes supplémentaires (masquées par défaut) ────────
+        g2 = QGroupBox("Colonnes supplémentaires (masquées par défaut)")
+        g2_lay = QVBoxLayout(g2)
+        extra_cbs: dict[str, QCheckBox] = {}
+        for col_idx, key in _EXTRA_COLS.items():
+            cb = QCheckBox(_COLUMNS[col_idx][1])
+            cb.setChecked(key in extra_shown)
+            extra_cbs[key] = cb
+            g2_lay.addWidget(cb)
+        lay.addWidget(g2)
+
+        bb = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        ctx = load_sme_context()
+        ctx.hidden_columns = [key for key, cb in default_cbs.items() if not cb.isChecked()]
+        ctx.extra_columns_shown = [key for key, cb in extra_cbs.items() if cb.isChecked()]
+        save_sme_context(ctx)
+        self._apply_column_visibility()
+
+    def mark_dirty(self) -> None:
+        """Appelé depuis shell_window lors d'un changement de mois actif."""
+        self._refresh_lock_banner()
+
+    def notify_settings_changed(self) -> None:
+        """Appelé depuis shell_window quand les paramètres changent (mois, chemins, etc.)."""
+        self._refresh_lock_banner()
+
+    def _resize_columns_to_content(self) -> None:
+        """Redimensionne les colonnes au contenu (sauf Actions). Appelé après chaque rechargement complet."""
+        hdr = self._table.horizontalHeader()
+        actions_col = self._model.columnCount() - 1
+        for c in range(actions_col):
+            hdr.resizeSectionToContents(c)
+
+    def _reset_sort_order(self) -> None:
+        self._proxy.sort(-1)
+        self._show_status("Ordre métier restauré.")
+
+    def _current_filtered_rows(self) -> list[ListeGeneraleRow]:
+        """Lignes actuellement affichées (après filtres + recherche), dans l'ordre proxy."""
+        rows: list[ListeGeneraleRow] = []
+        for pr in range(self._proxy.rowCount()):
+            src = self._proxy.mapToSource(self._proxy.index(pr, 0))
+            if src.isValid():
+                r = self._model.row_at(src.row())
+                if r is not None:
+                    rows.append(r)
+        return rows
+
+    def _effective_hidden_keys(self) -> set[str]:
+        ctx = load_sme_context()
+        hidden = set(ctx.hidden_columns)
+        extra_shown = set(ctx.extra_columns_shown)
+        for key in _EXTRA_COLS.values():
+            if key not in extra_shown:
+                hidden.add(key)
+        return hidden
+
+    def _export_excel_filtered(self) -> None:
+        from sme_gend.services.personnel_excel_export import export_liste_filtered
+
+        rows = self._current_filtered_rows()
+        if not rows:
+            QMessageBox.information(self, "Export Excel", "Aucune ligne à exporter.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exporter la liste en Excel",
+            str(Path.home() / "liste_generale.xlsx"),
+            "Excel (*.xlsx)",
+        )
+        if not path:
+            return
+        mois = (load_sme_context().mois_actif or "").strip()
+        title = f"Liste générale {mois}".strip()
+
+        def _work() -> int:
+            return export_liste_filtered(
+                rows,
+                Path(path),
+                hidden_keys=self._effective_hidden_keys(),
+                flat=list(self._referentiel.subdivisions_flat()),
+                sheet_title=title,
+            )
+
+        n = run_with_progress(self, "Export Excel", "Génération du fichier…", _work)
+        if n is None:
+            return
+        QMessageBox.information(
+            self, "Export Excel",
+            f"Fichier enregistré ({n} ligne(s)) :\n{path}",
+        )
+
+    def _export_excel_by_padmin(self) -> None:
+        from sme_gend.services.personnel_excel_export import export_liste_by_padmin
+
+        rows = self._current_filtered_rows()
+        if not rows:
+            QMessageBox.information(self, "Export Excel", "Aucune ligne à exporter.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exporter par position administrative",
+            str(Path.home() / "liste_par_padmin.xlsx"),
+            "Excel (*.xlsx)",
+        )
+        if not path:
+            return
+
+        def _work() -> dict:
+            return export_liste_by_padmin(
+                rows,
+                Path(path),
+                hidden_keys=self._effective_hidden_keys(),
+                flat=list(self._referentiel.subdivisions_flat()),
+            )
+
+        counts = run_with_progress(self, "Export Excel", "Génération du fichier…", _work)
+        if counts is None:
+            return
+        details = "\n".join(f"  {p} : {n}" for p, n in sorted(counts.items(), key=lambda x: -x[1]))
+        QMessageBox.information(
+            self, "Export Excel par position",
+            f"Fichier enregistré :\n{path}\n\n{len(counts)} feuille(s) :\n{details}",
+        )
+
+    def _print_preview(self) -> None:
+        from PySide6.QtGui import QTextDocument
+        from PySide6.QtPrintSupport import QPrintPreviewDialog, QPrinter
+
+        rows = self._current_filtered_rows()
+        hidden = self._effective_hidden_keys()
+        flat = list(self._referentiel.subdivisions_flat())
+        mois = (load_sme_context().mois_actif or "").strip()
+
+        from sme_gend.services.personnel_excel_export import EXPORT_COLS
+        from sme_gend.services.subdivision_label_format import format_subdivision_arme_display
+
+        cols = [(k, h) for k, h, _ in EXPORT_COLS if k not in hidden]
+
+        # Génération HTML
+        html_parts = [
+            "<!DOCTYPE html><html><head><meta charset='utf-8'>",
+            "<style>",
+            "body{font-family:Calibri,Arial,sans-serif;font-size:9pt;margin:10mm;}",
+            "h2{font-size:12pt;color:#1a237e;margin:0 0 6px 0;}",
+            ".meta{font-size:8pt;color:#555;margin-bottom:8px;}",
+            "table{border-collapse:collapse;width:100%;}",
+            "th{background:#1a237e;color:#fff;font-size:8.5pt;padding:4px 6px;text-align:left;}",
+            "td{font-size:8pt;padding:3px 6px;border-bottom:1px solid #ddd;}",
+            "tr:nth-child(even)td{background:#eef2ff;}",
+            "</style></head><body>",
+            f"<h2>Liste générale{' — ' + mois if mois else ''}</h2>",
+            f"<p class='meta'>{len(rows)} ligne(s) affichée(s)</p>",
+            "<table><thead><tr>",
+        ]
+        for _, header in cols:
+            html_parts.append(f"<th>{header}</th>")
+        html_parts.append("</tr></thead><tbody>")
+
+        for row in rows:
+            html_parts.append("<tr>")
+            for key, _ in cols:
+                if key == "subdivision_arme":
+                    val = format_subdivision_arme_display(row.subdivision_arme, flat) or ""
+                else:
+                    val = str(getattr(row, key) or "").strip()
+                html_parts.append(f"<td>{_html.escape(val)}</td>")
+            html_parts.append("</tr>")
+
+        html_parts.append("</tbody></table></body></html>")
+        html_content = "".join(html_parts)
+
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setPageOrientation(QPageLayout.Orientation.Landscape)
+
+        doc = QTextDocument()
+        doc.setHtml(html_content)
+
+        dlg = QPrintPreviewDialog(printer, self)
+        dlg.setWindowTitle("Aperçu avant impression — Liste générale")
+        dlg.paintRequested.connect(lambda p: doc.print_(p))
+        dlg.resize(1100, 750)
+        dlg.exec()
+
+    def _export_csv(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Exporter en CSV",
-            "",
+            str(Path.home() / "liste_generale.csv"),
             "Fichiers CSV (*.csv);;Tous les fichiers (*)",
         )
         if not path:
             return
-        if not confirm_overwrite_file(self, path):
-            return
+        data_col_count = self._model.columnCount() - 1  # exclut la colonne Actions
         headers = [
             self._model.headerData(c, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
-            for c in range(self._model.columnCount())
+            for c in range(data_col_count)
         ]
         nrows = self._proxy.rowCount()
         dlg = QProgressDialog("Export CSV en cours…", None, 0, max(1, nrows), self)
@@ -688,7 +1202,7 @@ class PersonnelListView(QWidget):
                     if not src.isValid():
                         continue
                     row_vals = []
-                    for c in range(self._model.columnCount()):
+                    for c in range(data_col_count):
                         mi = self._model.index(src.row(), c)
                         v = self._model.data(mi, Qt.ItemDataRole.DisplayRole)
                         row_vals.append(v if v is not None else "")
@@ -708,9 +1222,13 @@ def _fmt_num(n: int) -> str:
 
 def _free_text_matches(row: ListeGeneraleRow, needle: str) -> bool:
     parts = [
-        row.id,
+        str(row.id),
         row.noms or "",
+        row.grade or "",
         row.fonction or "",
+        row.structure or "",
+        row.position_admin or "",
+        row.subdivision_arme or "",
         row.matricule_militaire or "",
         row.matricule_solde or "",
         row.diplome or "",

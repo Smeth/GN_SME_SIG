@@ -19,7 +19,7 @@ from sme_gend.repositories.sqlite_common import apply_sqlite_schema
 _SELECT_ROW = """
 SELECT id, id_acces, noms, date_n, lieu_n, grade, date_grade, date_service,
        ndecision, matmilitaire, matsolde, padmin, fonction, sub_arme,
-       diplome, date_obtention, structure, obs, oder_tri, presseance
+       diplome, date_obtention, structure, obs, ordre_tri, presseance
 FROM liste_generale
 """
 
@@ -63,10 +63,27 @@ class SqliteListeGeneraleRepository:
     def fetch_all(self) -> list[ListeGeneraleRow]:
         with self._connect() as conn:
             cur = conn.cursor()
-            cur.execute(f"{_SELECT_ROW.strip()} ORDER BY oder_tri, id")
+            cur.execute(f"{_SELECT_ROW.strip()} ORDER BY ordre_tri, id")
             return [self._row_to_liste(r) for r in cur.fetchall()]
 
     def fetch_presents(self) -> list[ListeGeneraleRow]:
+        """Personnels présents — utilise tab_padmin si renseigné, sinon heuristique."""
+        with self._connect() as conn:
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    "SELECT COUNT(*) FROM tab_padmin WHERE compte_comme_present = 1"
+                )
+                if cur.fetchone()[0] > 0:
+                    cur.execute(
+                        f"{_SELECT_ROW.strip()} "
+                        "JOIN tab_padmin ON trim(liste_generale.padmin) = trim(tab_padmin.libelle) "
+                        "WHERE tab_padmin.compte_comme_present = 1 "
+                        "ORDER BY ordre_tri, id"
+                    )
+                    return [self._row_to_liste(r) for r in cur.fetchall()]
+            except Exception:
+                pass
         rows = self.fetch_all()
         return [r for r in rows if padmin_counts_as_present(r.position_admin)]
 
@@ -113,7 +130,7 @@ class SqliteListeGeneraleRepository:
             noms = ?, date_n = ?, lieu_n = ?, grade = ?, date_grade = ?, date_service = ?,
             ndecision = ?, matmilitaire = ?, matsolde = ?, padmin = ?, fonction = ?,
             sub_arme = ?, diplome = ?, date_obtention = ?, structure = ?, obs = ?,
-            oder_tri = ?, presseance = ?, updated_at = datetime('now')
+            ordre_tri = ?, presseance = ?, updated_at = datetime('now')
         WHERE id = ?
         """
         with self._connect() as conn:
@@ -121,6 +138,37 @@ class SqliteListeGeneraleRepository:
             cur.execute(sql, (*set_vals, pk))
             if cur.rowcount == 0:
                 raise ValueError(f"Aucune ligne mise à jour pour id = {pk!r}")
+
+    def insert_row(self, row: ListeGeneraleRow) -> str:
+        """Insère une nouvelle ligne ; retourne l'id (clé primaire SQLite) sous forme de str."""
+        sql = """
+        INSERT INTO liste_generale (
+            id_acces, noms, date_n, lieu_n, grade, date_grade, date_service,
+            ndecision, matmilitaire, matsolde, padmin, fonction, sub_arme,
+            diplome, date_obtention, structure, obs, ordre_tri, presseance
+        ) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            row.noms, row.date_naissance, row.lieu_naissance,
+            row.grade, row.date_grade, row.date_service, row.ndecision,
+            row.matricule_militaire, row.matricule_solde, row.position_admin,
+            row.fonction, row.subdivision_arme, row.diplome, row.date_obtention,
+            row.structure, row.obs, row.ordre_tri, row.presseance,
+        )
+        with self._connect() as conn:
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            conn.commit()
+            return str(cur.lastrowid)
+
+    def delete_row(self, row_id: str) -> None:
+        pk = int(row_id)
+        with self._connect() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM liste_generale WHERE id = ?", (pk,))
+            if cur.rowcount == 0:
+                raise ValueError(f"Aucune ligne supprimée pour id = {pk!r}")
+            conn.commit()
 
     def update_structure_column(self, old_code: str, new_code: str) -> int:
         o = (old_code or "").strip()
@@ -180,7 +228,7 @@ class SqliteListeGeneraleRepository:
         INSERT INTO liste_generale (
             id_acces, noms, date_n, lieu_n, grade, date_grade, date_service,
             ndecision, matmilitaire, matsolde, padmin, fonction, sub_arme,
-            diplome, date_obtention, structure, obs, oder_tri, presseance
+            diplome, date_obtention, structure, obs, ordre_tri, presseance
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         update_sql = """
@@ -188,7 +236,7 @@ class SqliteListeGeneraleRepository:
             noms = ?, date_n = ?, lieu_n = ?, grade = ?, date_grade = ?, date_service = ?,
             ndecision = ?, matmilitaire = ?, matsolde = ?, padmin = ?, fonction = ?,
             sub_arme = ?, diplome = ?, date_obtention = ?, structure = ?, obs = ?,
-            oder_tri = ?, presseance = ?, updated_at = datetime('now')
+            ordre_tri = ?, presseance = ?, updated_at = datetime('now')
         WHERE id = ?
         """
         inserted = 0

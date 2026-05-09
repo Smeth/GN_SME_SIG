@@ -28,7 +28,16 @@
       "title_sub_override": null,
       "group_by_subdivision": true,
       "subdivision_order": [
-        "CABINET COMGEND"
+        "CABINET COMGEND",
+        "CONSEILLER",
+        "DIVISION COMMUNICATION",
+        "DIVISION PROTOCOLE ET COMMUNICATION",
+        "DIVISION REDACTION",
+        "DIVISION RELATIONS PUBLIQUES",
+        "PROTOCOLE",
+        "SECRETARIAT",
+        "SECTION INFORMATIQUE",
+        "SECURITE COMGEND"
       ]
     },
     {
@@ -38,7 +47,16 @@
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "DFGJ",
+        "DIVISION ETUDES ET SYNTHESES",
+        "DIVISION LOGISTIQUE ET FINANCES",
+        "DIVISION PLANIFICATION",
+        "POINT FOCAL UPC",
+        "PROTOCOLE",
+        "SECRETARIAT",
+        "SECURITE"
+      ]
     },
     {
       "id": "auto-IT-3",
@@ -47,7 +65,12 @@
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "DIVISION INSPECTION DE L'ADMINISTRATION ET DE LA  LOGISTIQUE",
+        "DIVISION INSPECTION DE L'ENTRAINEMENT ET DE LA FORMATION",
+        "DIVISION INSPECTION DE L'ORGANISATION ET DES OPERATIONS",
+        "SECRETARIAT"
+      ]
     },
     {
       "id": "auto-DOE-4",
@@ -56,7 +79,11 @@
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "DIVISION ENTRAINEMENT ET EMPLOI DES FORCES",
+        "DIVISION POLICE ADMINISTRATIVE ET ORDRE PUBLIC",
+        "SECRETARIAT"
+      ]
     },
     {
       "id": "auto-DPF-5",
@@ -85,7 +112,10 @@
         "DIVISON ORDINAIRE ET ORGANISMES D'INTERET PRIVE",
         "DIVISION TRESORERIE",
         "DIVISION BUDGET ET PROSPECTIVES BUDGETAIRES",
-        "DIVISION ADMINISTRATION GENERALE, SOLDE ET PENSIONS"
+        "DIVISION ADMINISTRATION GENERALE, SOLDE ET PENSIONS",
+        "DIVISIOIN BUDGET ET PROSPECTIVES BUDGETAIRES",
+        "DIVISION BUDGET  ET PROSPECTIVES BUDGETAIRES",
+        "SECRETARIAT"
       ]
     },
     {
@@ -97,7 +127,9 @@
       "group_by_subdivision": true,
       "subdivision_order": [
         "DIVISION POLICE JUDICIAIRE-POLICE ADMINISTRATIVE",
-        "DIVISION DOCUMENTATION"
+        "DIVISION DOCUMENTATION",
+        "DIVISION POLICE ADMINISTRATIVE",
+        "SECRETARIAT"
       ]
     },
     {
@@ -110,7 +142,8 @@
       "subdivision_order": [
         "DIVISION ETUDES ET EXPERIMENTATION",
         "DIVISION EXPLOITATION ET EMPLOI",
-        "DIVISION INFORMATIQUE ET TELECOMMUNICATION"
+        "DIVISION INFORMATIQUE ET TELECOMMUNICATION",
+        "SECRETARIAT"
       ]
     },
     {
@@ -126,7 +159,8 @@
         "DIVISION MAINTENANCE AUTOS ET ENGINS BLINDES",
         "DIVISION HABILLEMENT COUCHAGE CAMPEMENT ET AMEUBLEMENT",
         "DIVISION ARMEMENTS MUNITIONS ET MATERIELS SPECIFIQUES",
-        "DIVISION ARMEMENT MUNITIONS ET MATERIELS SPECIFIQUES"
+        "DIVISION ARMEMENT MUNITIONS ET MATERIELS SPECIFIQUES",
+        "SECRETARIAT"
       ]
     },
     {
@@ -141,7 +175,12 @@
         "DIVISION TRAVAUX - DDT",
         "DIVISION ETUDES ET PLANIFICATION - DDT",
         "DIVISION DOMAINE - DDT",
-        "Atélier bois - DDT"
+        "Atélier bois - DDT",
+        "ATELIER BOIS",
+        "DIVISION DOMAINE",
+        "DIVISION ETUDES ET PLANIFICATION",
+        "DIVISION TRAVAUX",
+        "SECRETARIAT"
       ]
     },
     {
@@ -152,7 +191,8 @@
       "title_sub_override": null,
       "group_by_subdivision": true,
       "subdivision_order": [
-        "COMMANDEMENT"
+        "COMMANDEMENT",
+        "SECRETARIAT"
       ]
     },
     {
@@ -165,7 +205,10 @@
       "subdivision_order": [
         "COMMANDEMENT OCR",
         "SECRETARIAT",
-        "ETAT-MAJOR"
+        "ETAT-MAJOR",
+        "COMMANDEMENT",
+        "LABORATOIRE DE POLICE TECHNIQUE ET SCIENTIFIQUE",
+        "SERVICE DES MATERIELS"
       ]
     },
     {
@@ -180,7 +223,20 @@
         "ETAT-MAJOR EGN",
         "CCS_EGN",
         "SCE ADM",
-        "INFIRMERIE_EGN"
+        "INFIRMERIE_EGN",
+        "CENTRE DE DOCUMENTATION ET DE PEDAGOGIE",
+        "COMMANDEMENT",
+        "COMPAGNIE DE COMMANDEMENT ET DES SERVICES",
+        "CONTROLE SPECIAL",
+        "DEPARTEMENT FORMATION MILITAIRE",
+        "DEPARTEMENT FORMATION PROFFESIONEL",
+        "DIRECTION DES ENSEIGNEMENTS",
+        "DIVISION PLANIFICATION, EMPLOI ET MOYENS",
+        "HABILLEMENT COUCHAGE CAMPEMENT ALIMENTATION",
+        "INFIRMERIE",
+        "PROTOCOLE",
+        "SECRETARIAT",
+        "SERVICES ADMINISTRATIFS"
       ]
     },
     {
@@ -202,7 +258,15 @@
         "1ère SECTION INTERVENTION",
         "2e SECTION INTERVENTION",
         "3e SECTION INTERVENTION",
-        "4e SECTION INTERVENTION"
+        "4e SECTION INTERVENTION",
+        "CASERNEMENT",
+        "CELLULE RENSEIGNEMENT",
+        "COMMANDEMENT",
+        "ETAT-MAJOR",
+        "OPERATIONS",
+        "SECRETARIAT",
+        "SERVICE GENERAL",
+        "SERVICES ADMINISTRATIFS"
       ]
     },
     {
@@ -216,7 +280,12 @@
         "SECRETARIAT",
         "SERVICES ADMINISTRATIF CIK",
         "DIVISION DES ENSEIGNEMENTS",
-        "COMPAGNIE DE COMMANDEMENT ET DE SERVICES"
+        "COMPAGNIE DE COMMANDEMENT ET DE SERVICES",
+        "COMMANDEMENT",
+        "ETAT-MAJOR",
+        "SCE ADM",
+        "SERVICE GENERAL",
+        "SERVICES ADMINISTRATIFS"
       ]
     },
     {
@@ -235,7 +304,16 @@
         "ESCADRON D'HONNEURS ET MUSIQUE",
         "ESCADRON DE SECURITE ET PROTECTION 1",
         "ESCADRON DE SECURITE ET PROTECTION 2",
-        "ESCADRON DES PERSONNELS DETACHES"
+        "ESCADRON DES PERSONNELS DETACHES",
+        "1er ESCADRON DE SECURITE ET PROTECTION",
+        "2e ESCADRON DE SECURITE ET PROTECTION",
+        "COMMANDEMENT",
+        "DIVISION OPERATION ET RENSEIGNEMENTS",
+        "ESCADRON DE COMMANDEMENT ET DES SERVICES",
+        "ESCADRON DE SECURITE ET DE PROTECTION",
+        "ETAT-MAJOR",
+        "GEGQG",
+        "ONU"
       ]
     },
     {
@@ -257,7 +335,12 @@
         "CGF_DOLISIE",
         "CGF_BRAZZAVILLE",
         "CFG-BZV",
-        "DETACHEMENT FERROVIAIRE DE LOUTETE"
+        "DETACHEMENT FERROVIAIRE DE LOUTETE",
+        "1er ESCADRON",
+        "2e ESCADRON",
+        "3e ESCADRON",
+        "COMMANDEMENT",
+        "SERVICES ADMINISTRATIFS"
       ]
     },
     {
@@ -267,7 +350,19 @@
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "BRIGADE DU PORT AUTONOME DE POINTE-NOIRE",
+        "BRIGADE FLUVIALE DE YORO",
+        "BRIGADE FLUVIALE DU BEACH",
+        "COMMANDEMENT",
+        "COMPAGNIE FLUVIALE  DE BRAZZAVILLE",
+        "COMPAGNIE FLUVIALE  DE NGABE",
+        "COMPAGNIE MARITIME DE LOANGO",
+        "COMPAGNIE MARITIME DE POINTE-NOIRE",
+        "ETAT-MAJOR",
+        "SOUS-GROUPEMENT CENTRE",
+        "SOUS-GROUPEMENT SUD"
+      ]
     },
     {
       "id": "auto-GGTA-19",
@@ -281,7 +376,8 @@
         "COMMANDEMENT GGTA",
         "COMPAGNIE GGTA BRAZZAVILLE",
         "COMPAGNIE GGTA POINTE-NOIRE",
-        "COMPAGNIE GGTA OLLOMBO"
+        "COMPAGNIE GGTA OLLOMBO",
+        "ETAT-MAJOR"
       ]
     },
     {
@@ -304,7 +400,17 @@
         "ESR OWANDO",
         "ESR YIE",
         "ESR-MENGO",
-        "ETAT-MAJOR"
+        "ETAT-MAJOR",
+        "COMMANDEMENT",
+        "ESCADRON DE SECURITE ROUTIERE D'OWANDO",
+        "ESCADRON DE SECURITE ROUTIERE DE BRAZZAVILLE",
+        "ESCADRON DE SECURITE ROUTIERE DE DOLISIE",
+        "ESCADRON DE SECURITE ROUTIERE DE MADINGOU",
+        "ESCADRON DE SECURITE ROUTIERE DE MENGO",
+        "ESCADRON DE SECURITE ROUTIERE DE NGO",
+        "ESCADRON DE SECURITE ROUTIERE DE OUESSO",
+        "ESCADRON DE SECURITE ROUTIERE DE POINTE-NOIRE",
+        "ESCADRON DE SECURITE ROUTIERE DE YIE"
       ]
     },
     {
@@ -345,7 +451,17 @@
         "BRIGADE TERRITORIALE DE KINTELE",
         "PSIG COMPAGNIE DE GENDARMERIE TERRITORIALE BZV-1",
         "PSIG COMPAGNIE DE GENDARMERIE TERRITORIALE BZV-2",
-        "PSIG COMPAGNIE DE GENDARMERIE TERRITORIALE DE KINTELE"
+        "PSIG COMPAGNIE DE GENDARMERIE TERRITORIALE DE KINTELE",
+        "BRIGADE TERRITORIALE DE BOUEMBA",
+        "COMMANDEMENT",
+        "DETACHEMENT COUR DE COMPTES ET DE DISCIPLINE BUDGETAIRE",
+        "DETACHEMENT ONU",
+        "ESCADRON SPECIALISE DE SECURITE ET D'INTERVENTION DE LA GENDARMERIE",
+        "ETAT-MAJOR",
+        "PELOTON DE SURVEILLANCE ET D'INTERVENTION DE LA GENDARMERIE BZV-1",
+        "PELOTON DE SURVEILLANCE ET D'INTERVENTION DE LA GENDARMERIE BZV-2",
+        "PELOTON DE SURVEILLANCE ET D'INTERVENTION DE LA GENDARMERIE DE KINTELE",
+        "SECTION DE RECHERCHES JUDICIAIRES"
       ]
     },
     {
@@ -356,7 +472,22 @@
       "title_sub_override": null,
       "group_by_subdivision": true,
       "subdivision_order": [
-        "COMMANDEMENT 1er GGM"
+        "COMMANDEMENT 1er GGM",
+        "1er ESCADRON",
+        "2e ESCADRON",
+        "3e ESCADRON",
+        "COMMANDEMENT",
+        "DIVISION LOGISTIQUE",
+        "DIVISION OPERATIONS ET INSTRUCTION",
+        "DIVISION RENSEIGNEMENT ET TRANSMISSION",
+        "DIVISION SPORT",
+        "ESCADRON BLINDE",
+        "ESCADRON D'INTERVENTION",
+        "ETAT-MAJOR",
+        "ONU",
+        "SECRETARIAT",
+        "SERVICE GENERAL",
+        "SERVICES ADMINISTRATIFS"
       ]
     },
     {
@@ -382,7 +513,10 @@
         "POSTE DE LOUINGUI",
         "COMPAGNIE DE GENDARMERIE TERRITORIALE DE MINDOULI",
         "BRIGADE TERRITORIALE DE MINDOULI",
-        "BRIGADE TERRITORIALE DE KINKALA"
+        "BRIGADE TERRITORIALE DE KINKALA",
+        "COMMANDEMENT",
+        "ESCADRON SPECIALISE DE SURVEILLANCE ET D'INTERVENTION DE LA GENDARMERIE",
+        "ETAT-MAJOR"
       ]
     },
     {
@@ -415,7 +549,11 @@
         "BRIGADE DE RECHERCHE DE NKAYI",
         "BRIGADE TERRITORIALE DE LOUDIMA",
         "BRIGADE TERRITORIALE DE NKAYI",
-        "PSIG"
+        "PSIG",
+        "COMMANDEMENT",
+        "ETAT-MAJOR",
+        "PELOTON DE SURVEILLANCE ET D'INTERVENTION DE LA GENDARMERIE",
+        "SECTION DE RECHERCHES JUDICIAIRES"
       ]
     },
     {
@@ -437,7 +575,15 @@
         "BRIGADE TERRITORIALE DE SIBITI",
         "COMPAGNIE DE GENDARMERIE TERRITORIALE DE ZANAGA",
         "BRIGADE TERRITORIALE DE ZANAGA",
-        "BRIGADE TERRITORIALE DE BAMBAMA"
+        "BRIGADE TERRITORIALE DE BAMBAMA",
+        "BRIGADE TERRITORIALE DE  BAMBAMA",
+        "BRIGADE TERRITORIALE DE  KOMONO",
+        "BRIGADE TERRITORIALE DE  MAYEYE",
+        "BRIGADE TERRITORIALE DE  ZANAGA",
+        "COMMANDEMENT",
+        "ESCADRON DE GENDARMERIE MOBILE",
+        "ETAT-MAJOR",
+        "SECTION DE RECHERCHES JUDICIAIRES"
       ]
     },
     {
@@ -472,7 +618,16 @@
         "BRIGADE TERRITORIALE DE MOUSSOGOS",
         "BRIGADE TERRITORIALE DE MOUSSOGO",
         "BRIGADE TERRITORIALE DE KIBANGOU",
-        "BRIGADE TERRITORIALE DE BANDA"
+        "BRIGADE TERRITORIALE DE BANDA",
+        "BRIGADE TERRITORIALE DE  BANDA",
+        "BRIGADE TERRITORIALE DE DIVENIE",
+        "BRIGADE TERRITORIALE DE MAYOKA",
+        "BRIGADE TERRITORIALE DEKIMONGO",
+        "BRIGADE TERRITORIIALE DE MOUSSONGO",
+        "COMMANDEMENT",
+        "ESCADRON DE GENDARMERIE MOBILE",
+        "ETAT-MAJOR",
+        "SECTION DE RECHERCHES JUDICIAIRES"
       ]
     },
     {
@@ -499,7 +654,13 @@
         "BRIGADE TERRITORIALE DE  MENGO",
         "BRIGADE TERRITORIALE DE  MVOUTI",
         "BRIGADE TERRITORIALE DE  NZAMBI",
-        "CTM/BL"
+        "CTM/BL",
+        "BRIGADE TERRITORIALE DE  KAKAMOUEKABRIGADE TERRITORIALE DE  MADINGO-KAYES",
+        "BRIGADE TERRITORIALE DE  LO3ANGO",
+        "COMMANDEMENT",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE HINDA",
+        "ESCADRON SPECIALISE DE SURVEILLANCE ET D'INTERVENTION DE LA GENDARMERIE",
+        "SECTION DE RECHERCHES JUDICIAIRES"
       ]
     },
     {
@@ -531,7 +692,12 @@
         "BRIGADE TERRITORIALE DE DJENO",
         "BRIGADE TERRITORIALE DE TIE TIE",
         "BRIGADE TERRITORIALE DE PATRA",
-        "BRIGADE TERRITORIALE DE NZASSI"
+        "BRIGADE TERRITORIALE DE NZASSI",
+        "COMMANDEMENT",
+        "DETACHEMENT TRIBUNAL DE GRANDE INSTANCE DE POINTE NOIRE",
+        "ESCADRON SPECIALISE DE SURVEILLANCE ET D'INTERVENTION DE LA GENDARMERIE",
+        "ETAT-MAJOR",
+        "SECTION DE RECHERCHES JUDICIAIRES"
       ]
     },
     {
@@ -542,7 +708,12 @@
       "title_sub_override": null,
       "group_by_subdivision": true,
       "subdivision_order": [
-        "COMMANDEMENT 2e GGM"
+        "COMMANDEMENT 2e GGM",
+        "1er ESCADRON",
+        "2e ESCADRON",
+        "COMMANDEMENT",
+        "ESCADRON D'INTERVENTION",
+        "ETAT-MAJOR"
       ]
     },
     {
@@ -560,7 +731,9 @@
         "BRIGADE TERRITORIALE DE  ODZIBA",
         "BRIGADE TERRITORIALE DE MAYAMA",
         "BRIGADE TERRITORIALE DE NGABE",
-        "BRIGADE TERRITORIALE D'IGNIE"
+        "BRIGADE TERRITORIALE D'IGNIE",
+        "COMMANDEMENT",
+        "ETAT-MAJOR"
       ]
     },
     {
@@ -585,7 +758,11 @@
         "BRIGADE TERRITORIALE DE DJAMBALA",
         "COMPAGNIE DE GENDARMERIE TERRITORIALE DE NGO",
         "BRIGADE TERRITORIALE DE NGO",
-        "BRIGADE TERRITORIALE DE BOUEMBA"
+        "BRIGADE TERRITORIALE DE BOUEMBA",
+        "COMMANDEMENT",
+        "ESCADRON SPECIALISE DE SURVEILLANCE ET D'INTERVENTION DE LA GENDARMERIE",
+        "ETAT-MAJOR",
+        "SECTION DE RECHERCHES JUDICIAIRES"
       ]
     },
     {
@@ -608,7 +785,13 @@
         "COMPAGNIE DE GENDARMERIE TERRITORIALE D'OLLOMBO",
         "BRIGADE TERRITORIALE DE  OLLOMBO",
         "GROUPEMENT TERRITORIALE DE GENDARMERIE D'OLLOMBO",
-        "ESCADRON DE GENDARMERIE MOBILE D'OLLOMBO"
+        "ESCADRON DE GENDARMERIE MOBILE D'OLLOMBO",
+        "BRIGADE TERRITORIALE D'ABALA",
+        "BRIGADE TERRITORIALE D'OLLOMBO",
+        "BRIGADE TERRITORIALE D'ONGOGNI",
+        "BRIGADE TERRITORIALE DE  GAMBOMA",
+        "COMMANDEMENT",
+        "ETAT-MAJOR"
       ]
     },
     {
@@ -636,7 +819,13 @@
         "BRIGADE TERRITORIALE DE OWANDO",
         "COMPAGNIE DE GENDARMERIE TERRITORIALE DE OYO",
         "BRIGADE TERRITORIALE DE OYO",
-        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE TCHIKAPIKA"
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE DE TCHIKAPIKA",
+        "BRIGADE TERRITORIALE DE TCHIKAPIKA",
+        "BRIGADETERRITORIALE DE BOUNDJI",
+        "COMMANDEMENT",
+        "ESCADRON SPECIALISE DE SURVEILLANCE ET D'INTERVENTION DE LA GENDARMERIE",
+        "ETAT-MAJOR",
+        "SECTION DE RECHERCHES JUDICIAIRES"
       ]
     },
     {
@@ -662,7 +851,17 @@
         "BRIGADE TERRITORIALE DE EWO",
         "BRIGADE TERRITORIALE DE MBOMO",
         "BRIGADE TERRITORIALE DE YABA MBETI",
-        "PSIG EWO"
+        "PSIG EWO",
+        "BRIGADE TERRITORIALE D'ETOUMBI",
+        "BRIGADE TERRITORIALE D'EWO",
+        "BRIGADE TERRITORIALE D'OKOYO",
+        "COMMANDEMENT",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE D'OKOYO",
+        "ESCADRON SPECIALISE DE SURVEILLANCE ET D'INTERVENTION DE LA GENDARMERIE",
+        "ETAT-MAJOR",
+        "PELOTON DE SURVEILLANCE ET D'INTERVENTION DE LA GENDARMERIE D'EWO",
+        "PELOTON DE SURVEILLANCE ET D'INTERVENTION DE LA GENDARMERIE DE KELLE",
+        "SECTION DE RECHERCHES JUDICIAIRES"
       ]
     },
     {
@@ -680,7 +879,11 @@
         "BRIGADE TERRITORIALE DE MOSSAKA",
         "BRIGADE TERRITORIALE DE BOKOMA",
         "BRIGADE TERRITORIALE DE LIRANGA",
-        "BRIGADE TERRITORIALE DE LOUKOLELA"
+        "BRIGADE TERRITORIALE DE LOUKOLELA",
+        "COMMANDEMENT",
+        "DIVISION POLICE JUDICIARE-POLICE ADMINISTRATIVE",
+        "ETAT-MAJOR",
+        "PELOTON DE SURVEILLANCE ET D'INTERVENTION DE LA GENDARMERIE DE MOSSAKA"
       ]
     },
     {
@@ -704,7 +907,11 @@
         "COMPAGNIE DE GENDARMERIE TERRITORIALE DE SEMBE",
         "BRIGADE TERRITORIALE DE SEMBE",
         "BRIGADE TERRITORIALE DE SOUANKE",
-        "BRIGADE TERRITORIALE DE TALA-TALA"
+        "BRIGADE TERRITORIALE DE TALA-TALA",
+        "COMMANDEMENT",
+        "ESCADRON DE GENDARMERIE MOBILE",
+        "ETAT-MAJOR",
+        "SECTION DE RECHERCHES JUDICIAIRES"
       ]
     },
     {
@@ -736,7 +943,12 @@
         "POSTE GONGO",
         "POSTE MOUALE",
         "POSTE SAMBALA",
-        "POSTE THANRY"
+        "POSTE THANRY",
+        "BRIGADE DE RECHERCHES",
+        "COMMANDEMENT",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE D'ENYELLE",
+        "ETAT-MAJOR",
+        "PELOTON DE SURVEILLANCE ET D'INTERVENTION DE LA GENDARMERIE"
       ]
     },
     {
@@ -746,7 +958,52 @@
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "2e_ESC",
+        "3e ESCADRON",
+        "4e ESC",
+        "BRIGADE DE RECHERCHES COMPAGNIE DE GENDARMERIE TERRITORIALE DE POINTE NOIRE 2",
+        "BRIGADE TERRITORIALE DE BACONGO",
+        "BRIGADE TERRITORIALE DE MFILOU",
+        "BRIGADE TERRITORIALE DE MOUNGALI",
+        "C/S EGN",
+        "CABINET COMGEND",
+        "CDMT",
+        "CDP",
+        "COMMANDEMENT GEGQG",
+        "COMMANDEMENT GGMF",
+        "COMMANDEMENT GGTA",
+        "COMPAGNIE DE GENDARMERIE TERRITORIALE POINTE NOIRE 2",
+        "COMPAGNIE GGTA BRAZZAVILLE",
+        "COMPAGNIE GGTA POINTE-NOIRE",
+        "CS-DPF",
+        "CS-RG-BZV",
+        "DGSP",
+        "DIRMAT",
+        "DIVISION ADMINISTRATION GENERALE, SOLDE ET PENSIONS",
+        "DIVISION DES ENSEIGNEMENTS",
+        "DIVISION ENTRAINEMENT ET ORDRE PUBLIC",
+        "DIVISION GESTION DU PERSONNEL",
+        "DIVISION TRESORERIE",
+        "DRO/GE-GQG",
+        "ESCADRON BLINDE",
+        "ESCADRON DE GENDARMERIE MOBILE RG-SGH",
+        "ESP/GEGQG",
+        "ESSIG RG-PNR",
+        "ESSIG RG-POO",
+        "ESSIG-PNR",
+        "ETAT-MAJOR",
+        "ETAT-MAJOR 1er GGM",
+        "ETAT-MAJOR 2e GGM",
+        "ETAT-MAJOR RG-BZV",
+        "ETAT-MAJOR RG-NRI",
+        "ETAT-MAJOR RG-PLT",
+        "ETAT-MAJOR RG-PNR",
+        "OFFICE CENTRAL DE RENSEIGNEMENT",
+        "ONU",
+        "SECRETARIAT",
+        "SECTION DE RECHERCHE JUDICIARE"
+      ]
     },
     {
       "id": "auto-DETACHE-39",
@@ -755,7 +1012,128 @@
       "title_main_override": null,
       "title_sub_override": null,
       "group_by_subdivision": true,
-      "subdivision_order": null
+      "subdivision_order": [
+        "3e ESCADRON",
+        "4e ESCADRON",
+        "AN",
+        "ARPCE",
+        "BRIGADE TERRITORIALE DE _MBOMO",
+        "CA-BZV",
+        "CAB/MDN",
+        "CAB/MID",
+        "CC",
+        "CCB",
+        "CCS",
+        "CESE",
+        "CID",
+        "CIMAK",
+        "CIRAS",
+        "CMDT_RGN",
+        "CNS",
+        "CNTRGFP",
+        "CRF",
+        "CS",
+        "CSCPRC",
+        "CSLC",
+        "DCSM",
+        "DCSS",
+        "DDEF SH",
+        "DETACHE",
+        "DFMAS",
+        "DGAF",
+        "DGAP",
+        "DGASCOM",
+        "DGCCA",
+        "DGE",
+        "DGFE",
+        "DGJ",
+        "DGRH",
+        "DGSCC",
+        "DGSP",
+        "DGT",
+        "DIC",
+        "DIRCAB PR",
+        "DNVO",
+        "DOPS-FAC",
+        "DPNMA",
+        "DPR",
+        "Direction du protocole présidentiel",
+        "EGM_RGBZA",
+        "EGM_SGH",
+        "EGT",
+        "EMP-PR",
+        "ESP",
+        "ESSIG_RGK",
+        "ETAT-MAJOR_SGH",
+        "GDB MOIGNY",
+        "GDB NIANGA NGATSE MBOUALA",
+        "GDB PVM",
+        "GR",
+        "GRANDE CHANCELLERIE DES ORDRES NATIONNAUX",
+        "HALC",
+        "HCREC",
+        "HCVVCA",
+        "HOPITAL REGIONALE DES ARMEES PNR",
+        "IGFAC",
+        "IGPG",
+        "INFIRMERIE_EGN",
+        "INSPECTEUR GENERALE DES FAC",
+        "Inspection générale FAC",
+        "MAE",
+        "MAEFCE",
+        "MAEP",
+        "MAIRE ARR6, PNR",
+        "MAIRIE DE NGOYO",
+        "MAIRIE PNR",
+        "MASAH",
+        "MASSAH",
+        "MBCPPP",
+        "MCEQSPLAAP",
+        "MCEQSPLCA",
+        "MCM",
+        "MCRE",
+        "MCUH",
+        "MDN",
+        "MEDDBC",
+        "MEF",
+        "MEFVN",
+        "MEH",
+        "MEPPSA",
+        "METP",
+        "MF",
+        "MFPTSS",
+        "MH",
+        "MID-IG",
+        "MJDH",
+        "MJDHPPA",
+        "MJEC",
+        "MJSECFQE",
+        "MPFIFD",
+        "MPMEA",
+        "MPSIR",
+        "MPTEN",
+        "MSP",
+        "MTACMM",
+        "MZES",
+        "Maire de Mvoumvou",
+        "Mairie centrale",
+        "OMS",
+        "ONU",
+        "PCDK",
+        "PM",
+        "PREFET KOUILOU",
+        "PRESIDENT CC",
+        "Préfet Kouilou",
+        "Royaume MBAYA",
+        "S/PREFET OYO",
+        "SECTION FICHIER",
+        "SENAT",
+        "SG MIN JUSTICE",
+        "SNPC",
+        "SOUS-PREFET SGH",
+        "TGI-PNR",
+        "Vice gouverneur BEAC"
+      ]
     },
     {
       "id": "auto-N_SIGNALE-40",

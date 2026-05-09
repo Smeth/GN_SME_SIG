@@ -8,6 +8,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 from sme_gend.config.settings import Settings
+from sme_gend.config.sme_context import load_sme_context as _lsc
 from sme_gend.models.liste_generale import ListeGeneraleRow
 from sme_gend.repositories.liste_generale_repository import ListeGeneraleRepository
 from sme_gend.repositories.numerique_satellite_repository import NumeriqueSatelliteRepository
@@ -84,6 +85,33 @@ h3 { font-size: 12pt; margin: 18px 0 8px 0; color: #283593; border-bottom: 1px s
 """
 
 
+_MOIS_FR = (
+    "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+    "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre",
+)
+
+
+def _ym_to_label(ym: str) -> str:
+    """'2026-04' → 'Avril 2026'"""
+    try:
+        y, m = int(ym[:4]), int(ym[5:7])
+        return f"{_MOIS_FR[m - 1]} {y}"
+    except (ValueError, IndexError):
+        return ym
+
+
+def _prev_ym_label(ym: str) -> str:
+    """Mois précédent de 'YYYY-MM' formaté en français."""
+    try:
+        y, m = int(ym[:4]), int(ym[5:7])
+        m -= 1
+        if m < 1:
+            m, y = 12, y - 1
+        return _ym_to_label(f"{y:04d}-{m:02d}")
+    except (ValueError, IndexError):
+        return "Mois précédent"
+
+
 def _read_recap_mois_fige_cd(template_path: Path | None) -> list[int | None]:
     """Valeurs colonne CD (mois figé dans le gabarit) pour le récap variation, lignes 5–14."""
     out: list[int | None] = [None] * 10
@@ -108,7 +136,7 @@ def _read_recap_mois_fige_cd(template_path: Path | None) -> list[int | None]:
 
 
 class NumeriquePreviewService:
-    """Aperçus HTML alignés sur les calculs d'export (Access)."""
+    """Aperçus HTML alignés sur les calculs d'export (SQLite ou Access)."""
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
@@ -117,6 +145,53 @@ class NumeriquePreviewService:
     def rebind_settings(self, settings: Settings) -> None:
         self._settings = settings
         self._repo = ListeGeneraleRepository(settings)
+
+    def _build_html_gain_perte_section(self) -> str:
+        """Section HTML résumant les gains & pertes du mois actif (TabGainPerte)."""
+        from sme_gend.repositories.gain_perte_repository import GainPerteRepository
+
+        ctx = _lsc()
+        mois_actif = (ctx.mois_actif or "").strip()
+        if not mois_actif:
+            return ""
+
+        try:
+            repo = GainPerteRepository(self._settings)
+            gp_rows = repo.fetch_for_month(mois_actif)
+        except Exception:
+            return ""
+
+        if not gp_rows:
+            return (
+                f"<h3>7. Gains &amp; Pertes — {html.escape(mois_actif)}</h3>"
+                "<p class='section-note'>Aucune donnée TabGainPerte pour ce mois.</p>"
+            )
+
+        n_gains = sum(1 for r in gp_rows if r.is_gain)
+        n_pertes = sum(1 for r in gp_rows if r.is_perte)
+        n_deces = sum(1 for r in gp_rows if r.is_deces)
+
+        parts: list[str] = [
+            f"<h3>7. Gains &amp; Pertes — {html.escape(mois_actif)}</h3>",
+            f"<p class='section-note'>{len(gp_rows)} enregistrement(s) — "
+            f"<b>{n_gains}</b> gain(s), <b>{n_pertes}</b> perte(s) dont <b>{n_deces}</b> décès.</p>",
+            "<table class='grid'><thead><tr>"
+            "<th>ID</th><th>Grade</th><th>Nom</th><th>Objet</th><th>Observation</th>"
+            "</tr></thead><tbody>",
+        ]
+        for r in gp_rows:
+            style = " style='color:#c62828;font-weight:600;'" if r.is_deces else ""
+            parts.append(
+                f"<tr{style}>"
+                f"<td>{html.escape(r.id or '')}</td>"
+                f"<td>{html.escape(r.grade or '')}</td>"
+                f"<td>{html.escape(r.nom or '')}</td>"
+                f"<td>{html.escape(r.objet_display)}</td>"
+                f"<td>{html.escape(r.observ_display)}</td>"
+                "</tr>"
+            )
+        parts.append("</tbody></table>")
+        return "".join(parts)
 
     def build_html_matrice(self) -> str:
         rows = self._repo.fetch_all()
@@ -162,10 +237,11 @@ class NumeriquePreviewService:
             _CSS,
             "</style></head><body>",
             f"<h2>{html.escape(title)}</h2>",
-            f"<p class='meta'>Effectifs : {len(rows)} ligne(s) — source <b>ListeGenerale</b> (Access). "
-            "« Présents » = Padmin contenant « présent » ou libellé « stage interne » (liste des présents / effectifs). "
-            "Les tableaux de droite du gabarit sont recalculés ici comme les formules Excel (sauf la colonne "
-            "<b>mois figé</b>, lue depuis le gabarit si disponible).</p>",
+            f"<p class='meta'>Effectifs : {len(rows)} ligne(s) — source <b>ListeGenerale</b> "
+            f"({'SQLite' if self._settings.use_sqlite_liste_generale else 'Access'}). "
+            "« Présents » = Padmin contenant « présent » ou libellé « stage interne ». "
+            "Les tableaux sont recalculés d'après la ListeGenerale ; libellés mois dérivés du mois actif. "
+            "Colonne <b>mois figé</b> : valeurs lues en colonne CD du gabarit Excel.</p>",
             "<h3>1. Matrice principale (rubrique × grade)</h3>",
             "<table class='grid'><thead><tr><th>Rubrique</th>",
         ]
@@ -251,30 +327,36 @@ class NumeriquePreviewService:
             parts.append(f"<td>{int(matrix['presents'].get(g, 0))}</td>")
         parts.append("</tr></tbody></table>")
 
-        mois_courant = "Mois courant (Σ T)"
-        mois_fige = "Mois figé (CD gabarit)"
-        if tpl and tpl.is_file():
-            wb = None
-            try:
-                wb = load_workbook(tpl, read_only=True, data_only=True)
-                if "NUMERIQUE" in wb.sheetnames:
-                    ws_m = wb["NUMERIQUE"]
-                    t4 = ws_m.cell(4, 83).value  # CE4
-                    t3 = ws_m.cell(4, 82).value  # CD4
-                    if isinstance(t4, str) and t4.strip():
-                        mois_courant = str(t4).strip()
-                    if isinstance(t3, str) and t3.strip():
-                        mois_fige = str(t3).strip()
-            except OSError:
-                pass
-            finally:
-                if wb is not None:
-                    wb.close()
+        _ym = (_lsc().mois_actif or "").strip()
+        if _ym:
+            mois_courant = _ym_to_label(_ym)
+            mois_fige = _prev_ym_label(_ym)
+        else:
+            mois_courant = "Mois courant (Σ T)"
+            mois_fige = "Mois figé (CD gabarit)"
+            if tpl and tpl.is_file():
+                wb = None
+                try:
+                    wb = load_workbook(tpl, read_only=True, data_only=True)
+                    if "NUMERIQUE" in wb.sheetnames:
+                        ws_m = wb["NUMERIQUE"]
+                        t4 = ws_m.cell(4, 83).value  # CE4
+                        t3 = ws_m.cell(4, 82).value  # CD4
+                        if isinstance(t4, str) and t4.strip():
+                            mois_courant = str(t4).strip()
+                        if isinstance(t3, str) and t3.strip():
+                            mois_fige = str(t3).strip()
+                except OSError:
+                    pass
+                finally:
+                    if wb is not None:
+                        wb.close()
 
         parts.append("<h3>6. Récapitulatif de la variation des indisponibles</h3>")
         parts.append(
-            "<p class='section-note'>Équivalent zone CB–CF : « mois courant » = totaux colonne T par rubrique ; "
-            "« mois figé » = valeurs lues en colonne CD du gabarit (historique saisi dans le fichier).</p>"
+            "<p class='section-note'>Équivalent zone CB–CF : libellés des colonnes dérivés du mois actif ; "
+            "« mois courant » = totaux calculés depuis la ListeGenerale ; "
+            "« mois figé » = valeurs colonne CD du gabarit Excel (historique saisi manuellement).</p>"
         )
         parts.append("<table class='grid'><thead><tr><th>Position administrative</th>")
         parts.append(f"<th>{html.escape(mois_fige)}</th>")
@@ -282,6 +364,10 @@ class NumeriquePreviewService:
         parts.append("<th>Variation</th></tr></thead><tbody>")
         parts.extend(recap_rows_html)
         parts.append("</tbody></table>")
+
+        gp_section = self._build_html_gain_perte_section()
+        if gp_section:
+            parts.append(gp_section)
 
         parts.append("</body></html>")
         return "".join(parts)

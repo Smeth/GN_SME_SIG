@@ -5,8 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QShowEvent
+from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -14,7 +15,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
@@ -29,12 +29,12 @@ class ListePresentView(QWidget):
         super().__init__(parent)
         self._service = service
         self._open_layout: Callable[[], None] | None = None
+        self._loaded = False
 
-        self._browser = QTextBrowser()
-        self._browser.setOpenExternalLinks(False)
+        self._web = QWebEngineView()
 
         self._btn_refresh = QPushButton("Actualiser l'aperçu")
-        self._btn_refresh.clicked.connect(lambda: self._refresh(confirm=True))
+        self._btn_refresh.clicked.connect(lambda: self._refresh(confirm=False))
 
         self._btn_export = QPushButton("Exporter vers Excel…")
         self._btn_export.clicked.connect(self._export)
@@ -66,7 +66,13 @@ class ListePresentView(QWidget):
         self._search.setPlaceholderText(
             "Filtrer (nom, grade, structure, matricule…) — sur les présents uniquement"
         )
-        self._search.textChanged.connect(lambda: self._refresh(confirm=False))
+
+        # Debounce : attend 350 ms d'inactivité avant de relancer le rendu
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(350)
+        self._search_timer.timeout.connect(lambda: self._refresh(confirm=False))
+        self._search.textChanged.connect(lambda: self._search_timer.start())
 
         bar = QHBoxLayout()
         bar.addWidget(self._btn_refresh)
@@ -82,14 +88,19 @@ class ListePresentView(QWidget):
         lay.addWidget(self._info)
         lay.addLayout(bar)
         lay.addLayout(search_row)
-        lay.addWidget(self._browser, stretch=1)
+        lay.addWidget(self._web, stretch=1)
 
     def showEvent(self, event: QShowEvent) -> None:
-        """Recharge l'aperçu à chaque affichage de l'onglet (JSON mise en page relu depuis le disque)."""
         super().showEvent(event)
-        self._refresh(confirm=False)
+        if not self._loaded:
+            self._refresh(confirm=False)
+
+    def mark_dirty(self) -> None:
+        """Force un rechargement au prochain affichage (config ou base modifiée)."""
+        self._loaded = False
 
     def apply_runtime_after_config_change(self) -> None:
+        self._loaded = False
         self._refresh(confirm=False)
 
     def set_open_layout_editor(self, fn: Callable[[], None] | None) -> None:
@@ -115,15 +126,19 @@ class ListePresentView(QWidget):
         def _build() -> str:
             return self._service.build_preview_html(needle)
 
-        html = run_with_progress(
+        # Dialogue masqué si la génération prend moins de 600 ms (rechargements silencieux)
+        result = run_with_progress(
             self,
             "Liste des présents",
             "Préparation de l'aperçu HTML…",
             _build,
+            minimum_duration=0 if confirm else 600,
         )
-        if html is None:
+        if result is None:
             return
-        self._browser.setHtml(html)
+        # setHtml sur QWebEngineView = rendu Chromium asynchrone, ne bloque pas le thread UI
+        self._web.setHtml(result, QUrl("about:blank"))
+        self._loaded = True
 
     def _export(self) -> None:
         if not confirm_yes_no(

@@ -61,6 +61,30 @@ def format_subdivision_arme_display(
             best_len = len(dt)
     if best:
         return _compose_label(best)
+
+    # Fallback code : SubArme contient un code TabSec (cas des détachés : sigle = CodeT/D/U).
+    # Cherche d'abord CodeT (niveau 3), puis CodeD (niveau 2), puis CodeU (niveau 1).
+    for r in flat:
+        if r.code_t and s_cf == r.code_t.strip().casefold():
+            return _compose_label(r)
+    seen_d: dict[str, SubdivisionFlatRow] = {}
+    seen_u: dict[str, SubdivisionFlatRow] = {}
+    for r in flat:
+        if r.code_d and r.code_d.strip().casefold() not in seen_d:
+            seen_d[r.code_d.strip().casefold()] = r
+        if r.code_u and r.code_u.strip().casefold() not in seen_u:
+            seen_u[r.code_u.strip().casefold()] = r
+    if s_cf in seen_d:
+        r = seen_d[s_cf]
+        cd = r.code_d.strip()
+        dd = (r.design_d or "").strip()
+        return f"{cd} — {dd}" if dd and dd.casefold() != cd.casefold() else cd
+    if s_cf in seen_u:
+        r = seen_u[s_cf]
+        cu = r.code_u.strip()
+        du = (r.design_u or "").strip()
+        return f"{cu} — {du}" if du and du.casefold() != cu.casefold() else cu
+
     # Sans ligne référentiel : forme déjà « ESR VILLE » ou dérivée du texte long
     fb = _fallback_esr_short_from_text(s)
     if fb:

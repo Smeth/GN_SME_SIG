@@ -48,10 +48,10 @@ INDISPO_CATEGORY_SPECS: tuple[tuple[str, str | tuple[str, ...]], ...] = (
 
 
 def _match_padmin(row: ListeGeneraleRow, spec: str | tuple[str, ...]) -> bool:
-    p = (row.position_admin or "").strip()
+    p = (row.position_admin or "").strip().casefold()
     if isinstance(spec, str):
-        return p == spec
-    return p in spec
+        return p == spec.casefold()
+    return p in {s.casefold() for s in spec}
 
 
 def count_by_grades(
@@ -93,11 +93,13 @@ def sum_by_grade_category(
 ) -> list[int]:
     """
     Sommes par les 7 catégories du gabarit + total (8 valeurs), dans l'ordre des colonnes V→AB.
+    Les indices hors de la liste grades (gabarit avec moins de 18 colonnes) contribuent 0.
     """
     glist = list(grades)
+    n = len(glist)
     cats: list[int] = []
     for _name, sl in NUMERIQUE_CATEGORY_SLICES:
-        s = sum(int(counts.get(glist[i], 0)) for i in range(sl.start, sl.stop))
+        s = sum(int(counts.get(glist[i], 0)) for i in range(sl.start, min(sl.stop, n)))
         cats.append(s)
     cats.append(sum(cats))
     return cats

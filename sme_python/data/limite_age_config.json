@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "grades": [
+    {
+      "grade": "GENERAL DE BRIGADE",
+      "limite_age": 65,
+      "limite_service": 40
+    },
+    {
+      "grade": "COLONEL-MAJOR",
+      "limite_age": 65,
+      "limite_service": 40
+    },
+    {
+      "grade": "COLONEL",
+      "limite_age": 65,
+      "limite_service": 40
+    },
+    {
+      "grade": "LIEUTENANT-COLONEL",
+      "limite_age": 62,
+      "limite_service": 40
+    },
+    {
+      "grade": "COMMANDANT",
+      "limite_age": 62,
+      "limite_service": 40
+    },
+    {
+      "grade": "CAPITAINE",
+      "limite_age": 60,
+      "limite_service": 40
+    },
+    {
+      "grade": "LIEUTENANT",
+      "limite_age": 60,
+      "limite_service": 40
+    },
+    {
+      "grade": "ASPIRANT",
+      "limite_age": 60,
+      "limite_service": 40
+    },
+    {
+      "grade": "SOUS-LIEUTENANT",
+      "limite_age": 60,
+      "limite_service": 40
+    },
+    {
+      "grade": "ADJUDANT-MAJOR",
+      "limite_age": 58,
+      "limite_service": 40
+    },
+    {
+      "grade": "ADJUDANT-CHEF",
+      "limite_age": 58,
+      "limite_service": 40
+    },
+    {
+      "grade": "ADJUDANT",
+      "limite_age": 58,
+      "limite_service": 40
+    },
+    {
+      "grade": "MARECHAL DES LOGIS-CHEF",
+      "limite_age": 56,
+      "limite_service": 38
+    },
+    {
+      "grade": "SERGENT-CHEF",
+      "limite_age": 55,
+      "limite_service": 35
+    },
+    {
+      "grade": "MARECHAL DES LOGIS",
+      "limite_age": 56,
+      "limite_service": 38
+    },
+    {
+      "grade": "SERGENT",
+      "limite_age": 55,
+      "limite_service": 35
+    },
+    {
+      "grade": "SOLDAT",
+      "limite_age": 55,
+      "limite_service": 35
+    },
+    {
+      "grade": "CIVILE",
+      "limite_age": 55,
+      "limite_service": 35
+    }
+  ],
+  "options": {
+    "signataire_titre": "Le directeur du personnel et de la formation de la gendarmerie nationale",
+    "signataire_nom": "Colonel-major Arthur Fernand KIBA",
+    "ville": "Brazzaville",
+    "lois_refs": [
+      "Loi n°10-2021 du 27 janvier 2021, telle que modifiée et complétée par la loi n°17-2023 du 27 mai 2023",
+      "Loi n°5-2022 du 26 janvier 2022"
+    ],
+    "validite_mois": 3
+  }
+}

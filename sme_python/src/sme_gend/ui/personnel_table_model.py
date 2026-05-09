@@ -10,16 +10,29 @@ from sme_gend.models.liste_generale import ListeGeneraleRow
 from sme_gend.repositories.subdivision_repository import SubdivisionFlatRow
 from sme_gend.services.subdivision_label_format import format_subdivision_arme_display
 
-# Colonnes affichées (ordre fixe — ajustable plus tard).
+# Colonnes affichées (ordre fixe — col 1 « Nom » et dernière « Actions » toujours visibles).
 _COLUMNS = (
-    ("id", "N°"),
-    ("noms", "Noms et prénoms"),
-    ("grade", "Grade"),
-    ("position_admin", "Position adm."),
-    ("structure", "Structure"),
-    ("subdivision_arme", "Subdivision d'arme"),
-    ("fonction", "Fonction"),
-    ("matricule_militaire", "Matricule militaire"),
+    ("id",                  "N°"),              # 0
+    ("noms",                "Nom et prénom"),   # 1  — toujours visible
+    ("grade",               "Grade"),           # 2
+    ("fonction",            "Fonction"),        # 3
+    ("subdivision_arme",    "Subdivision"),     # 4
+    ("position_admin",      "Position adm."),   # 5
+    ("structure",           "Structure"),       # 6
+    ("matricule_militaire", "Matricule mil."),  # 7
+    # ── colonnes supplémentaires (masquées par défaut) ───────────────────────
+    ("matricule_solde",     "Matricule solde"), # 8
+    ("date_naissance",      "Date naissance"),  # 9
+    ("lieu_naissance",      "Lieu naissance"),  # 10
+    ("date_grade",          "Date de grade"),   # 11
+    ("date_service",        "Date de service"), # 12
+    ("ndecision",           "N° décision"),     # 13
+    ("diplome",             "Diplôme"),         # 14
+    ("date_obtention",      "Date diplôme"),    # 15
+    ("obs",                 "Observations"),    # 16
+    ("presseance",          "Préséance"),       # 17
+    ("ordre_tri",           "Ordre tri"),       # 18
+    (None,                  "Actions"),         # 19 — toujours visible, peint par PersonnelActionDelegate
 )
 
 
@@ -64,6 +77,11 @@ class PersonnelTableModel(QAbstractTableModel):
             return None
         row = self._rows[index.row()]
         key = _COLUMNS[index.column()][0]
+        if key is None:
+            # Colonne Actions : retourne l'objet ligne pour le délégué
+            if role == Qt.ItemDataRole.UserRole:
+                return row
+            return None
         value = getattr(row, key)
         if role == Qt.ItemDataRole.DisplayRole:
             if key == "subdivision_arme" and self._subdivision_flat is not None:

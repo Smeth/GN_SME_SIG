@@ -33,11 +33,14 @@ def run_with_progress(
     title: str,
     text: str,
     fn: Callable[[], T],
+    *,
+    minimum_duration: int = 0,
 ) -> T | None:
     """
     Exécute fn dans un thread secondaire avec dialogue modal indéterminé.
     Ne pas utiliser pour du code qui touche aux widgets / modèles Qt.
 
+    minimum_duration : ms avant que le dialogue soit affiché (0 = immédiat).
     Retourne le résultat, ou None si erreur (QMessageBox critique affichée).
     """
     dlg = QProgressDialog(parent)
@@ -46,7 +49,7 @@ def run_with_progress(
     dlg.setRange(0, 0)
     dlg.setCancelButton(None)
     dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
-    dlg.setMinimumDuration(0)
+    dlg.setMinimumDuration(minimum_duration)
     dlg.setMinimumWidth(340)
 
     result: list[T] = []

@@ -93,9 +93,98 @@ class LayoutConfigService:
             sections=new_secs,
         )
 
+    def sync_missing_subdivisions(
+        self, cfg: ListeLayoutConfig
+    ) -> tuple[ListeLayoutConfig, list[str]]:
+        """
+        Pour chaque section dont ``group_by_subdivision`` est activé, ajoute en fin de
+        ``subdivision_order`` les libellés SubArme présents en base mais absents de la liste.
+        Retourne (cfg mis à jour, liste des nouveaux libellés ajoutés sous forme 'CODE: libellé').
+        """
+        new_items: list[str] = []
+        for sec in cfg.sections:
+            if not sec.group_by_subdivision:
+                continue
+            db_subs = set(self.subarme_labels_for_structure(sec.structure_code))
+            if not db_subs:
+                continue
+            known = set(sec.subdivision_order or [])
+            missing = sorted(db_subs - known)
+            if missing:
+                new_items.extend(f"[{sec.structure_code}] {s}" for s in missing)
+                sec.subdivision_order = list(sec.subdivision_order or []) + missing
+        return cfg, new_items
+
+    def sync_all_from_database(
+        self, cfg: ListeLayoutConfig
+    ) -> tuple[ListeLayoutConfig, list[str], list[str]]:
+        """
+        Fusionne les structures manquantes et les subdivisions manquantes.
+        Retourne (cfg mis à jour, nouvelles structures ajoutées, nouveaux libellés SubArme ajoutés).
+        """
+        known_before = {s.structure_code for s in cfg.sections}
+        cfg = self.merge_missing_structures(cfg)
+        new_structs = [
+            s.structure_code for s in cfg.sections
+            if s.structure_code not in known_before
+        ]
+        cfg, new_subs = self.sync_missing_subdivisions(cfg)
+        return cfg, new_structs, new_subs
+
     def structure_row(self, code: str) -> StructureRow | None:
         """Référentiel TabStructure pour un code, ou None."""
         return self._structures.fetch_by_code(code)
+
+    def all_structure_designations(self) -> dict[str, str]:
+        """Code → désignation (ou code si absent) pour tous les enregistrements TabStructure."""
+        return {s.code: (s.designation or s.code) for s in self._structures.fetch_all()}
+
+    def present_counts_by_structure(self) -> dict[str, int]:
+        """Nombre de présents par code structure (pour affichage dans l'éditeur de mise en page)."""
+        from sme_gend.padmin_present import padmin_counts_as_present
+        counts: dict[str, int] = {}
+        try:
+            for r in self._liste_generale.fetch_all():
+                if padmin_counts_as_present(r.position_admin):
+                    code = (r.structure or "").strip()
+                    if code:
+                        counts[code] = counts.get(code, 0) + 1
+        except Exception:
+            pass
+        return counts
+
+    def count_subarme_occurrences(
+        self, subarme: str, structure_code: str | None = None
+    ) -> int:
+        """Compte les lignes ListeGenerale avec ce SubArme exact (optionnellement par structure)."""
+        search = (subarme or "").strip()
+        if not search:
+            return 0
+        count = 0
+        try:
+            for r in self._liste_generale.fetch_all():
+                if (r.subdivision_arme or "").strip() == search:
+                    if structure_code is None or (r.structure or "").strip() == structure_code:
+                        count += 1
+        except Exception:
+            pass
+        return count
+
+    def rename_subarme_global(
+        self,
+        cfg: ListeLayoutConfig,
+        old_label: str,
+        new_label: str,
+        structure_code: str | None = None,
+    ) -> tuple[int, ListeLayoutConfig]:
+        """Renomme SubArme dans toutes les structures (ou une seule) + met à jour la config JSON."""
+        if structure_code is not None:
+            return self.rename_subarme_in_database(cfg, structure_code, old_label, new_label)
+        total = 0
+        for sec in list(cfg.sections):
+            n, cfg = self.rename_subarme_in_database(cfg, sec.structure_code, old_label, new_label)
+            total += n
+        return total, cfg
 
     def update_structure_referentiel(
         self, code: str, designation: str, ordre_tri: int | None

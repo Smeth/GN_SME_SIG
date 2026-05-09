@@ -1,9 +1,10 @@
-"""Vues référentiels — lecture / édition Structures et Grades (Access)."""
+"""Vues référentiels — lecture / édition Structures, Grades, Positions administratives."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -19,9 +20,11 @@ from PySide6.QtWidgets import (
 )
 
 from sme_gend.models.grade_ref import GradeRefRow
+from sme_gend.models.padmin_ref import PadminRefRow
 from sme_gend.models.structure import StructureRow
 from sme_gend.repositories.subdivision_repository import SubdivisionFlatRow
 from sme_gend.services.referentiel_service import ReferentielService
+from sme_gend.services.sme_editing_policy import evaluate_editing_state
 from sme_gend.ui.confirm_dialogs import confirm_yes_no
 from sme_gend.ui.ref_table_model import RefTableModel
 from sme_gend.ui.structure_subdivisions_dialog import StructureSubdivisionsDialog
@@ -210,9 +213,10 @@ class StructuresView(QWidget):
         self._table.doubleClicked.connect(self._open_subdivisions_modal)
 
         self._hint = QLabel(
-            "<b>Structures</b> — regroupe la table <b>TabStructure</b>, la vue des couples "
-            "(Structure, SubArme) dans la liste générale, et la hiérarchie référentielle "
-            "<b>Secun → Secdeux → Sectrois</b>. Utilisez les onglets ci-dessous."
+            "<b>Référentiel codes structures</b> (table des codes, libellés, ordre). "
+            "Onglets : codes officiels ; couples structure / subdivision d’arme dans la liste ; "
+            "hiérarchie subdivisions. Pour <b>effectifs par structure</b>, utilisez "
+            "<b>Effectifs du mois → Effectifs par structure</b>."
         )
         self._hint.setWordWrap(True)
 
@@ -287,15 +291,21 @@ class StructuresView(QWidget):
         if row < 0 or row >= len(self._rows):
             QMessageBox.information(self, "Structures", "Sélectionnez une structure.")
             return
+        st = evaluate_editing_state(self._service.settings)
         dlg = StructureSubdivisionsDialog(
             self,
             self._service,
             self._rows[row],
             on_structure_changed=self.reload,
+            allow_edit=not st.locked,
         )
         dlg.exec()
 
     def _on_add(self) -> None:
+        st = evaluate_editing_state(self._service.settings)
+        if st.locked:
+            QMessageBox.warning(self, "Édition verrouillée", st.detail)
+            return
         dlg = _StructureDialog(self, None)
         if dlg.exec() != QDialog.Accepted:
             return
@@ -318,6 +328,10 @@ class StructuresView(QWidget):
         self.reload()
 
     def _on_edit(self) -> None:
+        st = evaluate_editing_state(self._service.settings)
+        if st.locked:
+            QMessageBox.warning(self, "Édition verrouillée", st.detail)
+            return
         row = self._selected_row()
         if row < 0 or row >= len(self._rows):
             QMessageBox.information(self, "Structure", "Sélectionnez une ligne.")
@@ -344,6 +358,10 @@ class StructuresView(QWidget):
         self.reload()
 
     def _on_delete(self) -> None:
+        st = evaluate_editing_state(self._service.settings)
+        if st.locked:
+            QMessageBox.warning(self, "Édition verrouillée", st.detail)
+            return
         row = self._selected_row()
         if row < 0 or row >= len(self._rows):
             QMessageBox.information(self, "Structure", "Sélectionnez une ligne.")
@@ -476,6 +494,10 @@ class GradesView(QWidget):
         return idx.row()
 
     def _on_add(self) -> None:
+        st = evaluate_editing_state(self._service.settings)
+        if st.locked:
+            QMessageBox.warning(self, "Édition verrouillée", st.detail)
+            return
         dlg = _GradeDialog(self, None)
         if dlg.exec() != QDialog.Accepted:
             return
@@ -498,6 +520,10 @@ class GradesView(QWidget):
         self.reload()
 
     def _on_edit(self) -> None:
+        st = evaluate_editing_state(self._service.settings)
+        if st.locked:
+            QMessageBox.warning(self, "Édition verrouillée", st.detail)
+            return
         row = self._selected_row()
         if row < 0 or row >= len(self._rows):
             QMessageBox.information(self, "Grade", "Sélectionnez une ligne.")
@@ -524,6 +550,10 @@ class GradesView(QWidget):
         self.reload()
 
     def _on_delete(self) -> None:
+        st = evaluate_editing_state(self._service.settings)
+        if st.locked:
+            QMessageBox.warning(self, "Édition verrouillée", st.detail)
+            return
         row = self._selected_row()
         if row < 0 or row >= len(self._rows):
             QMessageBox.information(self, "Grade", "Sélectionnez une ligne.")
@@ -599,3 +629,220 @@ class FonctionsView(_RefBase):
         bb.accepted.connect(d.accept)
         lay.addWidget(bb)
         d.exec()
+
+
+# ── Positions administratives ─────────────────────────────────────────────────
+
+class _PadminDialog(QDialog):
+    """Dialogue de création / modification d'une position administrative."""
+
+    def __init__(self, parent: QWidget, row: PadminRefRow | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("RefEditDialog")
+        self.setWindowTitle(
+            "Nouvelle position administrative" if row is None else "Modifier la position"
+        )
+        self.setMinimumWidth(400)
+
+        self._libelle = QLineEdit()
+        self._libelle.setPlaceholderText("Libellé exact (ex : Présent)")
+        self._ordre = QLineEdit()
+        self._ordre.setPlaceholderText("Entier (ex : 1)")
+        self._present = QCheckBox("Compte comme présent (inclus dans les effectifs présents)")
+
+        if row is not None:
+            self._libelle.setText(row.libelle)
+            self._ordre.setText("" if row.ordre_tri is None else str(row.ordre_tri))
+            self._present.setChecked(row.compte_comme_present)
+
+        form = QFormLayout()
+        form.addRow("Libellé *", self._libelle)
+        form.addRow("Ordre de tri", self._ordre)
+        form.addRow("", self._present)
+
+        note = QLabel(
+            "<i>Le libellé doit correspondre exactement à la valeur saisie dans les fiches "
+            "personnel (respect des majuscules et accents).</i>"
+        )
+        note.setWordWrap(True)
+        note.setTextFormat(Qt.TextFormat.RichText)
+
+        bb = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+
+        lay = QVBoxLayout(self)
+        lay.addLayout(form)
+        lay.addWidget(note)
+        lay.addWidget(bb)
+
+    def values(self) -> tuple[str, bool, int | None]:
+        lib = self._libelle.text().strip()
+        ord_txt = self._ordre.text().strip()
+        ord_val: int | None = None
+        if ord_txt:
+            try:
+                ord_val = int(ord_txt)
+            except ValueError:
+                pass
+        return lib, self._present.isChecked(), ord_val
+
+
+class PadminView(QWidget):
+    """Référentiel des positions administratives (tab_padmin — SQLite uniquement)."""
+
+    def __init__(self, service: ReferentielService, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._service = service
+        self._rows: list[PadminRefRow] = []
+
+        self._hint = QLabel(
+            "<b>Positions administratives</b> — référentiel <code>tab_padmin</code> (mode SQLite). "
+            "La colonne <b>Présent</b> détermine quels personnels apparaissent dans la liste des "
+            "présents et le numérique. "
+            "<b>Double-clic</b> ou bouton Modifier pour éditer. "
+            "<i>Disponible uniquement en mode SQLite.</i>"
+        )
+        self._hint.setWordWrap(True)
+        self._hint.setTextFormat(Qt.TextFormat.RichText)
+
+        self._model = RefTableModel([], [])
+        self._table = QTableView()
+        self._table.setModel(self._model)
+        self._table.horizontalHeader().setStretchLastSection(True)
+        self._table.setAlternatingRowColors(True)
+        self._table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self._table.doubleClicked.connect(self._on_edit)
+
+        self._btn_reload = QPushButton("Actualiser")
+        self._btn_reload.clicked.connect(self.reload)
+        self._btn_add = QPushButton("Nouvelle position…")
+        self._btn_add.clicked.connect(self._on_add)
+        self._btn_edit = QPushButton("Modifier…")
+        self._btn_edit.clicked.connect(self._on_edit)
+        self._btn_del = QPushButton("Supprimer")
+        self._btn_del.clicked.connect(self._on_delete)
+
+        bar = QHBoxLayout()
+        bar.addWidget(self._btn_reload)
+        bar.addWidget(self._btn_add)
+        bar.addWidget(self._btn_edit)
+        bar.addWidget(self._btn_del)
+        bar.addStretch()
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(self._hint)
+        lay.addLayout(bar)
+        lay.addWidget(self._table, stretch=1)
+        self.reload()
+
+    def reload(self) -> None:
+        try:
+            self._rows = self._service.padmins()
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", str(e))
+            return
+        data = [
+            [r.libelle, "Oui" if r.compte_comme_present else "Non",
+             str(r.ordre_tri) if r.ordre_tri is not None else ""]
+            for r in self._rows
+        ]
+        self._model.set_data(["Position administrative", "Compte comme présent", "Ordre"], data)
+
+    def apply_runtime_after_config_change(self) -> None:
+        self.reload()
+
+    def _selected_row(self) -> int:
+        idx = self._table.selectionModel().currentIndex()
+        return idx.row()
+
+    def _require_sqlite(self) -> bool:
+        if not self._service.settings.use_sqlite_liste_generale:
+            QMessageBox.information(
+                self,
+                "Mode SQLite requis",
+                "La gestion des positions administratives nécessite le mode SQLite.\n"
+                "Activez-le dans Paramètres & données.",
+            )
+            return False
+        return True
+
+    def _on_add(self) -> None:
+        if not self._require_sqlite():
+            return
+        dlg = _PadminDialog(self, None)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        libelle, compte, ordre = dlg.values()
+        if not libelle:
+            QMessageBox.warning(self, "Position admin.", "Le libellé est obligatoire.")
+            return
+        if not confirm_yes_no(
+            self,
+            "Confirmer",
+            f"Créer la position « {libelle} » dans le référentiel ?",
+            default_no=True,
+        ):
+            return
+        try:
+            self._service.padmin_insert(libelle, compte, ordre)
+        except Exception as e:
+            QMessageBox.critical(self, "Enregistrement", str(e))
+            return
+        self.reload()
+
+    def _on_edit(self) -> None:
+        if not self._require_sqlite():
+            return
+        row = self._selected_row()
+        if row < 0 or row >= len(self._rows):
+            QMessageBox.information(self, "Position admin.", "Sélectionnez une ligne.")
+            return
+        current = self._rows[row]
+        dlg = _PadminDialog(self, current)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        new_libelle, compte, ordre = dlg.values()
+        if not new_libelle:
+            QMessageBox.warning(self, "Position admin.", "Le libellé est obligatoire.")
+            return
+        msg = f"Enregistrer les modifications de « {current.libelle} »"
+        if new_libelle != current.libelle:
+            msg += (
+                f"\n\nAttention : le libellé change de « {current.libelle} » vers « {new_libelle} ».\n"
+                "Toutes les fiches personnel utilisant l'ancien libellé seront mises à jour."
+            )
+        if not confirm_yes_no(self, "Confirmer", msg, default_no=True):
+            return
+        try:
+            self._service.padmin_update(current.libelle, new_libelle, compte, ordre)
+        except Exception as e:
+            QMessageBox.critical(self, "Enregistrement", str(e))
+            return
+        self.reload()
+
+    def _on_delete(self) -> None:
+        if not self._require_sqlite():
+            return
+        row = self._selected_row()
+        if row < 0 or row >= len(self._rows):
+            QMessageBox.information(self, "Position admin.", "Sélectionnez une ligne.")
+            return
+        libelle = self._rows[row].libelle
+        if not confirm_yes_no(
+            self,
+            "Supprimer",
+            f"Supprimer « {libelle} » du référentiel ?\n\n"
+            "Les fiches personnel conservent leur valeur actuelle mais elle ne sera plus "
+            "référencée dans tab_padmin.",
+            default_no=True,
+        ):
+            return
+        try:
+            self._service.padmin_delete(libelle)
+        except Exception as e:
+            QMessageBox.critical(self, "Suppression", str(e))
+            return
+        self.reload()

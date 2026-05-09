@@ -64,6 +64,8 @@ class PersonnelDossierDialog(QDialog):
         row: ListeGeneraleRow,
         referentiel: ReferentielService,
         service: PersonnelService,
+        *,
+        allow_edit: bool = True,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("PersonnelDossierDialog")
@@ -75,6 +77,7 @@ class PersonnelDossierDialog(QDialog):
         self._ref = referentiel
         self._service = service
         self._row = row
+        self._allow_edit = allow_edit
 
         ensure_personnel_media_dirs()
 
@@ -99,6 +102,8 @@ class PersonnelDossierDialog(QDialog):
         self._btn_edit = QPushButton("Modifier la fiche…")
         self._btn_edit.setObjectName("PersonnelDossierPrimaryBtn")
         self._btn_edit.clicked.connect(self._on_edit)
+        self._btn_edit.setVisible(allow_edit)
+        self._btn_edit.setEnabled(allow_edit)
         btn_row.addWidget(self._btn_edit)
         btn_row.addStretch()
         hl.addLayout(btn_row)
@@ -154,15 +159,25 @@ class PersonnelDossierDialog(QDialog):
         self._tabs.setDocumentMode(True)
 
         self._tab_synth = QWidget()
-        self._synth_grid_host = QWidget()
+        self._synth_host = QWidget()
         self._synth_scroll = QScrollArea()
         self._synth_scroll.setWidgetResizable(True)
         self._synth_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        self._synth_scroll.setWidget(self._synth_grid_host)
+        self._synth_scroll.setWidget(self._synth_host)
+        self._synth_lay = QVBoxLayout(self._synth_host)
+        self._synth_lay.setSpacing(16)
+        self._synth_lay.setContentsMargins(12, 12, 12, 12)
+
+        # Bandeau alerte (position admin spéciale) — affiché en haut de l'onglet Synthèse
+        self._alert_banner = QLabel()
+        self._alert_banner.setWordWrap(True)
+        self._alert_banner.setVisible(False)
+
         sl = QVBoxLayout(self._tab_synth)
-        sl.setContentsMargins(8, 8, 8, 8)
-        sl.addWidget(self._synth_scroll)
-        self._synth_grid = QGridLayout(self._synth_grid_host)
+        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setSpacing(0)
+        sl.addWidget(self._alert_banner)
+        sl.addWidget(self._synth_scroll, stretch=1)
 
         self._tab_parcours = QWidget()
         self._parcours_scroll = QScrollArea()
@@ -191,8 +206,31 @@ class PersonnelDossierDialog(QDialog):
         pr.setContentsMargins(8, 8, 8, 8)
         pr.addWidget(self._profil_table)
 
+        # Onglet tableau carrière : vue tabulaire de tous les événements de parcours
+        self._tab_carriere = QWidget()
+        self._carriere_table = QTableWidget()
+        self._carriere_table.setColumnCount(6)
+        self._carriere_table.setHorizontalHeaderLabels(
+            ["Date", "Champ", "Avant", "Après", "Mois SME", "Auteur / Motif"]
+        )
+        hh = self._carriere_table.horizontalHeader()
+        hh.setSectionResizeMode(0, hh.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(1, hh.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(2, hh.ResizeMode.Stretch)
+        hh.setSectionResizeMode(3, hh.ResizeMode.Stretch)
+        hh.setSectionResizeMode(4, hh.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(5, hh.ResizeMode.ResizeToContents)
+        self._carriere_table.setAlternatingRowColors(True)
+        self._carriere_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._carriere_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self._carriere_table.setWordWrap(True)
+        cr = QVBoxLayout(self._tab_carriere)
+        cr.setContentsMargins(8, 8, 8, 8)
+        cr.addWidget(self._carriere_table)
+
         self._tabs.addTab(self._tab_synth, "Synthèse")
         self._tabs.addTab(self._tab_parcours, "Parcours professionnel")
+        self._tabs.addTab(self._tab_carriere, "Historique carrière")
         self._tabs.addTab(self._tab_profil, "Traçabilité du profil")
 
         body_lay.addWidget(self._tabs, stretch=1)
@@ -211,6 +249,7 @@ class PersonnelDossierDialog(QDialog):
         self._refresh_header_and_media()
         self._refresh_synthesis()
         self._refresh_parcours_tab()
+        self._refresh_carriere_tab()
         self._refresh_profil_tab()
 
     def _refresh_header_and_media(self) -> None:
@@ -240,7 +279,9 @@ class PersonnelDossierDialog(QDialog):
         self._set_image_label(
             self._photo,
             person_photo_path(r.id),
-            self.style().standardIcon(QStyle.StandardPixmap.SP_UserIcon).pixmap(96, 96),
+            self.style().standardIcon(
+                getattr(QStyle.StandardPixmap, "SP_UserIcon", QStyle.StandardPixmap.SP_FileDialogContentsView)
+            ).pixmap(96, 96),
         )
         self._set_image_label(
             self._grade_pix,
@@ -299,48 +340,152 @@ class PersonnelDossierDialog(QDialog):
                 w.setParent(None)
                 w.deleteLater()
 
-    def _refresh_synthesis(self) -> None:
-        grid = self._synth_grid
-        while grid.count():
-            item = grid.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.setParent(None)
-                w.deleteLater()
+    def _make_section_card(
+        self,
+        title: str,
+        fields: list[tuple[str, str]],
+        *,
+        alert_field: str | None = None,
+    ) -> QFrame:
+        """Crée une carte de section style maquette web (titre + grille label/valeur)."""
+        card = QFrame()
+        card.setObjectName("DossierSectionCard")
+        card.setStyleSheet(
+            "QFrame#DossierSectionCard {"
+            "  background: white;"
+            "  border: 1px solid #e0e0e0;"
+            "  border-radius: 8px;"
+            "}"
+        )
+        v = QVBoxLayout(card)
+        v.setSpacing(10)
+        v.setContentsMargins(16, 14, 16, 16)
 
-        r = self._row
-        pairs: list[tuple[str, str]] = [
-            ("Identifiant liste", r.id),
-            ("Noms", _fmt_row_field(r, "noms")),
-            ("Date de naissance", _fmt_row_field(r, "date_naissance")),
-            ("Lieu de naissance", _fmt_row_field(r, "lieu_naissance")),
-            ("Grade", _fmt_row_field(r, "grade")),
-            ("Date de grade", _fmt_row_field(r, "date_grade")),
-            ("Structure", _fmt_row_field(r, "structure")),
-            ("Position administrative", _fmt_row_field(r, "position_admin")),
-            ("Fonction", _fmt_row_field(r, "fonction")),
-            ("Subdivision d’arme", _fmt_row_field(r, "subdivision_arme")),
-            ("Date de service", _fmt_row_field(r, "date_service")),
-            ("N° décision", _fmt_row_field(r, "ndecision")),
-            ("Matricule militaire", _fmt_row_field(r, "matricule_militaire")),
-            ("Matricule solde", _fmt_row_field(r, "matricule_solde")),
-            ("Diplôme", _fmt_row_field(r, "diplome")),
-            ("Date d’obtention", _fmt_row_field(r, "date_obtention")),
-            ("Observations", _fmt_row_field(r, "obs")),
-        ]
-        for i, (label, value) in enumerate(pairs):
-            lb = QLabel(f"<b>{label}</b>")
-            lb.setTextFormat(Qt.TextFormat.RichText)
-            lb.setAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop
+        title_lbl = QLabel(title)
+        title_lbl.setStyleSheet(
+            "font-size: 11px; font-weight: 700; color: #616161;"
+        )
+        v.addWidget(title_lbl)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("color: #eeeeee; margin: 0;")
+        v.addWidget(sep)
+
+        COLS = 3
+        grid = QGridLayout()
+        grid.setVerticalSpacing(4)
+        grid.setHorizontalSpacing(24)
+        for i, (lbl_text, val_text) in enumerate(fields):
+            row_i = i // COLS
+            col_i = i % COLS
+            lbl = QLabel(lbl_text)
+            lbl.setStyleSheet(
+                "font-size: 10px; font-weight: 600; color: #9e9e9e; letter-spacing: 0.3px;"
             )
-            val = QLabel(value)
+            val = QLabel(val_text if val_text else "—")
             val.setWordWrap(True)
             val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            val.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-            grid.addWidget(lb, i, 0)
-            grid.addWidget(val, i, 1)
-        grid.setColumnStretch(1, 1)
+            if alert_field and lbl_text == alert_field:
+                val.setStyleSheet("color: #c62828; font-weight: 600;")
+            grid.addWidget(lbl, row_i * 2, col_i)
+            grid.addWidget(val, row_i * 2 + 1, col_i)
+        for c in range(COLS):
+            grid.setColumnStretch(c, 1)
+        v.addLayout(grid)
+        return card
+
+    def _refresh_synthesis(self) -> None:
+        self._clear_layout(self._synth_lay)
+        r = self._row
+
+        # Bandeau alerte pour positions administratives particulières
+        padmin = (r.position_admin or "").strip()
+        _alert_words = {"déserteur", "insoumis", "absent", "décédé", "disparu"}
+        is_alert = any(w in padmin.lower() for w in _alert_words)
+        if is_alert:
+            self._alert_banner.setText(
+                f"  ▲  Position administrative : {padmin}"
+                f" — Cette situation requiert une attention particulière."
+            )
+            self._alert_banner.setStyleSheet(
+                "background: #fff5f5;"
+                "color: #c62828;"
+                "padding: 10px 18px;"
+                "border: 1px solid #ffcdd2;"
+                "border-left: 4px solid #c62828;"
+                "font-size: 13px;"
+            )
+        else:
+            self._alert_banner.setStyleSheet("")
+            self._alert_banner.setText("")
+        self._alert_banner.setVisible(is_alert)
+
+        def _v(attr: str) -> str:
+            return _fmt_row_field(r, attr)
+
+        def _grade_label() -> str:
+            code = (r.grade or "").strip()
+            if not code:
+                return "—"
+            for g in self._ref.grades():
+                if g.code == code:
+                    return f"{g.libelle} ({g.code})" if g.libelle else code
+            return code
+
+        # NOM / PRÉNOM : le champ noms contient tout → 1er mot = nom de famille, reste = prénoms
+        noms_full = (r.noms or "").strip()
+        parts = noms_full.split(None, 1)
+        nom_famille = parts[0] if parts else "—"
+        prenoms = parts[1] if len(parts) > 1 else "—"
+
+        # Section IDENTITÉ
+        self._synth_lay.addWidget(self._make_section_card("IDENTITÉ", [
+            ("NOM", nom_famille),
+            ("PRÉNOM", prenoms),
+            ("DATE DE NAISSANCE", _v("date_naissance")),
+            ("LIEU DE NAISSANCE", _v("lieu_naissance")),
+        ]))
+
+        # Section SERVICE ET ADMINISTRATIF (3 × 3 = 9 champs, aligné sur la maquette web)
+        self._synth_lay.addWidget(self._make_section_card(
+            "SERVICE ET ADMINISTRATIF",
+            [
+                ("GRADE", _grade_label()),
+                ("DATE NOMINATION GRADE", _v("date_grade")),
+                ("DATE ENTRÉE EN SERVICE", _v("date_service")),
+                ("N° DÉCISION D’ENGAGEMENT", _v("ndecision")),
+                ("MATRICULE MILITAIRE", _v("matricule_militaire")),
+                ("MATRICULE SOLDE", _v("matricule_solde")),
+                ("POSITION ADMINISTRATIVE", _v("position_admin")),
+                ("FONCTION", _v("fonction")),
+                ("ORIGINE", "—"),  # champ absent du modèle actuel
+            ],
+            alert_field="POSITION ADMINISTRATIVE" if is_alert else None,
+        ))
+
+        # Section AFFECTATION
+        self._synth_lay.addWidget(self._make_section_card("AFFECTATION", [
+            ("STRUCTURE", _v("structure")),
+            ("SUBDIVISION D’ARME", _v("subdivision_arme")),
+        ]))
+
+        # Section DIPLÔME (conditionnelle)
+        dip, dip_date = _v("diplome"), _v("date_obtention")
+        if dip != "—" or dip_date != "—":
+            self._synth_lay.addWidget(self._make_section_card("DIPLÔME ET FORMATION", [
+                ("DIPLÔME", dip),
+                ("DATE D’OBTENTION", dip_date),
+            ]))
+
+        # Observations
+        obs = _v("obs")
+        if obs != "—":
+            self._synth_lay.addWidget(self._make_section_card("OBSERVATIONS", [
+                ("OBSERVATIONS", obs),
+            ]))
+
+        self._synth_lay.addStretch()
 
     def _timeline_card(self, entry: AuditTimelineEntry) -> QFrame:
         card = QFrame()
@@ -349,14 +494,14 @@ class PersonnelDossierDialog(QDialog):
         v.setSpacing(8)
         v.setContentsMargins(14, 12, 14, 12)
 
-        head = QLabel(
-            f"<b>{format_ts_display(entry.ts_utc)}</b>"
-            + (
-                f" &nbsp;·&nbsp; mois SME <code>{entry.sme_mois_context}</code>"
-                if entry.sme_mois_context
-                else ""
-            )
-        )
+        parts = [f"<b>{format_ts_display(entry.ts_utc)}</b>"]
+        if entry.sme_mois_context:
+            parts.append(f"mois SME <code>{entry.sme_mois_context}</code>")
+        if entry.edited_by:
+            parts.append(f"par <b>{entry.edited_by}</b>")
+        if entry.edit_motif:
+            parts.append(f"motif : <i>{entry.edit_motif}</i>")
+        head = QLabel(" &nbsp;·&nbsp; ".join(parts))
         head.setTextFormat(Qt.TextFormat.RichText)
         v.addWidget(head)
 
@@ -398,6 +543,50 @@ class PersonnelDossierDialog(QDialog):
                 self._parcours_v.addWidget(self._timeline_card(e))
         self._parcours_v.addStretch()
 
+    def _refresh_carriere_tab(self) -> None:
+        timeline = build_audit_timeline(self._row.id)
+        rows_data: list[tuple[str, str, str, str, str, str]] = []
+        for e in timeline:
+            if not e.career_changes:
+                continue
+            date_s = format_ts_display(e.ts_utc)
+            mois_s = e.sme_mois_context or "—"
+            auteur_parts = []
+            if e.edited_by:
+                auteur_parts.append(e.edited_by)
+            if e.edit_motif:
+                auteur_parts.append(f"({e.edit_motif})")
+            auteur_s = " ".join(auteur_parts) or "—"
+            for field in sorted(e.career_changes.keys()):
+                delta = e.career_changes[field]
+                rows_data.append((
+                    date_s,
+                    field_label(field),
+                    fmt_val(delta.get("old")),
+                    fmt_val(delta.get("new")),
+                    mois_s,
+                    auteur_s,
+                ))
+        rows_data.reverse()
+
+        self._carriere_table.clearSpans()
+        if not rows_data:
+            self._carriere_table.setRowCount(1)
+            item = QTableWidgetItem(
+                "Aucun mouvement de carrière enregistré — les changements de grade, "
+                "structure, fonction, position admin… effectués via cette application "
+                "apparaîtront ici."
+            )
+            self._carriere_table.setItem(0, 0, item)
+            self._carriere_table.setSpan(0, 0, 1, 6)
+            return
+
+        self._carriere_table.setRowCount(len(rows_data))
+        for r, row in enumerate(rows_data):
+            for c, text in enumerate(row):
+                self._carriere_table.setItem(r, c, QTableWidgetItem(text))
+        self._carriere_table.resizeRowsToContents()
+
     def _refresh_profil_tab(self) -> None:
         timeline = build_audit_timeline(self._row.id)
         rows_data: list[tuple[str, str, str, str, str]] = []
@@ -436,6 +625,8 @@ class PersonnelDossierDialog(QDialog):
         self._profil_table.resizeColumnsToContents()
 
     def _on_edit(self) -> None:
+        if not self._allow_edit:
+            return
         fresh = self._service.get_by_id(self._row.id)
         if fresh is None:
             from PySide6.QtWidgets import QMessageBox

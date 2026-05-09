@@ -103,12 +103,33 @@ class DetachesView(QWidget):
         lay.addLayout(bar_off)
         lay.addWidget(self._browser, stretch=1)
 
-        self._refresh(silent=True)
+        self._loaded = False
         self._refresh_official_path_label()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if not self._loaded:
+            self._do_refresh()
+
+    def mark_dirty(self) -> None:
+        self._loaded = False
 
     def apply_runtime_settings(self, settings: Settings) -> None:
         self._settings = settings
-        self._refresh(silent=True)
+        self._loaded = False
+
+    def _do_refresh(self) -> None:
+        html = run_with_progress(
+            self,
+            "Détachés",
+            "Préparation de l'aperçu HTML…",
+            self._preview.build_html,
+        )
+        if html is None:
+            return
+        self._browser.setHtml(html)
+        self._loaded = True
+        self._refresh_official_path_label()
 
     def _refresh(self, *, silent: bool = False) -> None:
         if not silent:
@@ -119,16 +140,7 @@ class DetachesView(QWidget):
                 default_no=False,
             ):
                 return
-        html = run_with_progress(
-            self,
-            "Détachés",
-            "Préparation de l'aperçu HTML…",
-            self._preview.build_html,
-        )
-        if html is None:
-            return
-        self._browser.setHtml(html)
-        self._refresh_official_path_label()
+        self._do_refresh()
 
     def _refresh_official_path_label(self) -> None:
         tpl = self._settings.template_detaches_path

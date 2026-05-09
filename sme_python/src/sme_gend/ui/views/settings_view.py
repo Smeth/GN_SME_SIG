@@ -24,10 +24,10 @@ class SettingsView(QWidget):
         self._settings = settings
 
         intro = QLabel(
-            "<b>Paramètres applicatifs</b><br/>"
-            "Les <b>données courantes</b> sont dans le fichier <b>SQLite</b> (bundle) lorsque le mode SQLite est activé ; "
+            "<b>Fichiers, chemins et mode de données</b><br/>"
+            "Accessible aussi via la barre latérale : <b>Maintenance & fichiers → Paramètres & données</b>. "
+            "Les <b>données courantes</b> peuvent être dans un <b>fichier SQLite</b> (bundle) ; "
             "la base <b>Access</b> sert surtout à <b>importer</b> depuis l’ancien outil (.mdb). "
-            "Modèles Excel, archives de clôture et médias fiches : configurez par catégorie. "
             "Après enregistrement, la configuration est <b>rechargée sans redémarrage</b>."
         )
         intro.setWordWrap(True)

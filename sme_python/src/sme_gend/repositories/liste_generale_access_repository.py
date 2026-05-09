@@ -156,6 +156,41 @@ class AccessListeGeneraleRepository:
             if cur.rowcount == 0:
                 raise ValueError(f"Aucune ligne mise à jour pour Id = {row.id!r}")
 
+    def insert_row(self, row: ListeGeneraleRow) -> str:
+        """Insère une nouvelle ligne dans Access ; retourne le nouvel Id (AutoNumber) sous forme de str."""
+        sql = """
+        INSERT INTO ListeGenerale (
+            noms, DateN, LieuN, Grade, DateGrade, DateService, Ndecision,
+            Matmilitaire, Matsolde, Padmin, Fonction, SubArme,
+            Diplome, DateObtention, Structure, Obs, OderTri, presseance
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            row.noms, row.date_naissance, row.lieu_naissance,
+            row.grade, row.date_grade, row.date_service, row.ndecision,
+            row.matricule_militaire, row.matricule_solde, row.position_admin,
+            row.fonction, row.subdivision_arme, row.diplome, row.date_obtention,
+            row.structure, row.obs, row.ordre_tri, row.presseance,
+        )
+        with self._conn_factory.connect() as conn:
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            cur.execute("SELECT @@IDENTITY")
+            new_id = cur.fetchone()[0]
+            return str(int(new_id))
+
+    def delete_row(self, row_id: str) -> None:
+        rid = (row_id or "").strip()
+        try:
+            id_param: str | int = int(rid)
+        except ValueError:
+            id_param = rid
+        with self._conn_factory.connect() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM ListeGenerale WHERE Id = ?", (id_param,))
+            if cur.rowcount == 0:
+                raise ValueError(f"Aucune ligne supprimée pour Id = {row_id!r}")
+
     def update_structure_column(self, old_code: str, new_code: str) -> int:
         o = (old_code or "").strip()
         n = (new_code or "").strip()

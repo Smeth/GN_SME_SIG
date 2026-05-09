@@ -1,0 +1,957 @@
+2026-05-04 07:16:52 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-04 07:17:10 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\__main__.py", line 136, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\__main__.py", line 119, in main
+    window = ShellWindow(
+        settings,
+    ...<7 lines>...
+        detaches_cfg,
+    )
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 436, in __init__
+    self._refresh_active_views_on_month_change()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 530, in _refresh_active_views_on_month_change
+    w._refresh_sme_workflow_widgets()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'HomeView' object has no attribute '_refresh_sme_workflow_widgets'
+2026-05-04 07:17:38 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-04 07:17:53 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\__main__.py", line 136, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\__main__.py", line 119, in main
+    window = ShellWindow(
+        settings,
+    ...<7 lines>...
+        detaches_cfg,
+    )
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 436, in __init__
+    self._refresh_active_views_on_month_change()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 530, in _refresh_active_views_on_month_change
+    w._refresh_sme_workflow_widgets()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'HomeView' object has no attribute '_refresh_sme_workflow_widgets'
+2026-05-04 07:18:40 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-04 07:18:55 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\__main__.py", line 136, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\__main__.py", line 119, in main
+    window = ShellWindow(
+        settings,
+    ...<7 lines>...
+        detaches_cfg,
+    )
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 436, in __init__
+    self._refresh_active_views_on_month_change()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 530, in _refresh_active_views_on_month_change
+    w._refresh_sme_workflow_widgets()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'HomeView' object has no attribute '_refresh_sme_workflow_widgets'
+2026-05-04 07:20:20 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-04 09:13:08 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-04 22:50:40 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-04 22:58:18 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 598, in <lambda>
+    act_import.triggered.connect(lambda: self._home_view._sme_panel._on_sme_import_dialog())
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'HomeView' object has no attribute '_on_sme_import_dialog'
+2026-05-04 22:59:44 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-04 23:05:44 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-05 11:07:07 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-06 12:48:24 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-06 12:54:09 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-06 14:44:10 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-06 14:45:32 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 482, in _go_next_month
+    self._navigate_month(+1)
+    ~~~~~~~~~~~~~~~~~~~~^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 528, in _navigate_month
+    self._apply_month_data_source(new_mois)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 578, in _apply_month_data_source
+    arc_s.database_path = archive_path
+    ^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 21, in __setattr__
+dataclasses.FrozenInstanceError: cannot assign to field 'database_path'
+2026-05-06 14:45:36 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 482, in _go_next_month
+    self._navigate_month(+1)
+    ~~~~~~~~~~~~~~~~~~~~^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 528, in _navigate_month
+    self._apply_month_data_source(new_mois)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 578, in _apply_month_data_source
+    arc_s.database_path = archive_path
+    ^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 21, in __setattr__
+dataclasses.FrozenInstanceError: cannot assign to field 'database_path'
+2026-05-06 14:45:39 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 482, in _go_next_month
+    self._navigate_month(+1)
+    ~~~~~~~~~~~~~~~~~~~~^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 528, in _navigate_month
+    self._apply_month_data_source(new_mois)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 578, in _apply_month_data_source
+    arc_s.database_path = archive_path
+    ^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 21, in __setattr__
+dataclasses.FrozenInstanceError: cannot assign to field 'database_path'
+2026-05-06 14:45:40 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 479, in _go_prev_month
+    self._navigate_month(-1)
+    ~~~~~~~~~~~~~~~~~~~~^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 528, in _navigate_month
+    self._apply_month_data_source(new_mois)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 578, in _apply_month_data_source
+    arc_s.database_path = archive_path
+    ^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 21, in __setattr__
+dataclasses.FrozenInstanceError: cannot assign to field 'database_path'
+2026-05-06 14:45:52 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 482, in _go_next_month
+    self._navigate_month(+1)
+    ~~~~~~~~~~~~~~~~~~~~^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 528, in _navigate_month
+    self._apply_month_data_source(new_mois)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 578, in _apply_month_data_source
+    arc_s.database_path = archive_path
+    ^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 21, in __setattr__
+dataclasses.FrozenInstanceError: cannot assign to field 'database_path'
+2026-05-06 14:45:54 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 482, in _go_next_month
+    self._navigate_month(+1)
+    ~~~~~~~~~~~~~~~~~~~~^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 528, in _navigate_month
+    self._apply_month_data_source(new_mois)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 578, in _apply_month_data_source
+    arc_s.database_path = archive_path
+    ^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 21, in __setattr__
+dataclasses.FrozenInstanceError: cannot assign to field 'database_path'
+2026-05-06 14:46:19 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 479, in _go_prev_month
+    self._navigate_month(-1)
+    ~~~~~~~~~~~~~~~~~~~~^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 528, in _navigate_month
+    self._apply_month_data_source(new_mois)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 578, in _apply_month_data_source
+    arc_s.database_path = archive_path
+    ^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 21, in __setattr__
+dataclasses.FrozenInstanceError: cannot assign to field 'database_path'
+2026-05-06 14:46:23 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 479, in _go_prev_month
+    self._navigate_month(-1)
+    ~~~~~~~~~~~~~~~~~~~~^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 528, in _navigate_month
+    self._apply_month_data_source(new_mois)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 578, in _apply_month_data_source
+    arc_s.database_path = archive_path
+    ^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 21, in __setattr__
+dataclasses.FrozenInstanceError: cannot assign to field 'database_path'
+2026-05-06 14:46:26 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 479, in _go_prev_month
+    self._navigate_month(-1)
+    ~~~~~~~~~~~~~~~~~~~~^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 528, in _navigate_month
+    self._apply_month_data_source(new_mois)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 578, in _apply_month_data_source
+    arc_s.database_path = archive_path
+    ^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 21, in __setattr__
+dataclasses.FrozenInstanceError: cannot assign to field 'database_path'
+2026-05-06 14:46:28 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 479, in _go_prev_month
+    self._navigate_month(-1)
+    ~~~~~~~~~~~~~~~~~~~~^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 528, in _navigate_month
+    self._apply_month_data_source(new_mois)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 578, in _apply_month_data_source
+    arc_s.database_path = archive_path
+    ^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 21, in __setattr__
+dataclasses.FrozenInstanceError: cannot assign to field 'database_path'
+2026-05-06 14:52:45 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-06 15:01:40 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-06 15:36:35 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 711, in _on_double_click
+    self._refresh_active_views_on_month_change()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 559, in _refresh_active_views_on_month_change
+    current.apply_runtime_after_config_change()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 602, in apply_runtime_after_config_change
+    self._model.set_subdivision_flat(self._referentiel.subdivisions_flat())
+                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\services\referentiel_service.py", line 43, in subdivisions_flat
+    return self._subdivisions.fetch_flat_hierarchy()
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\repositories\subdivision_repository.py", line 28, in fetch_flat_hierarchy
+    return self._impl.fetch_flat_hierarchy()
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\repositories\subdivision_access_repository.py", line 31, in fetch_flat_hierarchy
+    cur.execute(SQL_FLAT)
+    ~~~~~~~~~~~^^^^^^^^^^
+pyodbc.ProgrammingError: ('42S02', '[42S02] [Microsoft][Pilote ODBC Microsoft Access] Le moteur de base de données Microsoft Access ne peut pas trouver la table ou la requête source «\xa0TabSecun\xa0». Assurez-vous qu’elle existe et qu’elle est correctement orthographiée. (-1305) (SQLExecDirectW)')
+2026-05-06 17:08:39 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-07 09:43:12 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-07 09:44:06 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-07 10:12:36 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-07 11:30:28 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-08 14:07:28 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-08 18:22:23 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-08 18:53:15 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-08 18:59:14 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-08 18:59:34 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 489, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 745, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-08 19:53:22 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-08 19:53:54 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 489, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 746, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-08 19:54:07 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 814, in _open_dossier
+    self._open_dossier_for(row_obj)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 762, in _open_dossier_for
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-08 19:58:57 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-08 19:59:05 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 489, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 746, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-08 20:01:16 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 814, in _open_dossier
+    self._open_dossier_for(row_obj)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 762, in _open_dossier_for
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 01:27:48 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 01:28:36 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 494, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 751, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\limite_age_view.py", line 835, in showEvent
+    self._tab_attest.load_personnel()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\limite_age_view.py", line 294, in load_personnel
+    from sme_gend.repositories.liste_generale_sqlite_repository import ListeGeneraleSQLiteRepository
+ImportError: cannot import name 'ListeGeneraleSQLiteRepository' from 'sme_gend.repositories.liste_generale_sqlite_repository' (C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\repositories\liste_generale_sqlite_repository.py)
+2026-05-09 01:28:59 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 01:30:15 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 494, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 751, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\limite_age_view.py", line 835, in showEvent
+    self._tab_attest.load_personnel()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\limite_age_view.py", line 294, in load_personnel
+    from sme_gend.repositories.liste_generale_sqlite_repository import ListeGeneraleSQLiteRepository
+ImportError: cannot import name 'ListeGeneraleSQLiteRepository' from 'sme_gend.repositories.liste_generale_sqlite_repository' (C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\repositories\liste_generale_sqlite_repository.py)
+2026-05-09 01:30:44 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\limite_age_view.py", line 294, in load_personnel
+    from sme_gend.repositories.liste_generale_sqlite_repository import ListeGeneraleSQLiteRepository
+ImportError: cannot import name 'ListeGeneraleSQLiteRepository' from 'sme_gend.repositories.liste_generale_sqlite_repository' (C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\repositories\liste_generale_sqlite_repository.py)
+2026-05-09 02:24:03 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 02:24:31 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 495, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 753, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 02:38:56 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 08:19:43 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 08:30:10 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 09:28:23 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 09:28:59 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 500, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 758, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 09:29:51 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 500, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 758, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 09:37:26 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 10:06:25 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 10:06:46 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 500, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 758, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 10:16:45 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 10:17:51 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 10:17:51 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 8334
+2026-05-09 10:18:16 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 10:18:16 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 8334
+2026-05-09 10:18:25 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 10:18:25 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 8334
+2026-05-09 11:04:10 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 11:05:48 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 11:05:48 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 8470
+2026-05-09 11:06:46 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 11:06:46 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 8100
+2026-05-09 11:49:27 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 11:50:34 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 11:50:34 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 2097
+2026-05-09 11:52:04 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 11:52:04 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 2812
+2026-05-09 12:03:19 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 12:03:44 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 500, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 758, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 12:06:18 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\personnel_action_delegate.py", line 88, in editorEvent
+    self._callback(row, act)
+    ~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 747, in _on_action_btn
+    self._open_dossier_for(row)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 762, in _open_dossier_for
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 12:16:04 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 12:21:34 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 12:27:45 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 12:28:47 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 12:28:47 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 2931
+2026-05-09 12:36:37 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 12:39:26 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 12:39:26 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 4546
+2026-05-09 12:39:26 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 12:39:26 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 5651
+2026-05-09 12:42:54 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 12:43:51 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 12:43:51 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 5686
+2026-05-09 12:43:51 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 12:43:51 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 6279
+2026-05-09 12:44:12 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 12:44:12 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 5686
+2026-05-09 12:44:12 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 12:44:12 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 6279
+2026-05-09 12:53:04 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 12:54:01 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 12:54:01 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 5738
+2026-05-09 12:54:01 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 12:54:01 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 6349
+2026-05-09 12:54:17 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 12:54:17 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 5738
+2026-05-09 12:54:17 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 12:54:17 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 6349
+2026-05-09 12:54:43 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 12:54:43 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 5441
+2026-05-09 12:54:43 DEBUG    PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-05-09 12:54:43 DEBUG    PIL.PngImagePlugin: STREAM b'IDAT' 41 5495
+2026-05-09 12:58:06 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 533, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 791, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 13:31:16 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 13:32:15 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 536, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 794, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 13:32:41 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\personnel_action_delegate.py", line 88, in editorEvent
+    self._callback(row, act)
+    ~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 747, in _on_action_btn
+    self._open_dossier_for(row)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 762, in _open_dossier_for
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 13:38:55 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\personnel_action_delegate.py", line 88, in editorEvent
+    self._callback(row, act)
+    ~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 747, in _on_action_btn
+    self._open_dossier_for(row)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 762, in _open_dossier_for
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 13:39:26 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 814, in _open_dossier
+    self._open_dossier_for(row_obj)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 762, in _open_dossier_for
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 13:47:37 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 536, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 794, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 13:59:46 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 14:01:08 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 536, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 794, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 14:08:06 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\personnel_action_delegate.py", line 88, in editorEvent
+    self._callback(row, act)
+    ~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 747, in _on_action_btn
+    self._open_dossier_for(row)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 762, in _open_dossier_for
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 14:16:20 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 15:16:47 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 15:27:14 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 558, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 816, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 15:46:40 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 558, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 816, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 15:49:03 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 558, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 816, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 15:49:45 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 814, in _open_dossier
+    self._open_dossier_for(row_obj)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 762, in _open_dossier_for
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 16:12:55 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 16:13:20 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 565, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 827, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 16:24:48 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 17:49:12 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 17:54:21 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 570, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 832, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 18:31:07 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 18:39:28 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 18:44:11 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 18:56:52 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 18:57:24 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 570, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 832, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 19:16:18 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 20:17:51 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 20:18:09 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 576, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 839, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 363, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 637, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 611, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 981, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 20:36:54 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 20:38:29 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\edition_sme_view.py", line 257, in setData
+    if int(value) == int(Qt.CheckState.Checked):
+                     ~~~^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: int() argument must be a string, a bytes-like object or a real number, not 'CheckState'
+2026-05-09 20:38:31 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\edition_sme_view.py", line 257, in setData
+    if int(value) == int(Qt.CheckState.Checked):
+                     ~~~^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: int() argument must be a string, a bytes-like object or a real number, not 'CheckState'
+2026-05-09 20:39:04 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 576, in _on_content_page_changed
+    self._refresh_period_banner()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\shell_window.py", line 839, in _refresh_period_banner
+    self._period_month_lbl.setText(_format_mois_fr(mois))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 378, in showEvent
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 652, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 626, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 1017, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: Error calling Python override of QWidget::showEvent(): 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 20:56:32 CRITICAL sme_gend: Exception non interceptée
+Traceback (most recent call last):
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 829, in _open_dossier
+    self._open_dossier_for(row_obj)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 777, in _open_dossier_for
+    self._refresh_all(silent=True)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 652, in _refresh_all
+    self._apply_loaded_rows(rows)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 626, in _apply_loaded_rows
+    self._resize_columns_to_content()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\MONSTER\Desktop\GN\Impression\sme_python\src\sme_gend\ui\views\personnel_list_view.py", line 1017, in _resize_columns_to_content
+    hdr.resizeSectionToContents(c)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'PySide6.QtWidgets.QHeaderView' object has no attribute 'resizeSectionToContents'
+2026-05-09 20:58:51 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 21:21:31 INFO     sme_gend: Démarrage SME Gendarmerie
+2026-05-09 21:35:04 INFO     sme_gend: Démarrage SME Gendarmerie

@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QAction, QCloseEvent, QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QDialogButtonBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QPushButton,
     QSizePolicy,
     QStackedWidget,
     QStatusBar,
@@ -25,6 +27,7 @@ from PySide6.QtWidgets import (
 from sme_gend import __version__
 from sme_gend.config import get_settings
 from sme_gend.config.settings import Settings
+from sme_gend.config.sme_context import load_sme_context, save_sme_context
 from sme_gend.services.dashboard_service import DashboardService
 from sme_gend.services.layout_config_service import LayoutConfigService
 from sme_gend.services.liste_present_service import ListePresentService
@@ -40,39 +43,89 @@ from sme_gend.ui.views.detaches_view import DetachesView
 from sme_gend.ui.views.home_view import HomeView
 from sme_gend.ui.views.layout_editor_view import LayoutEditorView
 from sme_gend.ui.views.liste_present_view import ListePresentView
-from sme_gend.ui.views.numerique_indispo_view import NumeriqueIndispoView
-from sme_gend.ui.views.numerique_matrice_view import NumeriqueMatriceView
-from sme_gend.ui.views.numerique_satellite_view import NumeriqueSatelliteView
+from sme_gend.ui.views.numerique_combined_view import NumeriqueCombinedView
 from sme_gend.ui.views.personnel_list_view import PersonnelListView
-from sme_gend.ui.views.referentiel_views import FonctionsView, GradesView, StructuresView
+from sme_gend.ui.views.referentiel_views import FonctionsView, GradesView, PadminView, StructuresView
+from sme_gend.ui.views.structure_effectifs_view import StructureEffectifsView
 from sme_gend.ui.navigation_pages import (
-    NAV_MENU_SEPARATOR_BEFORE,
     PAGE_COUNT,
+    PAGE_CSV_IMPORT,
     PAGE_DASHBOARD,
     PAGE_ARCHIVES_CLOSURE,
     PAGE_DETACHES,
+    PAGE_DETACHES_CONFIG,
+    PAGE_DOC_GEN_LOG,
+    PAGE_EDITION_SME,
     PAGE_FONCTIONS,
+    PAGE_PADMIN,
+    PAGE_GAIN_PERTE,
     PAGE_GRADES,
     PAGE_LAYOUT_EDITOR,
+    PAGE_LIMITE_AGE,
     PAGE_LISTE_GENERALE,
     PAGE_LISTE_PRESENTS,
-    PAGE_NUMERIQUE_INDISPO,
-    PAGE_NUMERIQUE_MATRICE,
-    PAGE_NUMERIQUE_SATELLITE,
+    PAGE_NUMERIQUE,
     PAGE_SETTINGS,
+    PAGE_SOIT_TRANSMIS,
     PAGE_STRUCTURES,
-    PAGE_DETACHES_CONFIG,
+    PAGE_STRUCTURES_EFFECTIFS,
 )
 from sme_gend.ui.views.archives_view import ArchivesView
+from sme_gend.ui.views.csv_import_view import CsvImportView
+from sme_gend.ui.views.doc_gen_log_view import DocGenLogView
+from sme_gend.ui.views.edition_sme_view import EditionSmeView
+from sme_gend.ui.views.gain_perte_view import GainPerteView
+from sme_gend.ui.views.limite_age_view import LimiteAgeView
 from sme_gend.ui.views.settings_view import SettingsView
+from sme_gend.ui.views.soit_transmis_view import SoitTransmisView
 
 # Données utilisateur sur QTreeWidgetItem : indice pile (-1 = dossier non navigable)
 _ROLE_STACK = Qt.ItemDataRole.UserRole
 _ROLE_LABEL = Qt.ItemDataRole.UserRole + 1
 
+_MOIS_FR = (
+    "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+    "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre",
+)
+
+
+def _format_mois_fr(mois: str) -> str:
+    if not mois:
+        return "—"
+    try:
+        y, m = mois.split("-")
+        m_int = int(m)
+        if 1 <= m_int <= 12:
+            return f"{_MOIS_FR[m_int - 1]} {y}"
+    except (ValueError, IndexError):
+        pass
+    return mois
+
 
 def _std_icon(style: QStyle, sp: QStyle.StandardPixmap) -> QIcon:
     return style.standardIcon(sp)
+
+
+class _PlaceholderView(QWidget):
+    """Page vide affichée pour les modules en cours de développement."""
+
+    def __init__(self, title: str, message: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        lbl_title = QLabel(title)
+        lbl_title.setObjectName("dashTitle")
+        lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        lbl_msg = QLabel(message)
+        lbl_msg.setObjectName("dashSubtitle")
+        lbl_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_msg.setWordWrap(True)
+
+        lay = QVBoxLayout(self)
+        lay.addStretch()
+        lay.addWidget(lbl_title)
+        lay.addSpacing(12)
+        lay.addWidget(lbl_msg)
+        lay.addStretch()
 
 
 class ShellWindow(QMainWindow):
@@ -114,80 +167,105 @@ class ShellWindow(QMainWindow):
             self._stack.addWidget(widget)
             self._nav_labels.append(text)
 
-        # --- Pages (ordre pile = index utilisé partout) ---
+        # --- Pages (ordre pile = index utilisé partout ; libellés = navigation latérale + menu) ---
+        self._home_view = HomeView(settings, dashboard, navigate_to_page=self._go_page)
+        register_page("Synthèse & pilotage", self._home_view)
+        personnel_list = PersonnelListView(personnel, referentiel, settings)
+        self._personnel_list_view = personnel_list
+        register_page("Liste générale", personnel_list)
+
+        def _open_liste_for_structure(structure_code: str) -> None:
+            self._go_page(PAGE_LISTE_GENERALE)
+            personnel_list.apply_structure_filter(structure_code)
+
         register_page(
-            "Tableau de bord",
-            HomeView(settings, dashboard, navigate_to_page=self._go_page),
+            "Effectifs par structure",
+            StructureEffectifsView(
+                settings,
+                personnel,
+                referentiel,
+                _open_liste_for_structure,
+            ),
         )
-        register_page("Liste générale", PersonnelListView(personnel, referentiel))
         register_page(
-            "Mise en page liste",
+            "Mise en page (liste présents)",
             LayoutEditorView(layout_cfg, detaches_cfg),
         )
         register_page("Liste des présents", ListePresentView(liste_present))
         register_page("Détachés", DetachesView(settings, detaches_preview, detaches_cfg))
-        register_page("Structures", StructuresView(referentiel))
+        register_page("Structures (codes)", StructuresView(referentiel))
         register_page("Grades", GradesView(referentiel))
         register_page("Fonctions", FonctionsView(referentiel))
-        register_page("Config. fichier DETACHES", DetachesConfigView(detaches_cfg))
+        register_page("Fichier Excel détachés", DetachesConfigView(detaches_cfg))
         register_page(
-            "Matrice (situation numérique)",
-            NumeriqueMatriceView(settings, numerique_preview),
+            "Situation numérique",
+            NumeriqueCombinedView(settings, numerique_preview),
         )
-        register_page(
-            "Indispo par structure",
-            NumeriqueIndispoView(settings, numerique_preview),
-        )
-        register_page(
-            "Listes détail (situation num.)",
-            NumeriqueSatelliteView(settings, numerique_preview),
-        )
-        register_page("Archives clôture", ArchivesView())
-        register_page("Paramètres", SettingsView(settings))
+        register_page("Archives de clôture", ArchivesView())
+        register_page("Paramètres & données", SettingsView(settings))
+        register_page("Gains & Pertes", GainPerteView(settings))
+        self._limite_age_view = LimiteAgeView(settings)
+        register_page("Limite d'âge", self._limite_age_view)
 
-        assert self._stack.count() == PAGE_COUNT, (
-            f"navigation_pages.PAGE_COUNT={PAGE_COUNT} != pile={self._stack.count()} "
-            "(mettre à jour navigation_pages si l’ordre des pages change)."
-        )
+        self._soit_transmis_view = SoitTransmisView(settings)
+        register_page("Soit transmis", self._soit_transmis_view)
+
+        self._csv_import_view = CsvImportView(settings)
+        register_page("Import CSV / Excel", self._csv_import_view)
+
+        register_page("Historique documents", DocGenLogView())
+
+        self._edition_sme_view = EditionSmeView(settings)
+        register_page("Edition SME", self._edition_sme_view)
+
+        register_page("Positions administratives", PadminView(referentiel))
+
+        # Partager l'instance LimiteAgeService entre les deux vues (Point 17)
+        self._soit_transmis_view.set_limite_age_service(self._limite_age_view.limite_age_service)
+
+        # Lier le bouton "→ Soit transmis" de l'onglet Attestations
+        def _push_to_soit_transmis(persons, grade_code_map=None, results=None):
+            self._soit_transmis_view.load_persons(persons, grade_code_map, results)
+            self._go_page(PAGE_SOIT_TRANSMIS)
+
+        self._limite_age_view.set_send_to_soit_transmis_fn(_push_to_soit_transmis)
+
+        if self._stack.count() != PAGE_COUNT:
+            raise RuntimeError(
+                f"navigation_pages.PAGE_COUNT={PAGE_COUNT} != pile={self._stack.count()} "
+                "(mettre à jour navigation_pages si l'ordre des pages change)."
+            )
 
         # Icônes réelles (register_page a mis des QIcon() vides pour index 0)
         icons: list[QIcon] = [
-            _std_icon(style, QStyle.StandardPixmap.SP_DirHomeIcon),
-            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogListView),
-            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogDetailedView),
-            _std_icon(style, QStyle.StandardPixmap.SP_DialogApplyButton),
-            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogContentsView),
-            _std_icon(style, QStyle.StandardPixmap.SP_DesktopIcon),
-            _std_icon(style, QStyle.StandardPixmap.SP_MessageBoxInformation),
-            _std_icon(
-                style,
-                getattr(
-                    QStyle.StandardPixmap,
-                    "SP_UserIcon",
-                    QStyle.StandardPixmap.SP_FileDialogContentsView,
-                ),
-            ),
-            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogInfoView),
-            _std_icon(style, QStyle.StandardPixmap.SP_ComputerIcon),
-            _std_icon(
-                style,
-                getattr(
-                    QStyle.StandardPixmap,
-                    "SP_FileDialogStart",
-                    QStyle.StandardPixmap.SP_CommandLink,
-                ),
-            ),
-            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogListView),
-            _std_icon(style, QStyle.StandardPixmap.SP_DirLinkIcon),
-            _std_icon(
-                style,
-                getattr(
-                    QStyle.StandardPixmap,
-                    "SP_FileDialogDetailedView",
-                    QStyle.StandardPixmap.SP_FileDialogInfoView,
-                ),
-            ),
+            _std_icon(style, QStyle.StandardPixmap.SP_DirHomeIcon),         # 0 DASHBOARD
+            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogListView),  # 1 LISTE_GENERALE
+            _std_icon(style, QStyle.StandardPixmap.SP_ComputerIcon),        # 2 STRUCTURES_EFFECTIFS
+            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogDetailedView),  # 3 LAYOUT_EDITOR
+            _std_icon(style, QStyle.StandardPixmap.SP_DialogApplyButton),   # 4 LISTE_PRESENTS
+            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogContentsView),  # 5 DETACHES
+            _std_icon(style, QStyle.StandardPixmap.SP_DesktopIcon),         # 6 STRUCTURES
+            _std_icon(style, QStyle.StandardPixmap.SP_MessageBoxInformation),  # 7 GRADES
+            _std_icon(style, getattr(QStyle.StandardPixmap, "SP_UserIcon",
+                QStyle.StandardPixmap.SP_FileDialogContentsView)),           # 8 FONCTIONS
+            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogInfoView),  # 9 DETACHES_CONFIG
+            _std_icon(style, QStyle.StandardPixmap.SP_ComputerIcon),        # 10 NUMERIQUE
+            _std_icon(style, QStyle.StandardPixmap.SP_DirLinkIcon),         # 11 ARCHIVES_CLOSURE
+            _std_icon(style, getattr(QStyle.StandardPixmap, "SP_FileDialogDetailedView",
+                QStyle.StandardPixmap.SP_FileDialogInfoView)),               # 12 SETTINGS
+            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogContentsView),  # 13 GAIN_PERTE
+            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogInfoView),   # 14 LIMITE_AGE
+            _std_icon(style, QStyle.StandardPixmap.SP_FileLinkIcon),          # 15 SOIT_TRANSMIS
+            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogContentsView),# 16 CSV_IMPORT
+            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogListView),    # 17 DOC_GEN_LOG
+            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogDetailedView), # 18 EDITION_SME
+            _std_icon(style, QStyle.StandardPixmap.SP_MessageBoxInformation),   # 19 PADMIN
         ]
+        if len(icons) != PAGE_COUNT:
+            raise RuntimeError(
+                f"Incohérence icônes/pages : {len(icons)} icônes pour PAGE_COUNT={PAGE_COUNT}. "
+                "Mettre à jour la liste icons[] lors de tout ajout de page."
+            )
 
         self._nav = QTreeWidget()
         self._nav.setObjectName("navTree")
@@ -229,12 +307,23 @@ class ShellWindow(QMainWindow):
         add_leaf(None, nl[PAGE_DASHBOARD], PAGE_DASHBOARD)
 
         f_eff = add_folder(
-            "Effectifs & listes",
+            "Effectifs du mois",
             _std_icon(style, QStyle.StandardPixmap.SP_FileDialogNewFolder),
         )
         add_leaf(f_eff, nl[PAGE_LISTE_GENERALE], PAGE_LISTE_GENERALE)
-        add_leaf(f_eff, nl[PAGE_LAYOUT_EDITOR], PAGE_LAYOUT_EDITOR)
+        add_leaf(f_eff, nl[PAGE_EDITION_SME], PAGE_EDITION_SME)
+        add_leaf(f_eff, nl[PAGE_STRUCTURES_EFFECTIFS], PAGE_STRUCTURES_EFFECTIFS)
         add_leaf(f_eff, nl[PAGE_LISTE_PRESENTS], PAGE_LISTE_PRESENTS)
+        add_leaf(f_eff, nl[PAGE_LAYOUT_EDITOR], PAGE_LAYOUT_EDITOR)
+        add_leaf(f_eff, nl[PAGE_NUMERIQUE], PAGE_NUMERIQUE)
+        add_leaf(f_eff, nl[PAGE_GAIN_PERTE], PAGE_GAIN_PERTE)
+
+        f_attest = add_folder(
+            "Attestations",
+            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogInfoView),
+        )
+        add_leaf(f_attest, nl[PAGE_LIMITE_AGE],    PAGE_LIMITE_AGE)
+        add_leaf(f_attest, nl[PAGE_SOIT_TRANSMIS], PAGE_SOIT_TRANSMIS)
 
         f_det = add_folder(
             "Détachés",
@@ -243,15 +332,8 @@ class ShellWindow(QMainWindow):
                 getattr(QStyle.StandardPixmap, "SP_DriveNetIcon", QStyle.StandardPixmap.SP_DirIcon),
             ),
         )
-        add_leaf(f_det, "Liste & export", PAGE_DETACHES)
-
-        f_num = add_folder(
-            "Situation numérique",
-            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogInfoView),
-        )
-        add_leaf(f_num, nl[PAGE_NUMERIQUE_MATRICE], PAGE_NUMERIQUE_MATRICE)
-        add_leaf(f_num, nl[PAGE_NUMERIQUE_INDISPO], PAGE_NUMERIQUE_INDISPO)
-        add_leaf(f_num, nl[PAGE_NUMERIQUE_SATELLITE], PAGE_NUMERIQUE_SATELLITE)
+        add_leaf(f_det, nl[PAGE_DETACHES], PAGE_DETACHES)
+        add_leaf(f_det, nl[PAGE_DETACHES_CONFIG], PAGE_DETACHES_CONFIG)
 
         f_ref = add_folder(
             "Référentiels",
@@ -260,14 +342,27 @@ class ShellWindow(QMainWindow):
         add_leaf(f_ref, nl[PAGE_STRUCTURES], PAGE_STRUCTURES)
         add_leaf(f_ref, nl[PAGE_GRADES], PAGE_GRADES)
         add_leaf(f_ref, nl[PAGE_FONCTIONS], PAGE_FONCTIONS)
-        add_leaf(f_ref, nl[PAGE_DETACHES_CONFIG], PAGE_DETACHES_CONFIG)
+        add_leaf(f_ref, nl[PAGE_PADMIN], PAGE_PADMIN)
 
-        add_leaf(None, nl[PAGE_ARCHIVES_CLOSURE], PAGE_ARCHIVES_CLOSURE)
-        add_leaf(None, nl[PAGE_SETTINGS], PAGE_SETTINGS)
+        f_admin = add_folder(
+            "Administration",
+            _std_icon(style, QStyle.StandardPixmap.SP_FileDialogDetailedView),
+        )
+        add_leaf(f_admin, nl[PAGE_SETTINGS], PAGE_SETTINGS)
+        add_leaf(f_admin, nl[PAGE_ARCHIVES_CLOSURE], PAGE_ARCHIVES_CLOSURE)
+        add_leaf(f_admin, nl[PAGE_CSV_IMPORT], PAGE_CSV_IMPORT)
+        add_leaf(f_admin, nl[PAGE_DOC_GEN_LOG], PAGE_DOC_GEN_LOG)
 
         self._nav.itemClicked.connect(self._on_nav_item_clicked)
         self._nav.setCurrentItem(self._page_to_item[PAGE_DASHBOARD])
         self._stack.setCurrentIndex(PAGE_DASHBOARD)
+        self._stack.currentChanged.connect(self._on_content_page_changed)
+
+        # Ctrl+K — recherche globale
+        self._shortcut_search = QShortcut(QKeySequence("Ctrl+K"), self)
+        self._shortcut_search.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._shortcut_search.activated.connect(self._open_global_search)
+        self._global_search_dlg = None
 
         # F1 / aide : QShortcut plus fiable que QAction seul sous Windows (conflits menu / focus)
         self._shortcut_about = QShortcut(QKeySequence("F1"), self)
@@ -369,15 +464,86 @@ class ShellWindow(QMainWindow):
         help_row.addStretch()
         self._side_lay.addLayout(help_row)
 
+        self._period_banner = QFrame()
+        self._period_banner.setObjectName("appPeriodBanner")
+        pb_lay = QHBoxLayout(self._period_banner)
+        pb_lay.setContentsMargins(14, 6, 14, 6)
+        pb_lay.setSpacing(8)
+
+        lbl_sme = QLabel("<b>SME ·</b>")
+        lbl_sme.setObjectName("appPeriodBannerLabel")
+
+        self._btn_prev_month = QToolButton()
+        self._btn_prev_month.setText("◄")
+        self._btn_prev_month.setObjectName("periodNavBtn")
+        self._btn_prev_month.setToolTip("Mois précédent")
+        self._btn_prev_month.setAutoRaise(True)
+        self._btn_prev_month.clicked.connect(self._go_prev_month)
+
+        self._period_month_lbl = QLabel("—")
+        self._period_month_lbl.setObjectName("periodMonthLabel")
+        self._period_month_lbl.setMinimumWidth(130)
+        self._period_month_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self._period_statut_lbl = QLabel()
+        self._period_statut_lbl.setObjectName("periodStatutLabel")
+
+        self._btn_next_month = QToolButton()
+        self._btn_next_month.setText("►")
+        self._btn_next_month.setObjectName("periodNavBtn")
+        self._btn_next_month.setToolTip("Mois suivant")
+        self._btn_next_month.setAutoRaise(True)
+        self._btn_next_month.clicked.connect(self._go_next_month)
+
+        btn_period = QPushButton("Tableau de bord…")
+        btn_period.setObjectName("appPeriodBannerBtn")
+        btn_period.setToolTip("Synthèse, clôture, réouverture exceptionnelle.")
+        btn_period.clicked.connect(lambda: self._go_page(PAGE_DASHBOARD))
+
+        btn_months_overview = QPushButton("Calendrier des mois…")
+        btn_months_overview.setObjectName("appPeriodBannerBtn")
+        btn_months_overview.setToolTip(
+            "Liste tous les mois connus avec leur statut et la présence d'une archive."
+        )
+        btn_months_overview.clicked.connect(self._on_months_overview_dialog)
+
+        pb_lay.addWidget(lbl_sme)
+        pb_lay.addWidget(self._btn_prev_month)
+        pb_lay.addWidget(self._period_month_lbl)
+        pb_lay.addWidget(self._period_statut_lbl)
+        pb_lay.addWidget(self._btn_next_month)
+
+        self._archive_lbl = QLabel()
+        self._archive_lbl.setObjectName("archiveBannerLabel")
+        self._archive_lbl.setStyleSheet(
+            "color: #bf360c; font-weight: 700; background: #fff3e0; "
+            "padding: 3px 10px; border-radius: 4px; border: 1px solid #ffb300;"
+        )
+        self._archive_lbl.setVisible(False)
+        pb_lay.addWidget(self._archive_lbl)
+
+        pb_lay.addStretch()
+        pb_lay.addWidget(btn_months_overview, alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        pb_lay.addWidget(btn_period, alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        content_row = QWidget()
+        row_lay = QHBoxLayout(content_row)
+        row_lay.setContentsMargins(0, 0, 0, 0)
+        row_lay.setSpacing(0)
+        row_lay.addWidget(self._sidebar_frame)
+        row_lay.addWidget(self._stack, stretch=1)
+
         central = QWidget()
-        lay = QHBoxLayout(central)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.addWidget(self._sidebar_frame)
-        lay.addWidget(self._stack, stretch=1)
+        vcentral = QVBoxLayout(central)
+        vcentral.setContentsMargins(0, 0, 0, 0)
+        vcentral.setSpacing(0)
+        vcentral.addWidget(self._period_banner)
+        vcentral.addWidget(content_row, stretch=1)
         self.setCentralWidget(central)
 
         self._settings = settings
+        self._refresh_period_banner()
+        self._refresh_active_views_on_month_change()
         self._build_menu_bar()
 
         status = QStatusBar()
@@ -387,11 +553,19 @@ class ShellWindow(QMainWindow):
         self._refresh_data_status_label()
         status.addPermanentWidget(self._status_data_lbl)
 
+        _layout_editor_ref: LayoutEditorView | None = None
+        _liste_present_ref: ListePresentView | None = None
         for i in range(self._stack.count()):
             w = self._stack.widget(i)
             if isinstance(w, ListePresentView):
                 w.set_open_layout_editor(lambda: self._go_page(PAGE_LAYOUT_EDITOR))
-                break
+                _liste_present_ref = w
+            elif isinstance(w, LayoutEditorView):
+                _layout_editor_ref = w
+        if _layout_editor_ref is not None and _liste_present_ref is not None:
+            _layout_editor_ref.set_on_saved_callback(
+                _liste_present_ref.apply_runtime_after_config_change
+            )
 
     def _on_nav_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
         del column
@@ -406,6 +580,292 @@ class ShellWindow(QMainWindow):
             return
         self._stack.setCurrentIndex(stack_idx)
 
+    def _on_content_page_changed(self, index: int) -> None:
+        self._refresh_period_banner()
+        if index == PAGE_EDITION_SME:
+            # Chargement automatique au premier affichage (ou si vide)
+            if self._edition_sme_view._model.rowCount() == 0:
+                self._edition_sme_view.load_data()
+
+    def _go_prev_month(self) -> None:
+        self._navigate_month(-1)
+
+    def _go_next_month(self) -> None:
+        self._navigate_month(+1)
+
+    def _navigate_month(self, direction: int) -> None:
+        from sme_gend.repositories.sme_repository import SmeRepository
+        from sme_gend.services.sme_month_closure import canonical_sme_mois_yyyy_mm
+
+        ctx = load_sme_context()
+        current = (canonical_sme_mois_yyyy_mm(ctx.mois_actif or "") or "").strip()
+
+        mois_list: list[str] = []
+        try:
+            repo = SmeRepository(self._settings)
+            if repo.table_exists():
+                seen: set[str] = set()
+                for r in repo.fetch_all():
+                    ym = canonical_sme_mois_yyyy_mm(r.mois)
+                    if ym and ym not in seen:
+                        seen.add(ym)
+                        mois_list.append(ym)
+                mois_list.sort()
+        except Exception:
+            pass
+
+        new_mois: str | None = None
+        if mois_list:
+            if current in mois_list:
+                new_idx = mois_list.index(current) + direction
+                if 0 <= new_idx < len(mois_list):
+                    new_mois = mois_list[new_idx]
+            else:
+                new_mois = mois_list[-1] if direction > 0 else mois_list[0]
+        elif current:
+            try:
+                y, m = int(current[:4]), int(current[5:7])
+                m += direction
+                if m < 1:
+                    m, y = 12, y - 1
+                elif m > 12:
+                    m, y = 1, y + 1
+                new_mois = f"{y:04d}-{m:02d}"
+            except (ValueError, IndexError):
+                pass
+
+        if new_mois:
+            ctx.mois_actif = new_mois
+            save_sme_context(ctx)
+            self._apply_month_data_source(new_mois)
+            self._refresh_period_banner()
+            self._refresh_active_views_on_month_change()
+
+    def _refresh_active_views_on_month_change(self) -> None:
+        from sme_gend.ui.views.archives_view import ArchivesView
+
+        new_mois = load_sme_context().mois_actif or None
+        for i in range(self._stack.count()):
+            w = self._stack.widget(i)
+            if isinstance(w, ArchivesView):
+                w.set_active_mois(new_mois)
+            if isinstance(w, HomeView):
+                w._sme_panel.refresh_workflow()
+            # Marque toutes les vues "dirty" : rechargement depuis la bonne source au prochain affichage
+            if hasattr(w, "mark_dirty"):
+                w.mark_dirty()
+
+        # Rafraîchit la page courante immédiatement
+        current = self._stack.widget(self._stack.currentIndex())
+        if hasattr(current, "_reload_stats"):
+            current._reload_stats(silent=True)
+        elif hasattr(current, "apply_runtime_after_config_change"):
+            current.apply_runtime_after_config_change()
+
+    def _rebind_data_services(
+        self,
+        data_settings: Settings,
+        ref_settings: Settings | None = None,
+    ) -> None:
+        """Rebinde les services de données.
+
+        data_settings : source des données mensuelles (ListeGenerale).
+        ref_settings  : source du référentiel (structures, grades, subdivisions).
+                        Si None, identique à data_settings (mode live normal).
+        """
+        if ref_settings is not None:
+            self._dashboard.rebind_for_archive(data_settings, ref_settings)
+        else:
+            self._dashboard.rebind_settings(data_settings)
+        self._personnel.rebind_settings(data_settings)
+        self._liste_present.rebind_settings(data_settings)
+        self._numerique_preview.rebind_settings(data_settings)
+        self._detaches_preview.rebind_settings(data_settings)
+        self._limite_age_view.rebind_settings(data_settings)
+        # Référentiel : rebind sur data_settings pour lire grades/structures de l'archive.
+        # En mode live, data_settings == self._settings (pas d'impact).
+        self._referentiel.rebind_settings(data_settings)
+
+    def _apply_month_data_source(self, mois: str) -> None:
+        """
+        Quand on navigue vers un mois fermé avec une archive, rebinde les services
+        sur ce fichier archive. Sinon, restaure les services sur la base principale.
+        """
+        import dataclasses
+        from sme_gend.config.sme_context import load_sme_context as _ctx
+        from sme_gend.services.sme_month_closure import find_archive_for_month
+
+        ctx = _ctx()
+        is_closed = mois in (ctx.mois_fermes or [])
+        archive_path = find_archive_for_month(mois) if is_closed else None
+
+        if archive_path is not None:
+            ext = archive_path.suffix.lower()
+            if ext in (".sqlite", ".db"):
+                arc_s = dataclasses.replace(
+                    self._settings,
+                    sqlite_liste_path=archive_path,
+                    use_sqlite_liste_generale=True,
+                )
+            else:
+                arc_s = dataclasses.replace(
+                    self._settings,
+                    database_path=archive_path,
+                    use_sqlite_liste_generale=False,
+                )
+            self._rebind_data_services(arc_s, ref_settings=self._settings)
+            self._archive_lbl.setText(f"Archives {mois} — lecture seule")
+            self._archive_lbl.setVisible(True)
+        else:
+            self._rebind_data_services(self._settings)
+            self._archive_lbl.setVisible(False)
+
+    def _on_months_overview_dialog(self) -> None:
+        """Affiche le calendrier des mois : statut TabSme + présence d'archive pour chacun."""
+        from sme_gend.repositories.sme_repository import SmeRepository
+        from sme_gend.services.sme_month_closure import (
+            canonical_sme_mois_yyyy_mm,
+            find_archive_for_month,
+        )
+        from PySide6.QtWidgets import (
+            QDialog, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
+            QDialogButtonBox, QHeaderView,
+        )
+        from PySide6.QtGui import QColor
+
+        ctx = load_sme_context()
+        mois_actif = (ctx.mois_actif or "").strip()
+
+        # --- Collecte des mois connus ---
+        # 1. depuis TabSme
+        tabsme_map: dict[str, str] = {}  # YYYY-MM → statut
+        try:
+            repo = SmeRepository(self._settings)
+            if repo.table_exists():
+                for r in repo.fetch_all():
+                    ym = canonical_sme_mois_yyyy_mm(r.mois)
+                    if ym:
+                        tabsme_map[ym] = r.statut or "—"
+        except Exception:
+            pass
+
+        # 2. depuis mois_fermes (contexte local)
+        all_months: set[str] = set(tabsme_map.keys())
+        for m in (ctx.mois_fermes or []):
+            ym = canonical_sme_mois_yyyy_mm(m)
+            if ym:
+                all_months.add(ym)
+        if mois_actif:
+            ym = canonical_sme_mois_yyyy_mm(mois_actif)
+            if ym:
+                all_months.add(ym)
+
+        sorted_months = sorted(all_months, reverse=True)
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Calendrier des mois — données disponibles")
+        dlg.setMinimumWidth(560)
+        dlg.setMinimumHeight(420)
+        lay = QVBoxLayout(dlg)
+
+        info = QLabel(
+            "Liste des mois connus (TabSme + historique local). "
+            "<b>Archive</b> = fichier de données importé dans <code>sme_archives/</code>. "
+            "Double-cliquez sur un mois pour y naviguer directement."
+        )
+        info.setWordWrap(True)
+        info.setTextFormat(Qt.TextFormat.RichText)
+        lay.addWidget(info)
+
+        tbl = QTableWidget(len(sorted_months), 4)
+        tbl.setHorizontalHeaderLabels(["Mois", "Statut TabSme", "Archive", "État"])
+        tbl.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        tbl.setAlternatingRowColors(True)
+        tbl.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+
+        for row, ym in enumerate(sorted_months):
+            archive = find_archive_for_month(ym)
+            statut = tabsme_map.get(ym, "—")
+            is_ferme = ym in (ctx.mois_fermes or [])
+            is_actif = ym == canonical_sme_mois_yyyy_mm(mois_actif)
+
+            if is_actif:
+                etat = "● Actif"
+                row_color = QColor("#e8f5e9")
+            elif archive is not None:
+                etat = "✓ Archive disponible"
+                row_color = QColor("#e3f2fd")
+            elif is_ferme:
+                etat = "○ Clôturé, sans archive"
+                row_color = QColor("#fff8e1")
+            else:
+                etat = "—"
+                row_color = None
+
+            tbl.setItem(row, 0, QTableWidgetItem(ym))
+            tbl.setItem(row, 1, QTableWidgetItem(statut))
+            tbl.setItem(row, 2, QTableWidgetItem(
+                f"✓  {archive.name}" if archive else "—"
+            ))
+            tbl.setItem(row, 3, QTableWidgetItem(etat))
+
+            if row_color:
+                for col in range(4):
+                    item = tbl.item(row, col)
+                    if item:
+                        item.setBackground(row_color)
+
+        def _on_double_click(r: int, _c: int) -> None:
+            ym_sel = tbl.item(r, 0)
+            if ym_sel is None:
+                return
+            target = ym_sel.text().strip()
+            if not target:
+                return
+            ctx2 = load_sme_context()
+            ctx2.mois_actif = target
+            save_sme_context(ctx2)
+            self._apply_month_data_source(target)
+            self._refresh_period_banner()
+            self._refresh_active_views_on_month_change()
+            dlg.accept()
+
+        tbl.cellDoubleClicked.connect(_on_double_click)
+        lay.addWidget(tbl)
+
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+        dlg.exec()
+
+    def _refresh_period_banner(self) -> None:
+        from sme_gend.services.sme_editing_policy import evaluate_editing_state
+
+        ctx = load_sme_context()
+        mois = (ctx.mois_actif or "").strip()
+        self._period_month_lbl.setText(_format_mois_fr(mois))
+
+        try:
+            st = evaluate_editing_state(self._settings)
+        except Exception:
+            self._period_statut_lbl.setText("⚠ indisponible")
+            self._period_statut_lbl.setStyleSheet("color: #b71c1c;")
+            return
+
+        if st.locked:
+            self._period_statut_lbl.setText(f"● {st.tabsme_statut or 'Ferme'}")
+            self._period_statut_lbl.setStyleSheet("color: #b71c1c; font-weight: 600;")
+        elif st.tabsme_statut:
+            self._period_statut_lbl.setText(f"● {st.tabsme_statut}")
+            self._period_statut_lbl.setStyleSheet("color: #2e7d32; font-weight: 600;")
+        elif not mois:
+            self._period_statut_lbl.setText("non définie")
+            self._period_statut_lbl.setStyleSheet("color: #6d4c41;")
+        else:
+            self._period_statut_lbl.setText("● saisie autorisée")
+            self._period_statut_lbl.setStyleSheet("color: #1565c0;")
+
     def _walk_nav_items(self):
         """Parcourt tous les items (y compris enfants)."""
         for i in range(self._nav.topLevelItemCount()):
@@ -418,41 +878,102 @@ class ShellWindow(QMainWindow):
 
     def _build_menu_bar(self) -> None:
         bar = self.menuBar()
-        # Barre de menus intégrée à la fenêtre (évite menus natifs Windows peu fiables avec thème QSS)
         bar.setNativeMenuBar(False)
 
+        def _nav_action(page_idx: int) -> QAction:
+            act = QAction(self._nav_labels[page_idx], self)
+            act.triggered.connect(lambda: self._go_page(page_idx))
+            return act
+
+        # ── Fichier ──────────────────────────────────────────────────────────
         m_file = bar.addMenu("&Fichier")
         act_paths = QAction("Chemins des fichiers de données…", self)
         act_paths.setToolTip(
-            "SQLite (données principales), Access (import depuis l’ancien .mdb), modèles Excel, "
-            "archives, médias. Enregistrement dans le profil : rechargement immédiat de l’application."
+            "SQLite (données principales), Access (import depuis l'ancien .mdb), "
+            "modèles Excel, archives. Rechargement immédiat après enregistrement."
         )
         act_paths.triggered.connect(self._open_paths_config)
         m_file.addAction(act_paths)
+
+        act_import = QAction("Importer une base existante…", self)
+        act_import.setToolTip(
+            "Importe un fichier .sqlite ou .mdb comme archive d'un mois passé : "
+            "copie vers sme_archives/, TabSme mis à jour."
+        )
+        act_import.triggered.connect(lambda: self._home_view._sme_panel._on_sme_import_dialog())
+        m_file.addAction(act_import)
+
         m_file.addSeparator()
         act_quit = QAction("Quitter", self)
         act_quit.setShortcut(QKeySequence.StandardKey.Quit)
         act_quit.triggered.connect(self.close)
         m_file.addAction(act_quit)
 
+        # ── Effectifs ─────────────────────────────────────────────────────────
+        m_eff = bar.addMenu("&Effectifs")
+        m_eff.addAction(_nav_action(PAGE_DASHBOARD))
+        m_eff.addAction(_nav_action(PAGE_LISTE_GENERALE))
+        m_eff.addAction(_nav_action(PAGE_EDITION_SME))
+        m_eff.addAction(_nav_action(PAGE_STRUCTURES_EFFECTIFS))
+        m_eff.addAction(_nav_action(PAGE_LISTE_PRESENTS))
+        m_eff.addAction(_nav_action(PAGE_NUMERIQUE))
+        m_eff.addAction(_nav_action(PAGE_GAIN_PERTE))
+
+        # ── Détachés ──────────────────────────────────────────────────────────
+        m_det = bar.addMenu("&Détachés")
+        m_det.addAction(_nav_action(PAGE_DETACHES))
+        m_det.addAction(_nav_action(PAGE_DETACHES_CONFIG))
+
+        # ── Référentiels ──────────────────────────────────────────────────────
+        m_ref = bar.addMenu("&Référentiels")
+        m_ref.addAction(_nav_action(PAGE_STRUCTURES))
+        m_ref.addAction(_nav_action(PAGE_GRADES))
+        m_ref.addAction(_nav_action(PAGE_FONCTIONS))
+        m_ref.addAction(_nav_action(PAGE_PADMIN))
+
+        # ── Administration ────────────────────────────────────────────────────
+        m_adm = bar.addMenu("&Administration")
+        m_adm.addAction(_nav_action(PAGE_ARCHIVES_CLOSURE))
+        m_adm.addAction(_nav_action(PAGE_LAYOUT_EDITOR))
+        m_adm.addAction(_nav_action(PAGE_SETTINGS))
+        m_adm.addSeparator()
+        m_adm.addAction(_nav_action(PAGE_CSV_IMPORT))
+        m_adm.addAction(_nav_action(PAGE_DOC_GEN_LOG))
+
+        # ── Affichage ─────────────────────────────────────────────────────────
         m_view = bar.addMenu("&Affichage")
-        act_reload = QAction("Actualiser le tableau de bord", self)
+        act_search = QAction("Recherche globale…", self)
+        act_search.setShortcut("Ctrl+K")
+        act_search.triggered.connect(self._open_global_search)
+        m_view.addAction(act_search)
+        act_reload = QAction("Actualiser la synthèse", self)
         act_reload.setShortcut("F5")
         act_reload.triggered.connect(self._refresh_dashboard_if_visible)
         m_view.addAction(act_reload)
-        act_sidebar = QAction("Réduire / développer la barre latérale (icônes)", self)
+        act_sidebar = QAction("Réduire / développer la barre latérale", self)
         act_sidebar.setShortcut("Ctrl+B")
         act_sidebar.triggered.connect(self._toggle_sidebar)
         m_view.addAction(act_sidebar)
 
-        m_nav = bar.addMenu("&Navigation")
-        for idx, label in enumerate(self._nav_labels):
-            if idx in NAV_MENU_SEPARATOR_BEFORE:
-                m_nav.addSeparator()
-            act = QAction(label, self)
-            act.triggered.connect(lambda checked=False, i=idx: self._go_page(i))
-            m_nav.addAction(act)
+        m_view.addSeparator()
+        m_theme = m_view.addMenu("Thème")
+        ctx_theme = load_sme_context()
+        self._act_theme_light = QAction("Clair", self)
+        self._act_theme_light.setCheckable(True)
+        self._act_theme_light.setChecked(ctx_theme.theme == "light")
+        self._act_theme_dark = QAction("Sombre", self)
+        self._act_theme_dark.setCheckable(True)
+        self._act_theme_dark.setChecked(ctx_theme.theme == "dark")
+        theme_grp = QActionGroup(self)
+        theme_grp.setExclusive(True)
+        theme_grp.addAction(self._act_theme_light)
+        theme_grp.addAction(self._act_theme_dark)
+        self._act_theme_light.triggered.connect(lambda: self._apply_theme("light"))
+        self._act_theme_dark.triggered.connect(lambda: self._apply_theme("dark"))
+        m_theme.addAction(self._act_theme_light)
+        m_theme.addAction(self._act_theme_dark)
 
+        # ── Aide ──────────────────────────────────────────────────────────────
         m_help = bar.addMenu("&Aide")
         act_about = QAction("À propos de SME…", self)
         act_about.setMenuRole(QAction.MenuRole.NoRole)
@@ -468,6 +989,15 @@ class ShellWindow(QMainWindow):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         self.reload_runtime_configuration(show_success_dialog=True)
+
+    def _apply_theme(self, theme: str) -> None:
+        from sme_gend.ui.theme import apply_app_theme
+        ctx = load_sme_context()
+        ctx.theme = theme
+        save_sme_context(ctx)
+        apply_app_theme(QApplication.instance(), theme)
+        self._act_theme_light.setChecked(theme == "light")
+        self._act_theme_dark.setChecked(theme == "dark")
 
     def _refresh_data_status_label(self) -> None:
         s = self._settings
@@ -503,7 +1033,7 @@ class ShellWindow(QMainWindow):
         self._settings = new_settings
         self._refresh_data_status_label()
         self._propagate_runtime_settings_to_views()
-        self._refresh_dashboard_if_visible()
+        self._refresh_period_banner()
         if show_success_dialog:
             QMessageBox.information(
                 self,
@@ -515,14 +1045,14 @@ class ShellWindow(QMainWindow):
 
     def _propagate_runtime_settings_to_views(self) -> None:
         from sme_gend.ui.views.detaches_view import DetachesView
+        from sme_gend.ui.views.gain_perte_view import GainPerteView as _GainPerteView
         from sme_gend.ui.views.home_view import HomeView
         from sme_gend.ui.views.liste_present_view import ListePresentView
-        from sme_gend.ui.views.numerique_indispo_view import NumeriqueIndispoView
-        from sme_gend.ui.views.numerique_matrice_view import NumeriqueMatriceView
-        from sme_gend.ui.views.numerique_satellite_view import NumeriqueSatelliteView
+        from sme_gend.ui.views.numerique_combined_view import NumeriqueCombinedView as _NumeriqueCombinedView
         from sme_gend.ui.views.personnel_list_view import PersonnelListView
-        from sme_gend.ui.views.referentiel_views import FonctionsView, GradesView, StructuresView
+        from sme_gend.ui.views.referentiel_views import FonctionsView, GradesView, PadminView, StructuresView
         from sme_gend.ui.views.settings_view import SettingsView
+        from sme_gend.ui.views.structure_effectifs_view import StructureEffectifsView
 
         s = self._settings
         for i in range(self._stack.count()):
@@ -535,12 +1065,20 @@ class ShellWindow(QMainWindow):
                 w.apply_runtime_after_config_change()
             elif isinstance(w, DetachesView):
                 w.apply_runtime_settings(s)
-            elif isinstance(w, (NumeriqueMatriceView, NumeriqueIndispoView, NumeriqueSatelliteView)):
+            elif isinstance(w, _NumeriqueCombinedView):
                 w.apply_runtime_settings(s)
-            elif isinstance(w, (StructuresView, GradesView, FonctionsView)):
+            elif isinstance(w, (StructuresView, GradesView, FonctionsView, PadminView)):
+                w.apply_runtime_after_config_change()
+            elif isinstance(w, StructureEffectifsView):
                 w.apply_runtime_after_config_change()
             elif isinstance(w, SettingsView):
                 w.apply_runtime_settings(s)
+            elif isinstance(w, _GainPerteView):
+                w.apply_runtime_settings(s)
+            elif isinstance(w, CsvImportView):
+                w.rebind_settings(s)
+            elif isinstance(w, EditionSmeView):
+                w.rebind_settings(s)
 
     def _refresh_dashboard_if_visible(self) -> None:
         if self._stack.currentIndex() != PAGE_DASHBOARD:
@@ -588,7 +1126,7 @@ class ShellWindow(QMainWindow):
             self._sidebar_frame.setMaximumWidth(100)
             self._header_stack.setCurrentIndex(1)
             self._nav.setIconSize(QSize(26, 26))
-            # Icônes alignées : pas d’indentation de branche (évite décalage + chevauchement scrollbar)
+            # Icônes alignées : pas d'indentation de branche (évite décalage + chevauchement scrollbar)
             self._nav.setIndentation(0)
             self._nav.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             self._nav.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -616,14 +1154,14 @@ class ShellWindow(QMainWindow):
 
     def _about(self) -> None:
         # QDialog plutôt que QMessageBox(RichText) : certains thèmes Windows / Fusion
-        # n’affichent pas correctement la boîte « À propos » (fenêtre invisible ou bloquée).
+        # n'affichent pas correctement la boîte « À propos » (fenêtre invisible ou bloquée).
         dlg = QDialog(self)
         dlg.setWindowTitle("À propos — SME")
         dlg.setModal(True)
         dlg.setMinimumWidth(420)
         body = QLabel(
             f"<h3 style=\"margin-top:0;\">SME — Situation mensuelle des effectifs</h3>"
-            f"<p>Application de gestion et d’export des listes de personnel.</p>"
+            f"<p>Application de gestion et d'export des listes de personnel.</p>"
             f"<p><b>Version</b> {__version__}</p>"
             f"<p><b>Réalisation</b> : "
             f"<a href=\"https://smeth-dev.site\">smeth-dev.site</a></p>"
@@ -643,6 +1181,21 @@ class ShellWindow(QMainWindow):
         lay.addWidget(bb)
         dlg.adjustSize()
         dlg.exec()
+
+    def _open_global_search(self) -> None:
+        from sme_gend.ui.global_search_dialog import GlobalSearchDialog
+
+        def _navigate(term: str) -> None:
+            self._go_page(PAGE_LISTE_GENERALE)
+            plv = self._personnel_list_view
+            plv._search.setText(term)
+            plv._search.setFocus()
+
+        if self._global_search_dlg is None or not self._global_search_dlg.isVisible():
+            self._global_search_dlg = GlobalSearchDialog(
+                self._settings, _navigate, parent=self
+            )
+        self._global_search_dlg.show_and_focus()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         if not confirm_yes_no(

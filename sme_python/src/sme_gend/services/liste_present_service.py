@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 from collections import defaultdict
+from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
 from sme_gend.config.settings import Settings
@@ -27,6 +28,26 @@ from sme_gend.services.resultat_format import (
 )
 from sme_gend.services.subdivision_label_format import format_subdivision_arme_display
 
+_SANS_STRUCTURE_KEY = "(Sans structure)"
+_SANS_SUBDIVISION_KEY = "(Sans subdivision)"
+
+
+@dataclass
+class PresentsAnomalies:
+    """Présents avec données manquantes ou hors configuration de mise en page."""
+
+    sans_subdivision: list[ListeGeneraleRow] = dc_field(default_factory=list)
+    sans_structure: list[ListeGeneraleRow] = dc_field(default_factory=list)
+    orphan_by_struct: dict[str, list[ListeGeneraleRow]] = dc_field(default_factory=dict)
+
+    @property
+    def has_issues(self) -> bool:
+        return bool(self.sans_subdivision or self.sans_structure or self.orphan_by_struct)
+
+    @property
+    def total_orphans(self) -> int:
+        return sum(len(v) for v in self.orphan_by_struct.values())
+
 
 def _row_matches(row: ListeGeneraleRow, needle: str) -> bool:
     """Même logique que la liste générale (recherche texte)."""
@@ -49,7 +70,7 @@ def _row_matches(row: ListeGeneraleRow, needle: str) -> bool:
 
 def _default_subdivision_key_order(keys: list[str]) -> list[str]:
     """Tri historique : alphabétique, « (Sans subdivision) » en dernier."""
-    return sorted(keys, key=lambda s: (s == "(Sans subdivision)", s))
+    return sorted(keys, key=lambda s: (s == _SANS_SUBDIVISION_KEY, s))
 
 
 def _ordered_subdivision_keys(
@@ -112,7 +133,7 @@ class ListePresentService:
             presents = [r for r in presents if _row_matches(r, needle)]
         by_struct: dict[str, list[ListeGeneraleRow]] = defaultdict(list)
         for row in presents:
-            key = (row.structure or "").strip() or "(Sans structure)"
+            key = (row.structure or "").strip() or _SANS_STRUCTURE_KEY
             by_struct[key].append(row)
         return dict(by_struct)
 
@@ -138,11 +159,36 @@ class ListePresentService:
             blocks.append((sub, lst))
         return blocks
 
+    def collect_anomalies(self, layout: ListeLayoutConfig | None = None) -> PresentsAnomalies:
+        """Détecte les présents avec données manquantes ou hors configuration de mise en page."""
+        if layout is None:
+            layout = self._layout_config.load()
+        layout_codes = {sec.structure_code.strip() for sec in layout.sections}
+        by_struct = self._presents_by_structure()
+
+        sans_subdivision: list[ListeGeneraleRow] = []
+        sans_structure: list[ListeGeneraleRow] = []
+        orphan_by_struct: dict[str, list[ListeGeneraleRow]] = {}
+
+        for code, rows in by_struct.items():
+            is_sans_struct = code == _SANS_STRUCTURE_KEY
+            is_orphan = not is_sans_struct and code not in layout_codes
+            for r in rows:
+                if not (r.subdivision_arme or "").strip():
+                    sans_subdivision.append(r)
+                if is_sans_struct:
+                    sans_structure.append(r)
+                elif is_orphan:
+                    orphan_by_struct.setdefault(code, []).append(r)
+
+        return PresentsAnomalies(sans_subdivision, sans_structure, orphan_by_struct)
+
     def build_sections_data(
         self,
         layout: ListeLayoutConfig | None = None,
         *,
         search_filter: str | None = None,
+        include_orphans: bool = False,
     ) -> list[
         tuple[str, str, str, list[tuple[str, list[ListeGeneraleRow]]]]
     ]:
@@ -151,6 +197,8 @@ class ListePresentService:
         Retourne : (title_main, title_sub, structure_code, blocks).
         Données : table Access ListeGenerale, filtre présents / stage interne (Padmin) ;
         `search_filter` restreint l’aperçu / export aux lignes correspondantes.
+        Si `include_orphans` est True, les personnes dont la structure est absente de la
+        configuration apparaissent à la fin dans des sections marquées ⚠.
         """
         if layout is None:
             layout = self._layout_config.load()
@@ -158,16 +206,17 @@ class ListePresentService:
         by_struct = self._presents_by_structure(search_filter)
         st_idx = self._structure_index()
         out: list[tuple[str, str, str, list[tuple[str, list[ListeGeneraleRow]]]]] = []
+        covered_codes: set[str] = set()
 
         for sec in sorted(layout.sections, key=lambda s: s.order):
             code = sec.structure_code.strip()
+            covered_codes.add(code)
             if code not in by_struct:
                 continue
             rows = by_struct[code]
             if code in st_idx:
                 st = st_idx[code]
-                title_main = (sec.title_main_override or st.designation or code).strip()
-                title_main = title_main.upper()
+                title_main = (sec.title_main_override or st.designation or code).strip().upper()
                 title_sub = (sec.title_sub_override or st.code or code).strip()
             else:
                 title_main = (sec.title_main_override or code).strip().upper()
@@ -180,11 +229,25 @@ class ListePresentService:
             )
             out.append((title_main, title_sub, code, blocks))
 
+        if include_orphans:
+            for code in sorted(by_struct.keys()):
+                if code in covered_codes:
+                    continue
+                rows = by_struct[code]
+                if code == _SANS_STRUCTURE_KEY:
+                    title_main = "⚠ STRUCTURE NON RENSEIGNÉE"
+                else:
+                    title_main = f"⚠ HORS CONFIGURATION : {code}"
+                blocks = self._blocks_for_rows(rows, group_by_subdivision=True, subdivision_order=None)
+                out.append((title_main, code, code, blocks))
+
         return out
 
     def build_preview_html(self, search_filter: str | None = None) -> str:
         """Aperçu HTML aligné sur la même donnée que l’export (ordre config)."""
-        sections = self.build_sections_data(search_filter=search_filter)
+        layout = self._layout_config.load()
+        sections = self.build_sections_data(layout, search_filter=search_filter, include_orphans=True)
+        anomalies = self.collect_anomalies(layout)
         flat = SubdivisionRepository(self._settings).fetch_flat_hierarchy()
         ncols = len(RESULTAT_HEADERS)
 
@@ -194,43 +257,79 @@ class ListePresentService:
         .title { font-size: 16pt; font-weight: bold; text-align: center; padding: 8px; border: 1px solid #000; background: #fff; }
         .hdr th { background: #d9e2f3; font-weight: bold; border: 1px solid #000; padding: 4px 3px; text-align: center; vertical-align: middle; }
         .sec1 td { background: #e8e8e8; font-weight: bold; text-align: center; }
+        .sec1-orphan td { background: #f8d7da; font-weight: bold; text-align: center; color: #842029; }
         .sec2 td { background: #f2f2f2; font-weight: bold; text-align: center; font-size: 11px; }
         .subdiv td { background: #e6f0ff; font-style: italic; text-align: left; padding-left: 8px; }
+        .subdiv-warn td { background: #fff3cd; font-style: italic; text-align: left; padding-left: 8px; color: #856404; }
         .data td { border: 1px solid #808080; padding: 2px 4px; vertical-align: top; }
         .data tr:nth-child(even) td { background: #fafafa; }
+        .anomaly-box td { background: #fff3cd; border: 2px solid #f0ad4e; padding: 8px 12px; font-size: 11px; }
         """
 
         parts: list[str] = [
-            "<!DOCTYPE html><html><head><meta charset='utf-8'><style>",
+            "<!DOCTYPE html><html><head><meta charset=’utf-8’><style>",
             css,
             "</style></head><body>",
-            "<table class='maquette'>",
-            f"<tr><td class='title' colspan='{ncols}'>{html.escape(RESULTAT_DOCUMENT_TITLE)}</td></tr>",
-            f"<tr><td colspan='{ncols}' style='height:8px;border:none;'></td></tr>",
-            "<tr class='hdr'>",
+            "<table class=’maquette’>",
+            f"<tr><td class=’title’ colspan=’{ncols}’>{html.escape(RESULTAT_DOCUMENT_TITLE)}</td></tr>",
+            f"<tr><td colspan=’{ncols}’ style=’height:8px;border:none;’></td></tr>",
         ]
+
+        if anomalies.has_issues:
+            parts.append(f"<tr class=’anomaly-box’><td colspan=’{ncols}’>")
+            parts.append("<b>&#9888; Anomalies détectées</b><br>")
+            if anomalies.sans_structure:
+                n = len(anomalies.sans_structure)
+                noms = ", ".join(r.noms or "?" for r in anomalies.sans_structure[:5])
+                if n > 5:
+                    noms += f" … (+{n - 5})"
+                parts.append(
+                    f"&bull; <b>{n} personne(s) sans structure renseignée</b>"
+                    f" : {html.escape(noms)}<br>"
+                )
+            if anomalies.orphan_by_struct:
+                total = anomalies.total_orphans
+                codes = ", ".join(sorted(anomalies.orphan_by_struct.keys()))
+                parts.append(
+                    f"&bull; <b>{total} personne(s) dans des structures hors configuration</b>"
+                    f" ({html.escape(codes)}) — affichées en fin de liste (fond rouge)<br>"
+                )
+            if anomalies.sans_subdivision:
+                n = len(anomalies.sans_subdivision)
+                parts.append(
+                    f"&bull; <b>{n} personne(s) sans subdivision d’arme</b>"
+                    f" — apparaissent sous « (Sans subdivision) » (fond jaune)<br>"
+                )
+            parts.append("</td></tr>")
+            parts.append(f"<tr><td colspan=’{ncols}’ style=’height:4px;border:none;’></td></tr>")
+
+        parts += ["<tr class=’hdr’>"]
         for label, cspan in RESULTAT_HEADER_HTML:
-            parts.append(f"<th colspan='{cspan}'>{html.escape(label)}</th>")
+            parts.append(f"<th colspan=’{cspan}’>{html.escape(label)}</th>")
         parts.append("</tr>")
 
         n_global = 0
         for title_main, title_sub, _code, blocks in sections:
+            is_orphan_sec = title_main.startswith("⚠")
+            sec1_cls = "sec1-orphan" if is_orphan_sec else "sec1"
             parts.append(
-                f"<tr class='sec1'><td colspan='{ncols}'>{html.escape(title_main)}</td></tr>"
+                f"<tr class=’{sec1_cls}’><td colspan=’{ncols}’>{html.escape(title_main)}</td></tr>"
             )
             parts.append(
-                f"<tr class='sec2'><td colspan='{ncols}'>{html.escape(title_sub)}</td></tr>"
+                f"<tr class=’sec2’><td colspan=’{ncols}’>{html.escape(title_sub)}</td></tr>"
             )
             for sub_label, personnes in blocks:
+                is_nosub = sub_label == _SANS_SUBDIVISION_KEY
                 sub_disp = format_subdivision_arme_display(sub_label, flat)
+                subdiv_cls = "subdiv-warn" if is_nosub else "subdiv"
                 parts.append(
-                    f"<tr class='subdiv'><td colspan='{ncols}'>{html.escape(sub_disp)}</td></tr>"
+                    f"<tr class=’{subdiv_cls}’><td colspan=’{ncols}’>{html.escape(sub_disp)}</td></tr>"
                 )
                 n_interne = 0
                 for r in personnes:
                     n_global += 1
                     n_interne += 1
-                    parts.append("<tr class='data'>")
+                    parts.append("<tr class=’data’>")
                     sub_cell = format_subdivision_arme_display(r.subdivision_arme, flat)
                     for cell in row_to_resultat_cells(
                         r,

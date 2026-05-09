@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from sme_gend.models.liste_generale import ListeGeneraleRow
 from sme_gend.services.referentiel_service import ReferentielService
+from sme_gend.services.validators import FieldError, validate_personnel_fields
 from sme_gend.ui.confirm_dialogs import confirm_yes_no
 
 
@@ -150,9 +151,19 @@ class PersonnelEditDialog(QDialog):
         self._diplome = QLineEdit(row.diplome or "")
         self._date_obt = QLineEdit(row.date_obtention or "")
         self._structure = QComboBox()
-        structs = [s.code for s in referentiel.structures()]
         with QSignalBlocker(self._structure):
-            _fill_combo(self._structure, structs, row.structure)
+            self._structure.addItem("", None)
+            cur_code = (row.structure or "").strip()
+            found = False
+            for s in referentiel.structures():
+                label = f"{s.code} — {s.designation}" if s.designation else s.code
+                self._structure.addItem(label, s.code)
+                if s.code == cur_code:
+                    self._structure.setCurrentIndex(self._structure.count() - 1)
+                    found = True
+            if cur_code and not found:
+                self._structure.addItem(cur_code, cur_code)
+                self._structure.setCurrentIndex(self._structure.count() - 1)
         self._sub_arme = QComboBox()
         self._fill_sub_arme_combo(preferred=row.subdivision_arme, allow_orphan_on_empty=True)
         self._structure.currentIndexChanged.connect(self._on_structure_changed)
@@ -182,7 +193,7 @@ class PersonnelEditDialog(QDialog):
 
         g_af = QGroupBox("Affectation")
         f_af = QFormLayout(g_af)
-        f_af.addRow("Structure (code)", self._structure)
+        f_af.addRow("Structure", self._structure)
         f_af.addRow("Subdivision d'arme", self._sub_arme)
         f_af.addRow("Fonction", self._fonction)
 
@@ -218,6 +229,30 @@ class PersonnelEditDialog(QDialog):
         hint.setWordWrap(True)
         hint.setTextFormat(Qt.TextFormat.RichText)
 
+        # Bannière d'erreurs de validation (cachée par défaut)
+        self._error_bar = QLabel()
+        self._error_bar.setObjectName("PersonnelEditErrorBar")
+        self._error_bar.setWordWrap(True)
+        self._error_bar.setTextFormat(Qt.TextFormat.RichText)
+        self._error_bar.setStyleSheet(
+            "background:#fff5f5; color:#c62828; border:1px solid #ffcdd2;"
+            "border-left:4px solid #c62828; padding:8px 12px; border-radius:4px;"
+        )
+        self._error_bar.hide()
+
+        # Mapping clé-champ → widget pour le surlignage
+        self._field_widgets: dict[str, object] = {
+            "noms": self._noms,
+            "date_naissance": self._date_n,
+            "date_grade": self._date_grade,
+            "date_service": self._date_service,
+            "date_obtention": self._date_obt,
+            "matricule_militaire": self._mat_mil,
+            "matricule_solde": self._mat_sol,
+            "ordre_tri": self._ordre,
+            "presseance": self._presseance,
+        }
+
         inner = QWidget()
         inner.setLayout(grid)
         scroll = QScrollArea()
@@ -238,10 +273,11 @@ class PersonnelEditDialog(QDialog):
         lay.addWidget(header)
         lay.addWidget(hint)
         lay.addWidget(scroll, stretch=1)
+        lay.addWidget(self._error_bar)
         lay.addWidget(bb)
 
     def _structure_code(self) -> str:
-        return (self._structure.currentText() or "").strip()
+        return (self._structure.currentData() or "").strip()
 
     def _sub_arme_items_for_structure(self, structure_code: str) -> list[str]:
         """SubArme déjà présents dans ListeGenerale pour ce code structure (cohérence métier)."""
@@ -271,26 +307,54 @@ class PersonnelEditDialog(QDialog):
         keep = cur if cur in items else None
         _fill_combo(self._sub_arme, items, keep)
 
+    _INVALID_STYLE = "border: 1.5px solid #e53935; background: #fff8f8;"
+
+    def _clear_validation(self) -> None:
+        for w in self._field_widgets.values():
+            if hasattr(w, "setStyleSheet"):
+                w.setStyleSheet("")  # type: ignore[union-attr]
+        self._error_bar.hide()
+        self._error_bar.clear()
+
+    def _show_field_errors(self, errors: list[FieldError]) -> None:
+        for err in errors:
+            w = self._field_widgets.get(err.field)
+            if w and hasattr(w, "setStyleSheet"):
+                w.setStyleSheet(self._INVALID_STYLE)  # type: ignore[union-attr]
+        lines = "".join(f"<li><b>{e.label}</b> : {e.message}</li>" for e in errors)
+        self._error_bar.setText(f"<ul style='margin:4px 0 0 0;padding-left:16px;'>{lines}</ul>")
+        self._error_bar.show()
+
     def _on_save(self) -> None:
-        try:
-            dn = _parse_dt_opt(self._date_n.text())
-            dg = _parse_dt_opt(self._date_grade.text())
-            ot = _parse_int_opt(self._ordre.text())
-            pr = _parse_int_opt(self._presseance.text())
-        except ValueError as e:
-            QMessageBox.warning(self, "Saisie", str(e))
+        self._clear_validation()
+
+        errors = validate_personnel_fields(
+            noms=self._noms.text(),
+            date_naissance_str=self._date_n.text(),
+            date_grade_str=self._date_grade.text(),
+            date_service_str=self._date_service.text(),
+            date_obtention_str=self._date_obt.text(),
+            matricule_militaire=self._mat_mil.text(),
+            matricule_solde=self._mat_sol.text(),
+            ordre_tri_str=self._ordre.text(),
+            presseance_str=self._presseance.text(),
+        )
+        if errors:
+            self._show_field_errors(errors)
             return
 
+        # Dates validées → parsing garanti sans erreur
+        dn = _parse_dt_opt(self._date_n.text())
+        dg = _parse_dt_opt(self._date_grade.text())
+        ot = _parse_int_opt(self._ordre.text())
+        pr = _parse_int_opt(self._presseance.text())
         noms = self._noms.text().strip()
-        if not noms:
-            QMessageBox.warning(self, "Saisie", "Le nom est obligatoire.")
-            return
 
         if not confirm_yes_no(
             self,
             "Enregistrer",
-            "Enregistrer les modifications de cette fiche dans la base Access ?",
-            default_no=True,
+            "Enregistrer les modifications de cette fiche dans la base ?",
+            default_no=False,
         ):
             return
 
@@ -310,7 +374,7 @@ class PersonnelEditDialog(QDialog):
             subdivision_arme=_combo_text(self._sub_arme),
             diplome=self._diplome.text().strip() or None,
             date_obtention=self._date_obt.text().strip() or None,
-            structure=_combo_text(self._structure),
+            structure=self._structure_code() or None,
             obs=self._obs.toPlainText().strip() or None,
             ordre_tri=ot,
             presseance=pr,

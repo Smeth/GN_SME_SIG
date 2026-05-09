@@ -1,4 +1,4 @@
-"""Traçabilité des modifications sur le personnel (fichier JSON Lines)."""
+"""Traçabilité des modifications sur le personnel (fichier JSON Lines, rotation mensuelle)."""
 
 from __future__ import annotations
 
@@ -12,12 +12,35 @@ from sme_gend.config.settings import liste_layout_config_path
 from sme_gend.models.liste_generale import ListeGeneraleRow
 
 
-def _audit_file_path() -> Path:
-    return liste_layout_config_path().parent / "personnel_audit.jsonl"
+def _audit_dir() -> Path:
+    return liste_layout_config_path().parent
+
+
+def _audit_file_path(ts_utc: str | None = None) -> Path:
+    """Chemin du fichier JSONL pour le mois donné (défaut : mois courant UTC)."""
+    if ts_utc:
+        try:
+            dt = datetime.fromisoformat(ts_utc)
+            ym = dt.strftime("%Y-%m")
+        except ValueError:
+            ym = datetime.now(timezone.utc).strftime("%Y-%m")
+    else:
+        ym = datetime.now(timezone.utc).strftime("%Y-%m")
+    return _audit_dir() / f"personnel_audit_{ym}.jsonl"
+
+
+def _all_audit_files() -> list[Path]:
+    """Tous les fichiers JSONL d’audit présents, triés chronologiquement."""
+    d = _audit_dir()
+    files = sorted(d.glob("personnel_audit_*.jsonl"))
+    legacy = d / "personnel_audit.jsonl"
+    if legacy.is_file():
+        files = [legacy] + [f for f in files if f != legacy]
+    return files
 
 
 def personnel_audit_file_path() -> Path:
-    """Chemin du fichier JSONL d’audit personnel et événements applicatifs."""
+    """Chemin du fichier JSONL d’audit pour le mois courant."""
     return _audit_file_path()
 
 
@@ -48,13 +71,14 @@ def append_audit_event(
     **extra: Any,
 ) -> None:
     """
-    Événement générique dans le même fichier JSONL que l’audit personnel
+    Événement générique dans le fichier JSONL mensuel courant
     (ex. import Access → SQLite). Les clés ``extra`` sont ajoutées au même niveau que ``action``.
     """
-    path = _audit_file_path()
+    ts = datetime.now(timezone.utc).isoformat()
+    path = _audit_file_path(ts)
     path.parent.mkdir(parents=True, exist_ok=True)
     entry: dict[str, Any] = {
-        "ts_utc": datetime.now(timezone.utc).isoformat(),
+        "ts_utc": ts,
         "action": action,
         **extra,
     }
@@ -73,18 +97,28 @@ def append_personnel_audit(
     snapshot_before: dict[str, Any] | None = None,
     snapshot_after: dict[str, Any] | None = None,
     sme_mois_context: str | None = None,
+    edited_by: str | None = None,
+    edit_motif: str | None = None,
+    ts_utc: str | None = None,
 ) -> None:
-    """Ajoute une ligne d'audit (append-only)."""
-    path = _audit_file_path()
+    """Ajoute une ligne d'audit (append-only). ts_utc permet de forcer un horodatage (import rétroactif)."""
+    effective_ts = ts_utc or datetime.now(timezone.utc).isoformat()
+    path = _audit_file_path(effective_ts)
     path.parent.mkdir(parents=True, exist_ok=True)
     entry: dict[str, Any] = {
-        "ts_utc": datetime.now(timezone.utc).isoformat(),
+        "ts_utc": effective_ts,
         "action": action,
         "personnel_id": personnel_id,
         "changes": changes,
     }
     if sme_mois_context:
         entry["sme_mois_context"] = sme_mois_context
+    eb = (edited_by or "").strip()
+    if eb:
+        entry["edited_by"] = eb
+    em = (edit_motif or "").strip()
+    if em:
+        entry["edit_motif"] = em
     if snapshot_before is not None:
         entry["before"] = snapshot_before
     if snapshot_after is not None:

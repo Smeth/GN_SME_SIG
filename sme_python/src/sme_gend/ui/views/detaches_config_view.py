@@ -108,6 +108,33 @@ class DetachesConfigView(QWidget):
         lay.addWidget(self._table, stretch=1)
 
         self._load_table_from_disk()
+        self._auto_synced = False  # détecte le premier affichage
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if not self._auto_synced:
+            self._auto_synced = True
+            self._silent_sync_sigles()
+
+    def _silent_sync_sigles(self) -> None:
+        """
+        Ajoute silencieusement les sigles détachés présents en base mais absents de la config.
+        Recharge le tableau si des sigles ont été ajoutés.
+        """
+        try:
+            _, added = self._svc.sync_missing_sigles()
+        except Exception:
+            return
+        if not added:
+            return
+        self._load_table_from_disk()
+        QMessageBox.information(
+            self,
+            "Sigles ajoutés automatiquement",
+            f"{len(added)} nouveau(x) sigle(s) détaché(s) ajouté(s) depuis la base :\n"
+            + "\n".join(f"  • {s}" for s in added)
+            + "\n\nComplétez les titres officiels puis enregistrez.",
+        )
 
     def _touch_dirty(self) -> None:
         if not self._suspend_dirty:

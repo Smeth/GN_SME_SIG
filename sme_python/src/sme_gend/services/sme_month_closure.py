@@ -171,6 +171,13 @@ def run_piste_a_month_closure(
     - ``sme_context.json`` : ajout du mois clôturé, nouveau mois actif.
     - Ligne d'audit ``sme_month_closure_piste_a``.
     """
+    ym_cloture = extract_yyyy_mm(mois_cloture)
+    ym_suivant = extract_yyyy_mm(mois_suivant)
+    if not ym_cloture:
+        raise ValueError(f"mois_cloture invalide — format YYYY-MM attendu : {mois_cloture!r}")
+    if not ym_suivant:
+        raise ValueError(f"mois_suivant invalide — format YYYY-MM attendu : {mois_suivant!r}")
+
     warnings: list[str] = []
     sqlite_archive: Path | None = None
     layout_archive: Path | None = None
@@ -204,9 +211,9 @@ def run_piste_a_month_closure(
     warnings.extend(tw)
 
     ctx = load_sme_context()
-    if mois_cloture not in ctx.mois_fermes:
-        ctx.mois_fermes.append(mois_cloture)
-    ctx.mois_actif = mois_suivant
+    if ym_cloture not in ctx.mois_fermes:
+        ctx.mois_fermes.append(ym_cloture)
+    ctx.mois_actif = ym_suivant
     save_sme_context(ctx)
 
     append_audit_event(
@@ -230,3 +237,82 @@ def run_piste_a_month_closure(
         tabsme_rows_opened=n_open,
         tabsme_inserted_suivant=ins,
     )
+
+
+def import_existing_db_for_month(
+    settings: Settings,
+    source_path: Path,
+    mois: str,
+    mois_suivant: str | None = None,
+) -> SmeMonthClosureResult:
+    """
+    Importe un fichier de base existant (SQLite ou Access) comme archive d'un mois passé.
+
+    - Copie ``source_path`` vers ``sme_archives/`` avec la convention de nommage standard.
+    - TabSme : marque ``mois`` comme Fermé ; ouvre ``mois_suivant`` si fourni.
+    - ``sme_context.json`` : ajoute ``mois`` à ``mois_fermes`` ;
+      met à jour ``mois_actif`` vers ``mois_suivant`` si fourni.
+    - Audit : événement ``sme_month_import_existing_db``.
+    """
+    warnings: list[str] = []
+    sqlite_archive: Path | None = None
+
+    arch = sme_archives_dir()
+    slug = slugify_mois_label(mois)
+
+    if not source_path.is_file():
+        warnings.append(f"Fichier source introuvable : {source_path}")
+    else:
+        dest = arch / f"sme_bundle_{slug}_{_archive_stamp()}{source_path.suffix}"
+        try:
+            shutil.copy2(source_path, dest)
+            sqlite_archive = dest
+        except OSError as e:
+            warnings.append(f"Copie du fichier vers les archives : {e}")
+
+    tw, n_closed, n_open, ins = _apply_tabsme_closure(
+        settings, mois, mois_suivant or ""
+    )
+    warnings.extend(tw)
+
+    ctx = load_sme_context()
+    if mois not in ctx.mois_fermes:
+        ctx.mois_fermes.append(mois)
+    if mois_suivant:
+        ctx.mois_actif = mois_suivant
+    save_sme_context(ctx)
+
+    append_audit_event(
+        action="sme_month_import_existing_db",
+        sme_mois_context=mois_suivant or mois,
+        mois_importe=mois,
+        mois_suivant=mois_suivant or "",
+        source_file=str(source_path),
+        sqlite_archive=str(sqlite_archive) if sqlite_archive else None,
+        tabsme_rows_closed=n_closed,
+        tabsme_rows_opened=n_open,
+        tabsme_auto_insert=ins,
+        warnings=warnings,
+    )
+
+    return SmeMonthClosureResult(
+        warnings=warnings,
+        sqlite_archive=sqlite_archive,
+        layout_archive=None,
+        tabsme_rows_closed=n_closed,
+        tabsme_rows_opened=n_open,
+        tabsme_inserted_suivant=ins,
+    )
+
+
+def find_archive_for_month(mois: str) -> Path | None:
+    """Retourne l'archive la plus récente pour le mois YYYY-MM dans sme_archives/, ou None."""
+    ym = canonical_sme_mois_yyyy_mm(mois) or mois
+    slug = slugify_mois_label(ym)
+    arch_dir = sme_archives_dir()
+    candidates: list[Path] = []
+    for ext in ("sqlite", "db", "mdb", "accdb"):
+        candidates.extend(arch_dir.glob(f"sme_bundle_{slug}_*.{ext}"))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.stat().st_mtime)

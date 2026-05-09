@@ -48,6 +48,12 @@ class ListeGeneraleRepository:
     def fetch_distinct_subarme_for_structure(self, structure_code: str) -> list[str]:
         return self._impl.fetch_distinct_subarme_for_structure(structure_code)
 
+    def insert_row(self, row: ListeGeneraleRow) -> str:
+        return self._impl.insert_row(row)
+
+    def delete_row(self, row_id: str) -> None:
+        return self._impl.delete_row(row_id)
+
     def update_row(self, row: ListeGeneraleRow) -> None:
         return self._impl.update_row(row)
 

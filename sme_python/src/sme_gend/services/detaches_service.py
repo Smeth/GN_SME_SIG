@@ -21,6 +21,21 @@ def sigle_ou_subdivision(row: ListeGeneraleRow) -> str:
     return s if s else "(Non renseigné)"
 
 
+def designation_detachement(
+    row: ListeGeneraleRow,
+    lookup: dict[str, str],
+) -> str:
+    """Résout le sigle SubArme dans la hiérarchie TabSec* et retourne la désignation complète.
+
+    lookup = dict code → désignation construit via _build_sec_lookup().
+    Si non trouvé, retourne le sigle brut.
+    """
+    sigle = (row.subdivision_arme or "").strip()
+    if not sigle:
+        return "(Non renseigné)"
+    return lookup.get(sigle, sigle)
+
+
 def recap_par_sigle(rows: Sequence[ListeGeneraleRow]) -> list[tuple[str, int]]:
     c: Counter[str] = Counter()
     for r in rows:

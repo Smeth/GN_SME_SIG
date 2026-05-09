@@ -18,12 +18,12 @@ def is_present_strict(row: ListeGeneraleRow) -> bool:
 
 
 def _eq_padmin(row: ListeGeneraleRow, code: str) -> bool:
-    return _norm(row.position_admin) == code
+    return _norm(row.position_admin).casefold() == code.casefold()
 
 
 def _one_of_padmin(row: ListeGeneraleRow, codes: tuple[str, ...]) -> bool:
-    p = _norm(row.position_admin)
-    return p in codes
+    p = _norm(row.position_admin).casefold()
+    return p in {c.casefold() for c in codes}
 
 
 # Codes Padmin alignés sur les formules du gabarit numerique.xlsx (feuille NUMERIQUE / INDISPO).

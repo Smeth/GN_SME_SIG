@@ -8,8 +8,10 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sme_gend.config.settings import Settings
+from sme_gend.models.gain_perte import GainPerteRow
 from sme_gend.models.liste_generale import ListeGeneraleRow
 from sme_gend.models.sme_row import SmeRow
+from sme_gend.repositories.gain_perte_repository import GainPerteRepository
 from sme_gend.repositories.grade_repository import GradeRepository
 from sme_gend.repositories.liste_generale_repository import ListeGeneraleRepository
 from sme_gend.repositories.sme_repository import SmeRepository
@@ -216,6 +218,38 @@ def build_main_kpi_cards(
     return tuple(cards)
 
 
+def build_gain_perte_kpi_cards(
+    mois: str,
+    n_deces: int,
+    n_gains: int,
+    n_pertes: int,
+) -> tuple[DashboardKpiCard, ...]:
+    """Cartes KPI pour les gains & pertes du mois (TabGainPerte)."""
+    return (
+        DashboardKpiCard(
+            "deces",
+            "Décès",
+            _fmt_int(n_deces),
+            f"mois {mois}" if mois else None,
+            "alert" if n_deces else "muted",
+        ),
+        DashboardKpiCard(
+            "gains_mois",
+            "Gains du mois",
+            _fmt_int(n_gains),
+            f"mois {mois}" if mois else None,
+            "success" if n_gains else "muted",
+        ),
+        DashboardKpiCard(
+            "pertes_mois",
+            "Pertes du mois",
+            _fmt_int(n_pertes),
+            f"dont {n_deces} décès" if n_deces else None,
+            "highlight" if n_pertes else "muted",
+        ),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class DashboardSnapshot:
     """Instantané tableau de bord. indisponibles = effectifs hors « présent » / stage interne (voir padmin_counts_as_present). grades_effectifs_detail : (grade, effectif, % total, écart vs uniforme)."""
@@ -236,6 +270,8 @@ class DashboardSnapshot:
     sme_table_ok: bool
     sme_rows: tuple[SmeRow, ...]
     sme_trend_points: tuple[tuple[str, float], ...]
+    gain_perte_cards: tuple[DashboardKpiCard, ...] = ()
+    gain_perte_rows: tuple[GainPerteRow, ...] = ()
 
 
 class DashboardService:
@@ -245,6 +281,7 @@ class DashboardService:
         self._structures = StructureRepository(settings)
         self._grades = GradeRepository(settings)
         self._sme = SmeRepository(settings)
+        self._gain_perte = GainPerteRepository(settings)
 
     def rebind_settings(self, settings: Settings) -> None:
         self._settings = settings
@@ -252,6 +289,16 @@ class DashboardService:
         self._structures = StructureRepository(settings)
         self._grades = GradeRepository(settings)
         self._sme = SmeRepository(settings)
+        self._gain_perte = GainPerteRepository(settings)
+
+    def rebind_for_archive(self, data_settings: Settings, ref_settings: Settings) -> None:
+        """Mode archive : ListeGenerale depuis l'archive, référentiel depuis la base principale."""
+        self._settings = ref_settings
+        self._liste = ListeGeneraleRepository(data_settings)
+        self._structures = StructureRepository(ref_settings)
+        self._grades = GradeRepository(ref_settings)
+        self._sme = SmeRepository(ref_settings)
+        self._gain_perte = GainPerteRepository(ref_settings)
 
     def snapshot(self) -> DashboardSnapshot:
         rows = self._liste.fetch_all()
@@ -306,6 +353,23 @@ class DashboardService:
 
         main_kpi = build_main_kpi_cards(total, presents, taux, rows)
 
+        # --- Gains & Pertes du mois actif (TabGainPerte) ---
+        from sme_gend.config.sme_context import load_sme_context as _ctx
+        mois_actif = (_ctx().mois_actif or "").strip()
+        gp_rows: tuple[GainPerteRow, ...] = ()
+        gp_cards: tuple[DashboardKpiCard, ...] = ()
+        try:
+            if mois_actif:
+                gp_list = self._gain_perte.fetch_for_month(mois_actif)
+                gp_rows = tuple(gp_list)
+                n_deces = sum(1 for r in gp_list if r.is_deces)
+                n_gains = sum(1 for r in gp_list if r.is_gain)
+                n_pertes = sum(1 for r in gp_list if r.is_perte)
+                if gp_list:
+                    gp_cards = build_gain_perte_kpi_cards(mois_actif, n_deces, n_gains, n_pertes)
+        except Exception:
+            pass
+
         return DashboardSnapshot(
             total_effectifs=total,
             presents=presents,
@@ -323,4 +387,6 @@ class DashboardService:
             sme_table_ok=sme_table_ok,
             sme_rows=tuple(sme_rows_list),
             sme_trend_points=tuple(trend),
+            gain_perte_cards=gp_cards,
+            gain_perte_rows=gp_rows,
         )

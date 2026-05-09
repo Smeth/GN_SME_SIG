@@ -1,9 +1,10 @@
-"""Accès aux référentiels (structures, subdivisions, grades, fonctions)."""
+"""Accès aux référentiels (structures, subdivisions, grades, fonctions, positions admin)."""
 
 from __future__ import annotations
 
 from sme_gend.config.settings import Settings
 from sme_gend.models.grade_ref import GradeRefRow
+from sme_gend.models.padmin_ref import PadminRefRow
 from sme_gend.models.structure import StructureRow
 from sme_gend.repositories.fonctions_repository import FonctionsRepository
 from sme_gend.repositories.grade_repository import GradeRepository
@@ -11,6 +12,17 @@ from sme_gend.repositories.liste_generale_repository import ListeGeneraleReposit
 from sme_gend.repositories.structure_repository import StructureRepository
 from sme_gend.repositories.structure_subdivision_repository import StructureSubdivisionRepository
 from sme_gend.repositories.subdivision_repository import SubdivisionFlatRow, SubdivisionRepository
+
+
+def _make_padmin_repo(settings: Settings):
+    """Crée SqlitePadminRepository si le mode SQLite est actif, sinon None."""
+    if settings.use_sqlite_liste_generale and settings.sqlite_liste_path:
+        try:
+            from sme_gend.repositories.padmin_sqlite_repository import SqlitePadminRepository
+            return SqlitePadminRepository(settings)
+        except Exception:
+            pass
+    return None
 
 
 class ReferentielService:
@@ -22,6 +34,11 @@ class ReferentielService:
         self._liste_generale = ListeGeneraleRepository(settings)
         self._grades = GradeRepository(settings)
         self._fonctions = FonctionsRepository(settings)
+        self._padmin = _make_padmin_repo(settings)
+
+    @property
+    def settings(self) -> Settings:
+        return self._settings
 
     def rebind_settings(self, settings: Settings) -> None:
         self._settings = settings
@@ -31,6 +48,7 @@ class ReferentielService:
         self._liste_generale = ListeGeneraleRepository(settings)
         self._grades = GradeRepository(settings)
         self._fonctions = FonctionsRepository(settings)
+        self._padmin = _make_padmin_repo(settings)
 
     def structures(self) -> list[StructureRow]:
         return self._structures.fetch_all()
@@ -66,9 +84,48 @@ class ReferentielService:
         out.sort(key=str.lower)
         return out
 
+    def padmins(self) -> list[PadminRefRow]:
+        """Toutes les positions administratives du référentiel (SQLite) ou des données existantes."""
+        if self._padmin:
+            try:
+                rows = self._padmin.fetch_all()
+                if rows:
+                    return rows
+            except Exception:
+                pass
+        from sme_gend.padmin_present import padmin_counts_as_present
+        return [
+            PadminRefRow(libelle=v, compte_comme_present=padmin_counts_as_present(v), ordre_tri=None)
+            for v in self._liste_generale.fetch_distinct_padmin()
+        ]
+
     def position_admin_choices(self) -> list[str]:
-        """Positions administratives distinctes (liste générale)."""
+        """Libellés pour les combos — référentiel SQLite en priorité, sinon DISTINCT de la liste."""
+        if self._padmin:
+            try:
+                rows = self._padmin.fetch_all()
+                if rows:
+                    return [r.libelle for r in rows]
+            except Exception:
+                pass
         return self._liste_generale.fetch_distinct_padmin()
+
+    def padmin_insert(self, libelle: str, compte: bool, ordre: int | None) -> None:
+        if not self._padmin:
+            raise ValueError("Le référentiel padmin nécessite le mode SQLite.")
+        self._padmin.insert(libelle, compte, ordre)
+
+    def padmin_update(
+        self, old_libelle: str, new_libelle: str, compte: bool, ordre: int | None
+    ) -> None:
+        if not self._padmin:
+            raise ValueError("Le référentiel padmin nécessite le mode SQLite.")
+        self._padmin.update(old_libelle, new_libelle, compte, ordre)
+
+    def padmin_delete(self, libelle: str) -> None:
+        if not self._padmin:
+            raise ValueError("Le référentiel padmin nécessite le mode SQLite.")
+        self._padmin.delete(libelle)
 
     def structure_insert(self, code: str, designation: str, ordre_tri: int | None) -> None:
         self._structures.insert(code, designation, ordre_tri)

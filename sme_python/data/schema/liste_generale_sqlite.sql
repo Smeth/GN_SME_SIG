@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS liste_generale (
   date_obtention TEXT,
   structure TEXT,
   obs TEXT,
-  oder_tri INTEGER,
+  ordre_tri INTEGER,
   presseance INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -36,7 +36,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_liste_generale_id_acces
   WHERE id_acces IS NOT NULL AND trim(id_acces) <> '';
 
 CREATE INDEX IF NOT EXISTS idx_liste_generale_structure ON liste_generale(structure);
-CREATE INDEX IF NOT EXISTS idx_liste_generale_oder_tri ON liste_generale(oder_tri);
+CREATE INDEX IF NOT EXISTS idx_liste_generale_ordre_tri ON liste_generale(ordre_tri);
 
 -- ---------------------------------------------------------------------------
 -- Référentiels et satellites (copie Access) — même fichier que la liste générale
@@ -46,7 +46,7 @@ CREATE INDEX IF NOT EXISTS idx_liste_generale_oder_tri ON liste_generale(oder_tr
 CREATE TABLE IF NOT EXISTS tab_structure (
   code TEXT PRIMARY KEY NOT NULL,
   designation TEXT,
-  oder_tri INTEGER
+  ordre_tri INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS tab_grade (
@@ -116,3 +116,40 @@ CREATE TABLE IF NOT EXISTS tab_stage_ex (
   lieu_stage TEXT,
   date_debut_fin TEXT
 );
+
+CREATE TABLE IF NOT EXISTS tab_gain_perte (
+  rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL,
+  grade TEXT,
+  nom TEXT,
+  objet TEXT,
+  cdsme TEXT,
+  observ TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tab_gain_perte_cdsme ON tab_gain_perte(cdsme);
+CREATE INDEX IF NOT EXISTS idx_tab_gain_perte_id ON tab_gain_perte(id);
+
+-- ---------------------------------------------------------------------------
+-- Référentiel positions administratives
+-- libelle = valeur telle que stockée dans liste_generale.padmin (clé primaire).
+-- compte_comme_present = 1 → comptée dans les effectifs présents (NUMERIQUE, liste présents).
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS tab_padmin (
+  libelle TEXT PRIMARY KEY NOT NULL,
+  compte_comme_present INTEGER NOT NULL DEFAULT 0,
+  ordre_tri INTEGER
+);
+
+INSERT OR IGNORE INTO tab_padmin (libelle, compte_comme_present, ordre_tri) VALUES
+  ('Présent',           1,  1),
+  ('Stage interne',     1,  2),
+  ('Détaché',           0,  3),
+  ('Congé maladie',     0,  4),
+  ('Permission',        0,  5),
+  ('Absent',            0,  6),
+  ('En mission',        0,  7),
+  ('Stage extérieur',   0,  8),
+  ('Déserteur',         0,  9),
+  ('Retraite',          0, 10),
+  ('Suspendu',          0, 11);
