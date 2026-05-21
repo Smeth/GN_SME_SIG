@@ -3,48 +3,48 @@
   "grades": [
     {
       "grade": "GENERAL DE BRIGADE",
-      "limite_age": 65,
-      "limite_service": 40
+      "limite_age": 70,
+      "limite_service": 52
     },
     {
       "grade": "COLONEL-MAJOR",
       "limite_age": 65,
-      "limite_service": 40
+      "limite_service": 47
     },
     {
       "grade": "COLONEL",
       "limite_age": 65,
-      "limite_service": 40
+      "limite_service": 47
     },
     {
       "grade": "LIEUTENANT-COLONEL",
-      "limite_age": 62,
-      "limite_service": 40
+      "limite_age": 65,
+      "limite_service": 47
     },
     {
       "grade": "COMMANDANT",
-      "limite_age": 62,
-      "limite_service": 40
+      "limite_age": 65,
+      "limite_service": 47
     },
     {
       "grade": "CAPITAINE",
       "limite_age": 60,
-      "limite_service": 40
+      "limite_service": 42
     },
     {
       "grade": "LIEUTENANT",
       "limite_age": 60,
-      "limite_service": 40
+      "limite_service": 42
     },
     {
       "grade": "ASPIRANT",
       "limite_age": 60,
-      "limite_service": 40
+      "limite_service": 42
     },
     {
       "grade": "SOUS-LIEUTENANT",
       "limite_age": 60,
-      "limite_service": 40
+      "limite_service": 42
     },
     {
       "grade": "ADJUDANT-MAJOR",
@@ -63,28 +63,28 @@
     },
     {
       "grade": "MARECHAL DES LOGIS-CHEF",
-      "limite_age": 56,
-      "limite_service": 38
+      "limite_age": 55,
+      "limite_service": 37
     },
     {
       "grade": "SERGENT-CHEF",
       "limite_age": 55,
-      "limite_service": 35
+      "limite_service": 37
     },
     {
       "grade": "MARECHAL DES LOGIS",
       "limite_age": 56,
-      "limite_service": 38
+      "limite_service": 37
     },
     {
       "grade": "SERGENT",
       "limite_age": 55,
-      "limite_service": 35
+      "limite_service": 37
     },
     {
       "grade": "SOLDAT",
       "limite_age": 55,
-      "limite_service": 35
+      "limite_service": 32
     },
     {
       "grade": "CIVILE",
@@ -94,8 +94,8 @@
   ],
   "options": {
     "signataire_titre": "Le directeur du personnel et de la formation de la gendarmerie nationale",
-    "signataire_nom": "Colonel-major Arthur Fernand KIBA",
-    "ville": "Brazzaville",
+    "signataire_nom": "Commissaire Colonel-major Roch Cyriaque GALEBAYI, directeur des services financiers",
+    "ville": "",
     "lois_refs": [
       "Loi n°10-2021 du 27 janvier 2021, telle que modifiée et complétée par la loi n°17-2023 du 27 mai 2023",
       "Loi n°5-2022 du 26 janvier 2022"

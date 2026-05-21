@@ -44,8 +44,11 @@ _GRADE_ORDER: dict[str, int] = {
     "ADJUDANT-CHEF":          12,  "ADC": 12,
     "ADJUDANT":               13,  "ADJ": 13,
     # Sous-officiers subalternes
-    "MARECHAL DES LOGIS CHEF": 14,  "MDC": 14,
+    "MARECHAL DES LOGIS CHEF": 14,  "MARECHAL DES LOGIS-CHEF": 14,  "MDC": 14,
+    "SERGENT-CHEF":            14,
     "MARECHAL DES LOGIS":      15,  "MDL": 15,
+    "SERGENT":                 15,
+    "ADJUDANT-MAJOR":          11,
     # Militaires du rang
     "BRIGADIER-CHEF":         16,  "BDC": 16,
     "BRIGADIER":              17,  "BRI": 17,
@@ -59,21 +62,90 @@ def _grade_rank(grade_str: str) -> int:
     key = _grade_key(grade_str)
     if key in _GRADE_ORDER:
         return _GRADE_ORDER[key]
-    # Recherche partielle pour les variantes orthographiques
+    # Correspondance partielle : privilégier le motif le plus long (ex. MDC avant MDL)
+    best_len = -1
+    best_rank = 99
     for pat, rank in _GRADE_ORDER.items():
         if pat in key or key in pat:
-            return rank
-    return 99
+            if len(pat) > best_len:
+                best_len = len(pat)
+                best_rank = rank
+    return best_rank
+
+
+def _person_row_key(person) -> tuple:
+    return (
+        person.matricule_militaire or "",
+        person.matricule_solde or "",
+        person.noms or "",
+    )
+
+
+def _resolve_grade_code(
+    grade_str: str | None,
+    grade_code_map: dict[str, str] | None,
+) -> str:
+    """Retourne le code court TabGrade (MDC, MDL…) pour le tri, depuis libellé ou code."""
+    g = (grade_str or "").strip()
+    if not g:
+        return ""
+    if grade_code_map and g in grade_code_map:
+        return grade_code_map[g]
+    key = _grade_key(g)
+    if key in _GRADE_ORDER:
+        return g
+    return g
 
 
 def sort_persons_by_grade(
     persons: list,
+    *,
+    grade_code_map: dict[str, str] | None = None,
+    grades: list | None = None,
 ) -> list:
-    """Trie les personnes par ordre hiérarchique de grade décroissant puis par nom."""
-    return sorted(
-        persons,
-        key=lambda p: (_grade_rank(p.grade or ""), _grade_key(p.noms or "")),
+    """
+    Trie par hiérarchie de grade (TabGrade PrefOrd si disponible, sinon table interne),
+    puis par nom.
+    """
+    from sme_gend.services.personnel_list_order import (
+        _grade_pref_maps,
+        _grade_sort_key,
+        _norm,
     )
+
+    by_code, by_lib = _grade_pref_maps(grades) if grades else ({}, {})
+
+    def _sort_key(p) -> tuple:
+        raw = (p.grade or "").strip()
+        code = _resolve_grade_code(raw, grade_code_map)
+        if grades and (by_code or by_lib):
+            po, gl = _grade_sort_key(code, by_code, by_lib)
+            if po >= 999_999:
+                po, gl = _grade_sort_key(raw, by_code, by_lib)
+        else:
+            po = _grade_rank(code or raw)
+            gl = _grade_key(raw)
+        return (po, gl, _norm(p.noms), p.matricule_militaire or "")
+
+    return sorted(persons, key=_sort_key)
+
+
+def sort_limite_age_rows(
+    rows: list[tuple],
+    *,
+    grade_code_map: dict[str, str] | None = None,
+    grades: list | None = None,
+) -> list[tuple]:
+    """Trie des couples (ListeGeneraleRow, LimiteDateResult) comme sort_persons_by_grade."""
+    if not rows:
+        return rows
+    by_key = {_person_row_key(p): (p, r) for p, r in rows}
+    ordered = sort_persons_by_grade(
+        [p for p, _ in rows],
+        grade_code_map=grade_code_map,
+        grades=grades,
+    )
+    return [by_key[_person_row_key(p)] for p in ordered]
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +280,7 @@ class SoitTransmisService:
         dest_path: Path,
         sign_date: date | None = None,
         grade_code_map: dict[str, str] | None = None,
+        grades: list | None = None,
     ) -> Path:
         from docx import Document
         from sme_gend.config.settings import project_root
@@ -219,15 +292,18 @@ class SoitTransmisService:
         doc = Document(str(template_path))
         paras = doc.paragraphs
 
+        ville_hdr = (cfg.ville or "").strip().upper() or "BRAZZAVILLE"
+
         # ── Trouver les paragraphes variables dans le corps ───────────────
         p07 = p08 = p10_body = p19 = None
         for p in paras:
             txt = p.text.strip()
+            txt_up = txt.upper()
             if p07 is None and "Monsieur" in txt and "commissaire" in txt:
                 p07 = p
             elif p08 is None and "directeur des services financiers" in txt:
                 p08 = p
-            elif p10_body is None and txt.startswith("-") and len(txt) < 30:
+            elif p10_body is None and txt.startswith("-") and ville_hdr in txt_up:
                 p10_body = p
             elif p19 is None and "honneur de vous transmettre" in txt:
                 p19 = p
@@ -259,17 +335,23 @@ class SoitTransmisService:
                     else f"N°_________{cfg.reference_suffix}"
                 )
                 _first_run_set(p_ref, ref_val)
-            # Cellule droite [0,2] — lieu et date
-            p_date = _find_para_containing(t0.cell(0, 2), "Brazzaville")
+            # Cellule droite [0,2] — lieu et date (date laissée vide : saisie manuelle sur le modèle)
+            ville = (cfg.ville or "").strip() or "Brazzaville"
+            p_date = (
+                _find_para_containing(t0.cell(0, 2), ville)
+                or _find_para_containing(t0.cell(0, 2), "Brazzaville")
+            )
             if p_date is not None:
-                date_str = (
-                    sign_date.strftime("%d/%m/%Y") if sign_date else "___________"
-                )
-                _first_run_set(p_date, f"{cfg.ville}, le {date_str}")
+                date_str = sign_date.strftime("%d/%m/%Y") if sign_date else ""
+                _first_run_set(p_date, f"{ville}, le {date_str}".rstrip())
 
         # ── Remplir Table 2 (liste des personnels — triée par grade puis nom) ─
         if len(doc.tables) >= 3:
-            sorted_persons = sort_persons_by_grade(persons)
+            sorted_persons = sort_persons_by_grade(
+                persons,
+                grade_code_map=grade_code_map,
+                grades=grades,
+            )
             _fill_persons_table(doc.tables[2], sorted_persons, grade_code_map)
 
         dest_path.parent.mkdir(parents=True, exist_ok=True)

@@ -47,6 +47,11 @@ from sme_gend.services.limite_age_service import (
     LimiteDateResult,
     _to_date,
 )
+from sme_gend.services.soit_transmis_service import (
+    _grade_rank,
+    sort_limite_age_rows,
+    sort_persons_by_grade,
+)
 
 _TODAY = date.today()
 
@@ -89,9 +94,13 @@ class _PersonnelModel(QAbstractTableModel):
         # Clé → (person, result) : persiste à travers les changements de filtre
         self._checked: dict[tuple, tuple[ListeGeneraleRow, LimiteDateResult]] = {}
         self._grade_code_map: dict[str, str] = {}
+        self._grades: list = []
 
     def set_grade_code_map(self, m: dict[str, str]) -> None:
         self._grade_code_map = m
+
+    def set_grades(self, grades: list) -> None:
+        self._grades = grades or []
 
     def load(self, rows: list[tuple[ListeGeneraleRow, LimiteDateResult]]) -> None:
         self.beginResetModel()
@@ -191,8 +200,12 @@ class _PersonnelModel(QAbstractTableModel):
     # ---- Gestion des coches -------------------------------------------------
 
     def checked_rows(self) -> list[tuple[ListeGeneraleRow, LimiteDateResult]]:
-        """Retourne toutes les personnes cochées, même celles filtrées hors de la vue."""
-        return list(self._checked.values())
+        """Retourne toutes les personnes cochées, triées par grade puis nom."""
+        return sort_limite_age_rows(
+            list(self._checked.values()),
+            grade_code_map=self._grade_code_map,
+            grades=self._grades,
+        )
 
     def checked_count(self) -> int:
         return len(self._checked)
@@ -575,6 +588,7 @@ class _AttestationsTab(QWidget):
         self._all_rows: list[tuple[ListeGeneraleRow, LimiteDateResult]] = []
         self._filtered: list[tuple[ListeGeneraleRow, LimiteDateResult]] = []
         self._grade_code_map: dict[str, str] = {}   # libelle_complet → code_court
+        self._grades: list = []
         self._send_to_soit_transmis_fn = None  # callback(persons: list[ListeGeneraleRow])
 
         # Stats bar
@@ -617,7 +631,7 @@ class _AttestationsTab(QWidget):
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.AllEditTriggers)
         self._table.setAlternatingRowColors(True)
-        self._table.setSortingEnabled(True)
+        self._table.setSortingEnabled(False)
         hdr = self._table.horizontalHeader()
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         hdr.setStretchLastSection(False)
@@ -724,13 +738,10 @@ class _AttestationsTab(QWidget):
             from sme_gend.repositories.liste_generale_repository import ListeGeneraleRepository
             from sme_gend.repositories.grade_repository import GradeRepository
             from sme_gend.repositories.structure_repository import StructureRepository
-            from sme_gend.services.personnel_list_order import sort_liste_generale_default_order
-
             cfg     = svc.load()
             rows    = ListeGeneraleRepository(settings).fetch_all()
             grades  = GradeRepository(settings).fetch_all()
             structs = StructureRepository(settings).fetch_all()
-            rows    = sort_liste_generale_default_order(rows, grades)
 
             grade_map  = {g.code: g.libelle     for g in grades  if g.code}
             struct_map = {s.code: s.designation for s in structs if s.code}
@@ -741,8 +752,15 @@ class _AttestationsTab(QWidget):
                 resolved.append(dc_replace(r, grade=ng, structure=ns))
 
             grade_code_map = {v: k for k, v in grade_map.items()}
-            all_rows = [(p, svc.calculate_limit(p, cfg)) for p in resolved]
-            return all_rows, grade_code_map
+            resolved = sort_persons_by_grade(
+                resolved, grade_code_map=grade_code_map, grades=grades
+            )
+            all_rows = sort_limite_age_rows(
+                [(p, svc.calculate_limit(p, cfg)) for p in resolved],
+                grade_code_map=grade_code_map,
+                grades=grades,
+            )
+            return all_rows, grade_code_map, grades
 
         result = run_with_progress(
             self, "Limite d'âge", "Chargement du personnel…", do_load
@@ -750,9 +768,11 @@ class _AttestationsTab(QWidget):
         if result is None:
             return
 
-        all_rows, grade_code_map = result
+        all_rows, grade_code_map, grades = result
+        self._grades = grades
         self._grade_code_map = grade_code_map
         self._model.set_grade_code_map(grade_code_map)
+        self._model.set_grades(grades)
         self._all_rows = all_rows
         self._stats.update_stats(all_rows)
         self._refresh_combos()
@@ -767,7 +787,8 @@ class _AttestationsTab(QWidget):
             if g and g not in grades: grades.append(g)
             s = (p.structure or "").strip()
             if s and s not in structs: structs.append(s)
-        grades.sort(); structs.sort()
+        grades.sort(key=lambda g: (_grade_rank(g), g))
+        structs.sort()
 
         prev_g = self._combo_grade.currentData()
         self._combo_grade.blockSignals(True)
@@ -812,7 +833,11 @@ class _AttestationsTab(QWidget):
                 if search not in hay: continue
             filtered.append((p, r))
 
-        filtered.sort(key=lambda t: (t[1].limit_date is None, t[1].limit_date or date.max))
+        filtered = sort_limite_age_rows(
+            filtered,
+            grade_code_map=self._grade_code_map,
+            grades=self._grades,
+        )
         self._filtered = filtered
         self._model.load(filtered)
         self._lbl_count.setText(
@@ -875,7 +900,9 @@ class _AttestationsTab(QWidget):
         tmp = Path(tempfile.gettempdir()) / "attestations_groupees.docx"
         try:
             persons = [p for p, _ in rows]
-            self._svc.generate_docx_batch(persons, cfg, tmp, None)
+            self._svc.generate_docx_batch(
+                persons, cfg, tmp, None, self._grade_code_map, self._grades
+            )
             os.startfile(str(tmp))
         except Exception as e:
             QMessageBox.critical(self, "Erreur", str(e))

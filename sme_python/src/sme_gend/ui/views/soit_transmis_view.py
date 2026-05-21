@@ -30,7 +30,11 @@ from sme_gend.config.settings import Settings
 from sme_gend.models.liste_generale import ListeGeneraleRow
 from sme_gend.models.soit_transmis_config import SoitTransmisConfig
 from sme_gend.services.limite_age_service import LimiteDateResult, _int_to_fr
-from sme_gend.services.soit_transmis_service import SoitTransmisService
+from sme_gend.services.soit_transmis_service import (
+    SoitTransmisService,
+    _grade_rank,
+    sort_persons_by_grade,
+)
 
 # ---------------------------------------------------------------------------
 # Colonnes du tableau personnel
@@ -161,6 +165,9 @@ class SoitTransmisView(QWidget):
         self._settings = settings
         self._svc = SoitTransmisService()
         self._la_svc = None  # LimiteAgeService partagé (injecté par shell_window)
+        self._grades: list = []
+        self._needs_reload = True
+        self._loaded_from_attestations = False
         self._all_rows: list[ListeGeneraleRow] = []
         # Personnes originales (grades complets) pour la génération des attestations
         self._key_to_orig: dict[tuple, ListeGeneraleRow] = {}
@@ -204,6 +211,11 @@ class SoitTransmisView(QWidget):
         self._combo_urgence.addItem("< 1 an", 365)
         self._combo_urgence.addItem("1 - 2 ans", 730)
         self._combo_urgence.currentIndexChanged.connect(self._apply_filter)
+        self._combo_urgence.setToolTip(
+            "Filtre par date de limite calculée.\n"
+            "Disponible après envoi depuis Limite d'âge ou chargement BDD "
+            "(calcul automatique si le service est actif)."
+        )
 
         filter_row = QHBoxLayout()
         filter_row.setSpacing(6)
@@ -282,12 +294,20 @@ class SoitTransmisView(QWidget):
         self._f_ville = QLineEdit()
         self._f_ville.setPlaceholderText("Brazzaville")
 
+        self._f_ref_num = QLineEdit()
+        self._f_ref_num.setPlaceholderText("Numéro (vide = tirets dans le Word)")
+
+        self._f_ref_suffix = QLineEdit()
+        self._f_ref_suffix.setPlaceholderText("/GN/EM/DPF/DGP.-")
+
         grp_dest = QGroupBox("Destinataire & localisation")
         form_dest = QFormLayout(grp_dest)
         form_dest.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         form_dest.addRow("Titre :", self._f_dest_titre)
         form_dest.addRow("Rôle :", self._f_dest_role)
         form_dest.addRow("Ville :", self._f_ville)
+        form_dest.addRow("N° référence :", self._f_ref_num)
+        form_dest.addRow("Suffixe réf. :", self._f_ref_suffix)
 
         # Aperçu du nombre de dossiers (mise à jour automatique)
         self._lbl_preview = QLabel("— dossiers sélectionnés")
@@ -341,12 +361,16 @@ class SoitTransmisView(QWidget):
         self._f_dest_titre.setText(cfg.destinataire_titre)
         self._f_dest_role.setText(cfg.destinataire_role)
         self._f_ville.setText(cfg.ville)
+        self._f_ref_num.setText(cfg.reference_num)
+        self._f_ref_suffix.setText(cfg.reference_suffix)
 
     def _read_config(self) -> SoitTransmisConfig:
         cfg = self._svc.load()
         cfg.destinataire_titre = self._f_dest_titre.text().strip()
         cfg.destinataire_role  = self._f_dest_role.text().strip()
         cfg.ville              = self._f_ville.text().strip() or "Brazzaville"
+        cfg.reference_num      = self._f_ref_num.text().strip()
+        cfg.reference_suffix   = self._f_ref_suffix.text().strip() or "/GN/EM/DPF/DGP.-"
         return cfg
 
     def _save_config(self) -> None:
@@ -365,25 +389,40 @@ class SoitTransmisView(QWidget):
         settings = self._settings
 
         def do_load():
+            from dataclasses import replace as dc_replace
             from sme_gend.repositories.liste_generale_repository import ListeGeneraleRepository
             from sme_gend.repositories.grade_repository import GradeRepository
-            from sme_gend.services.personnel_list_order import sort_liste_generale_default_order
-            rows   = ListeGeneraleRepository(settings).fetch_all()
-            grades = GradeRepository(settings).fetch_all()
-            rows   = sort_liste_generale_default_order(rows, grades)
-            return rows
 
-        rows = run_with_progress(
+            grades = GradeRepository(settings).fetch_all()
+            rows = ListeGeneraleRepository(settings).fetch_all()
+            grade_map = {g.code: g.libelle for g in grades if g.code}
+            resolved = []
+            for r in rows:
+                ng = grade_map.get((r.grade or "").strip()) or r.grade
+                resolved.append(dc_replace(r, grade=ng))
+            grade_code_map = {v: k for k, v in grade_map.items()}
+            ordered = sort_persons_by_grade(
+                resolved, grade_code_map=grade_code_map, grades=grades
+            )
+            return grades, ordered, grade_code_map
+
+        result = run_with_progress(
             self, "Soit transmis", "Chargement du personnel…", do_load
         )
-        if rows is None:
-            rows = []
+        if result is None:
+            grades, rows, grade_code_map = [], [], {}
+        else:
+            grades, rows, grade_code_map = result
 
+        self._grades = grades
         self._key_to_orig = {_person_key(p): p for p in rows}
-        self._results = {}
-        self._model.set_grade_code_map({})
+        self._loaded_from_attestations = False
+        self._results = self._compute_limit_results(rows)
+        self._model.set_grade_code_map(grade_code_map)
         self._all_rows = rows
+        self._needs_reload = False
         self._refresh_grade_combo()
+        self._update_urgence_combo_state()
         self._apply_filter()
 
     def load_persons(
@@ -397,15 +436,46 @@ class SoitTransmisView(QWidget):
         grade_code_map : {libelle_complet → code_court} transmis par l'onglet Attestations.
         results        : liste des LimiteDateResult correspondant à chaque personne.
         """
-        self._key_to_orig = {_person_key(p): p for p in persons}
-        self._model.set_grade_code_map(grade_code_map or {})
-        self._results = {
+        if not self._grades:
+            from sme_gend.repositories.grade_repository import GradeRepository
+            self._grades = GradeRepository(self._settings).fetch_all()
+        ordered = sort_persons_by_grade(
+            persons,
+            grade_code_map=grade_code_map,
+            grades=self._grades,
+        )
+        results_map = {
             _person_key(p): r for p, r in zip(persons, results or [])
         }
-        self._all_rows = persons
+        self._key_to_orig = {_person_key(p): p for p in ordered}
+        self._model.set_grade_code_map(grade_code_map or {})
+        self._results = {
+            _person_key(p): results_map[_person_key(p)]
+            for p in ordered
+            if _person_key(p) in results_map
+        }
+        self._all_rows = ordered
+        self._loaded_from_attestations = True
+        self._needs_reload = False
         self._refresh_grade_combo()
+        self._update_urgence_combo_state()
         self._apply_filter()
         self._model.check_all()
+
+    def _compute_limit_results(
+        self, persons: list[ListeGeneraleRow]
+    ) -> dict[tuple, LimiteDateResult]:
+        """Calcule les dates de limite pour activer le filtre urgence."""
+        if not self._la_svc or not persons:
+            return {}
+        try:
+            cfg_la = self._la_svc.load()
+            return {
+                _person_key(p): self._la_svc.calculate_limit(p, cfg_la)
+                for p in persons
+            }
+        except Exception:
+            return {}
 
     def set_limite_age_service(self, svc) -> None:
         """Reçoit l'instance LimiteAgeService partagée depuis shell_window."""
@@ -413,6 +483,31 @@ class SoitTransmisView(QWidget):
 
     def rebind_settings(self, settings: Settings) -> None:
         self._settings = settings
+        self._grades = []
+        self.mark_dirty()
+
+    def mark_dirty(self) -> None:
+        self._needs_reload = True
+        self._loaded_from_attestations = False
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if event.spontaneous():
+            return
+        if self._needs_reload and not self._loaded_from_attestations:
+            self._needs_reload = False
+            self.load_personnel()
+
+    def _has_urgence_data(self) -> bool:
+        return bool(self._results)
+
+    def _update_urgence_combo_state(self) -> None:
+        has = self._has_urgence_data()
+        self._combo_urgence.setEnabled(has)
+        if not has and self._combo_urgence.currentData() is not None:
+            self._combo_urgence.blockSignals(True)
+            self._combo_urgence.setCurrentIndex(0)
+            self._combo_urgence.blockSignals(False)
 
     # ── Filtre / recherche ────────────────────────────────────────────────
 
@@ -428,7 +523,7 @@ class SoitTransmisView(QWidget):
             g = (p.grade or "").strip()
             if g and g not in seen:
                 seen.append(g)
-        seen.sort()
+        seen.sort(key=lambda g: (_grade_rank(g), g))
         for g in seen:
             label = gmap.get(g, g)
             self._combo_grade.addItem(label, g)
@@ -443,7 +538,11 @@ class SoitTransmisView(QWidget):
         from datetime import date as _date
         search = self._search.text().strip().upper()
         grade_filter  = self._combo_grade.currentData()
-        urgence_limit = self._combo_urgence.currentData()  # None | -1 | 180 | 365 | 730
+        urgence_limit = (
+            self._combo_urgence.currentData()
+            if self._has_urgence_data()
+            else None
+        )
         today = _date.today()
         filtered: list[ListeGeneraleRow] = []
         gmap = self._model._grade_code_map
@@ -474,6 +573,11 @@ class SoitTransmisView(QWidget):
                 if search not in hay:
                     continue
             filtered.append(p)
+        filtered = sort_persons_by_grade(
+            filtered,
+            grade_code_map=self._model._grade_code_map,
+            grades=self._grades,
+        )
         self._model.load(filtered)
         self._lbl_count.setText(
             f"{len(filtered)} / {len(self._all_rows)} personne(s)"
@@ -514,16 +618,23 @@ class SoitTransmisView(QWidget):
     # ── Personnes originales (grades complets pour les attestations) ───────
 
     def _orig_persons_for(self, display_persons: list[ListeGeneraleRow]) -> list[ListeGeneraleRow]:
-        """Retourne les versions originales (grades non convertis) des personnes cochées."""
-        return [self._key_to_orig.get(_person_key(p), p) for p in display_persons]
+        """Personnes cochées dans le même ordre (grade / nom) que l'affichage."""
+        return display_persons
 
     # ── Génération ────────────────────────────────────────────────────────
 
     def _gmap(self) -> dict[str, str]:
         return self._model._grade_code_map
 
+    def _checked_sorted(self) -> list[ListeGeneraleRow]:
+        return sort_persons_by_grade(
+            self._model.checked_rows(),
+            grade_code_map=self._gmap(),
+            grades=self._grades,
+        )
+
     def _generate(self) -> None:
-        persons = self._model.checked_rows()
+        persons = self._checked_sorted()
         if not persons:
             return
         cfg = self._read_config()
@@ -535,20 +646,24 @@ class SoitTransmisView(QWidget):
         if not dest:
             return
         try:
-            self._svc.generate_docx(persons, cfg, Path(dest), date.today(), self._gmap())
+            self._svc.generate_docx(
+                persons, cfg, Path(dest), None, self._gmap(), self._grades
+            )
             QMessageBox.information(self, "Soit transmis", f"Document généré :\n{dest}")
         except Exception as e:
             QMessageBox.critical(self, "Erreur génération", str(e))
 
     def _open_in_word(self) -> None:
         import os
-        persons = self._model.checked_rows()
+        persons = self._checked_sorted()
         if not persons:
             return
         cfg = self._read_config()
         tmp = Path(tempfile.gettempdir()) / "apercu_soit_transmis.docx"
         try:
-            self._svc.generate_docx(persons, cfg, tmp, date.today(), self._gmap())
+            self._svc.generate_docx(
+                persons, cfg, tmp, None, self._gmap(), self._grades
+            )
             os.startfile(str(tmp))
         except Exception as e:
             QMessageBox.critical(self, "Erreur", str(e))
@@ -557,7 +672,7 @@ class SoitTransmisView(QWidget):
         """Génère et ouvre le Soit transmis + le fichier groupé des attestations."""
         import os
 
-        persons_display = self._model.checked_rows()
+        persons_display = self._checked_sorted()
         if not persons_display:
             return
 
@@ -571,7 +686,9 @@ class SoitTransmisView(QWidget):
         errors: list[str] = []
 
         try:
-            self._svc.generate_docx(persons_display, cfg_st, tmp_st, date.today(), self._gmap())
+            self._svc.generate_docx(
+                persons_display, cfg_st, tmp_st, None, self._gmap(), self._grades
+            )
         except Exception as e:
             errors.append(f"Soit transmis : {e}")
 
@@ -579,7 +696,9 @@ class SoitTransmisView(QWidget):
             from sme_gend.services.limite_age_service import LimiteAgeService
             la_svc = self._la_svc or LimiteAgeService()
             cfg_la = la_svc.load()
-            la_svc.generate_docx_batch(persons_orig, cfg_la, tmp_at, None)
+            la_svc.generate_docx_batch(
+                persons_orig, cfg_la, tmp_at, None, self._gmap(), self._grades
+            )
         except Exception as e:
             errors.append(f"Attestations : {e}")
 

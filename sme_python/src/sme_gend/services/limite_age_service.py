@@ -539,23 +539,11 @@ class LimiteAgeService:
 
     # ---- Génération Word (.docx) -------------------------------------------
 
-    # ---- Formatage des noms pour les documents --------------------------------
-
     @staticmethod
     def _fmt_grade(grade: str) -> str:
         """Première lettre en majuscule, reste en minuscule (ex: ADJUDANT → Adjudant)."""
         g = grade.strip()
         return (g[0].upper() + g[1:].lower()) if g else ""
-
-    @staticmethod
-    def _fmt_noms(noms: str) -> str:
-        """Nom de famille en MAJUSCULES, prénoms en minuscules (ex: DZONDAULT GHISLAIN → DZONDAULT ghislain)."""
-        parts = noms.strip().split()
-        if not parts:
-            return ""
-        surname = parts[0].upper()
-        given   = " ".join(p.lower() for p in parts[1:])
-        return f"{surname} {given}".strip()
 
     def generate_docx(
         self,
@@ -601,9 +589,8 @@ class LimiteAgeService:
         opts       = cfg.options
         dn         = _to_date(person.date_naissance)
         ds         = _to_date(person.date_service)
-        sign_str   = sign_date.strftime("%d/%m/%Y") if sign_date else "___________"
         grade_str  = self._fmt_grade(person.grade      or "")
-        noms_str   = self._fmt_noms(person.noms        or "")
+        noms_str   = (person.noms or "").strip()
         struct_raw = (person.structure  or "").strip()
         struct_str = struct_raw.lower()
         prep_str   = _prep_structure(struct_raw)
@@ -678,7 +665,7 @@ class LimiteAgeService:
 
         dn = _to_date(person.date_naissance)
         ds = _to_date(person.date_service)
-        sign_date_str = sign_date.strftime("%d/%m/%Y") if sign_date else "___________"
+        sign_date_str = ""
         date_words = (
             date_to_words_fr(result.limit_date)
             if result.limit_date
@@ -726,7 +713,7 @@ class LimiteAgeService:
             bc_html = f"<center><small>{bc_data}</small></center>"
 
         grade_str  = self._fmt_grade(person.grade  or "")
-        noms_str   = self._fmt_noms(person.noms   or "")
+        noms_str   = (person.noms or "").strip()
         struct_raw = (person.structure or "").strip()
         struct_str = struct_raw.lower()
         prep_str   = _prep_structure(struct_raw)
@@ -848,6 +835,8 @@ class LimiteAgeService:
         cfg: LimiteAgeConfig,
         dest_path: Path,
         sign_date: date | None = None,
+        grade_code_map: dict[str, str] | None = None,
+        grades: list | None = None,
     ) -> Path:
         """Génère un seul .docx avec une attestation par page pour chaque personne."""
         from docx import Document
@@ -859,6 +848,11 @@ class LimiteAgeService:
 
         if not persons:
             raise ValueError("Aucune personne fournie")
+
+        from sme_gend.services.soit_transmis_service import sort_persons_by_grade
+        persons = sort_persons_by_grade(
+            persons, grade_code_map=grade_code_map, grades=grades
+        )
 
         R_IMG = ("http://schemas.openxmlformats.org/officeDocument/"
                  "2006/relationships/image")
