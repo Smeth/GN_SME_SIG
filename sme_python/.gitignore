@@ -10,3 +10,8 @@ venv/
 # Base Access locale (remplacez par votre smegend.mdb ; ne pas versionner les gros fichiers)
 data/*.mdb
 data/*.accdb
+# Journaux et audits locaux (ne pas versionner)
+data/*.log
+data/*.log.*
+data/doc_gen_log.jsonl
+data/personnel_audit_*.jsonl
