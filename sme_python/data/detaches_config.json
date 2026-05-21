@@ -6,5 +6,846 @@
     "libelle_bloc_non_reference": "— PERSONNEL : SIGLE NON CONFIGURÉ (SUBDIVISION ARME) —",
     "sigle_presidence": ""
   },
-  "structures": []
+  "structures": [
+    {
+      "sigle": "3E ESCADRON",
+      "ordre": 0,
+      "titres_lignes": [
+        "3E ESCADRON"
+      ]
+    },
+    {
+      "sigle": "4E ESCADRON",
+      "ordre": 1,
+      "titres_lignes": [
+        "4E ESCADRON"
+      ]
+    },
+    {
+      "sigle": "AN",
+      "ordre": 2,
+      "titres_lignes": [
+        "AN"
+      ]
+    },
+    {
+      "sigle": "ARPCE",
+      "ordre": 3,
+      "titres_lignes": [
+        "ARPCE"
+      ]
+    },
+    {
+      "sigle": "BRIGADE TERRITORIALE DE _MBOMO",
+      "ordre": 4,
+      "titres_lignes": [
+        "BRIGADE TERRITORIALE DE _MBOMO"
+      ]
+    },
+    {
+      "sigle": "CA-BZV",
+      "ordre": 5,
+      "titres_lignes": [
+        "CA-BZV"
+      ]
+    },
+    {
+      "sigle": "CAB/MDN",
+      "ordre": 6,
+      "titres_lignes": [
+        "CAB/MDN"
+      ]
+    },
+    {
+      "sigle": "CAB/MID",
+      "ordre": 7,
+      "titres_lignes": [
+        "CAB/MID"
+      ]
+    },
+    {
+      "sigle": "CC",
+      "ordre": 8,
+      "titres_lignes": [
+        "CC"
+      ]
+    },
+    {
+      "sigle": "CCB",
+      "ordre": 9,
+      "titres_lignes": [
+        "CCB"
+      ]
+    },
+    {
+      "sigle": "CCS",
+      "ordre": 10,
+      "titres_lignes": [
+        "CCS"
+      ]
+    },
+    {
+      "sigle": "CESE",
+      "ordre": 11,
+      "titres_lignes": [
+        "CESE"
+      ]
+    },
+    {
+      "sigle": "CID",
+      "ordre": 12,
+      "titres_lignes": [
+        "CID"
+      ]
+    },
+    {
+      "sigle": "CIMAK",
+      "ordre": 13,
+      "titres_lignes": [
+        "CIMAK"
+      ]
+    },
+    {
+      "sigle": "CIRAS",
+      "ordre": 14,
+      "titres_lignes": [
+        "CIRAS"
+      ]
+    },
+    {
+      "sigle": "CMDT_RGN",
+      "ordre": 15,
+      "titres_lignes": [
+        "CMDT_RGN"
+      ]
+    },
+    {
+      "sigle": "CNS",
+      "ordre": 16,
+      "titres_lignes": [
+        "CNS"
+      ]
+    },
+    {
+      "sigle": "CNTRGFP",
+      "ordre": 17,
+      "titres_lignes": [
+        "CNTRGFP"
+      ]
+    },
+    {
+      "sigle": "CRF",
+      "ordre": 18,
+      "titres_lignes": [
+        "CRF"
+      ]
+    },
+    {
+      "sigle": "CS",
+      "ordre": 19,
+      "titres_lignes": [
+        "CS"
+      ]
+    },
+    {
+      "sigle": "CSCPRC",
+      "ordre": 20,
+      "titres_lignes": [
+        "CSCPRC"
+      ]
+    },
+    {
+      "sigle": "CSLC",
+      "ordre": 21,
+      "titres_lignes": [
+        "CSLC"
+      ]
+    },
+    {
+      "sigle": "DCSM",
+      "ordre": 22,
+      "titres_lignes": [
+        "DCSM"
+      ]
+    },
+    {
+      "sigle": "DCSS",
+      "ordre": 23,
+      "titres_lignes": [
+        "DCSS"
+      ]
+    },
+    {
+      "sigle": "DDEF SH",
+      "ordre": 24,
+      "titres_lignes": [
+        "DDEF SH"
+      ]
+    },
+    {
+      "sigle": "DETACHE",
+      "ordre": 25,
+      "titres_lignes": [
+        "DETACHE"
+      ]
+    },
+    {
+      "sigle": "DFMAS",
+      "ordre": 26,
+      "titres_lignes": [
+        "DFMAS"
+      ]
+    },
+    {
+      "sigle": "DGAF",
+      "ordre": 27,
+      "titres_lignes": [
+        "DGAF"
+      ]
+    },
+    {
+      "sigle": "DGAP",
+      "ordre": 28,
+      "titres_lignes": [
+        "DGAP"
+      ]
+    },
+    {
+      "sigle": "DGASCOM",
+      "ordre": 29,
+      "titres_lignes": [
+        "DGASCOM"
+      ]
+    },
+    {
+      "sigle": "DGCCA",
+      "ordre": 30,
+      "titres_lignes": [
+        "DGCCA"
+      ]
+    },
+    {
+      "sigle": "DGE",
+      "ordre": 31,
+      "titres_lignes": [
+        "DGE"
+      ]
+    },
+    {
+      "sigle": "DGFE",
+      "ordre": 32,
+      "titres_lignes": [
+        "DGFE"
+      ]
+    },
+    {
+      "sigle": "DGJ",
+      "ordre": 33,
+      "titres_lignes": [
+        "DGJ"
+      ]
+    },
+    {
+      "sigle": "DGRH",
+      "ordre": 34,
+      "titres_lignes": [
+        "DGRH"
+      ]
+    },
+    {
+      "sigle": "DGSCC",
+      "ordre": 35,
+      "titres_lignes": [
+        "DGSCC"
+      ]
+    },
+    {
+      "sigle": "DGSP",
+      "ordre": 36,
+      "titres_lignes": [
+        "DGSP"
+      ]
+    },
+    {
+      "sigle": "DGT",
+      "ordre": 37,
+      "titres_lignes": [
+        "DGT"
+      ]
+    },
+    {
+      "sigle": "DIC",
+      "ordre": 38,
+      "titres_lignes": [
+        "DIC"
+      ]
+    },
+    {
+      "sigle": "DIRCAB PR",
+      "ordre": 39,
+      "titres_lignes": [
+        "DIRCAB PR"
+      ]
+    },
+    {
+      "sigle": "DIRECTION DU PROTOCOLE PRÉSIDENTIEL",
+      "ordre": 40,
+      "titres_lignes": [
+        "DIRECTION DU PROTOCOLE PRÉSIDENTIEL"
+      ]
+    },
+    {
+      "sigle": "DNVO",
+      "ordre": 41,
+      "titres_lignes": [
+        "DNVO"
+      ]
+    },
+    {
+      "sigle": "DOPS-FAC",
+      "ordre": 42,
+      "titres_lignes": [
+        "DOPS-FAC"
+      ]
+    },
+    {
+      "sigle": "DPNMA",
+      "ordre": 43,
+      "titres_lignes": [
+        "DPNMA"
+      ]
+    },
+    {
+      "sigle": "DPR",
+      "ordre": 44,
+      "titres_lignes": [
+        "DPR"
+      ]
+    },
+    {
+      "sigle": "EGM_RGBZA",
+      "ordre": 45,
+      "titres_lignes": [
+        "EGM_RGBZA"
+      ]
+    },
+    {
+      "sigle": "EGM_SGH",
+      "ordre": 46,
+      "titres_lignes": [
+        "EGM_SGH"
+      ]
+    },
+    {
+      "sigle": "EGT",
+      "ordre": 47,
+      "titres_lignes": [
+        "EGT"
+      ]
+    },
+    {
+      "sigle": "EMP-PR",
+      "ordre": 48,
+      "titres_lignes": [
+        "EMP-PR"
+      ]
+    },
+    {
+      "sigle": "ESP",
+      "ordre": 49,
+      "titres_lignes": [
+        "ESP"
+      ]
+    },
+    {
+      "sigle": "ESSIG_RGK",
+      "ordre": 50,
+      "titres_lignes": [
+        "ESSIG_RGK"
+      ]
+    },
+    {
+      "sigle": "ETAT-MAJOR_SGH",
+      "ordre": 51,
+      "titres_lignes": [
+        "ETAT-MAJOR_SGH"
+      ]
+    },
+    {
+      "sigle": "GDB MOIGNY",
+      "ordre": 52,
+      "titres_lignes": [
+        "GDB MOIGNY"
+      ]
+    },
+    {
+      "sigle": "GDB NIANGA NGATSE MBOUALA",
+      "ordre": 53,
+      "titres_lignes": [
+        "GDB NIANGA NGATSE MBOUALA"
+      ]
+    },
+    {
+      "sigle": "GDB PVM",
+      "ordre": 54,
+      "titres_lignes": [
+        "GDB PVM"
+      ]
+    },
+    {
+      "sigle": "GR",
+      "ordre": 55,
+      "titres_lignes": [
+        "GR"
+      ]
+    },
+    {
+      "sigle": "GRANDE CHANCELLERIE DES ORDRES NATIONNAUX",
+      "ordre": 56,
+      "titres_lignes": [
+        "GRANDE CHANCELLERIE DES ORDRES NATIONNAUX"
+      ]
+    },
+    {
+      "sigle": "HALC",
+      "ordre": 57,
+      "titres_lignes": [
+        "HALC"
+      ]
+    },
+    {
+      "sigle": "HCREC",
+      "ordre": 58,
+      "titres_lignes": [
+        "HCREC"
+      ]
+    },
+    {
+      "sigle": "HCVVCA",
+      "ordre": 59,
+      "titres_lignes": [
+        "HCVVCA"
+      ]
+    },
+    {
+      "sigle": "HOPITAL REGIONALE DES ARMEES PNR",
+      "ordre": 60,
+      "titres_lignes": [
+        "HOPITAL REGIONALE DES ARMEES PNR"
+      ]
+    },
+    {
+      "sigle": "IGFAC",
+      "ordre": 61,
+      "titres_lignes": [
+        "IGFAC"
+      ]
+    },
+    {
+      "sigle": "IGPG",
+      "ordre": 62,
+      "titres_lignes": [
+        "IGPG"
+      ]
+    },
+    {
+      "sigle": "INFIRMERIE_EGN",
+      "ordre": 63,
+      "titres_lignes": [
+        "INFIRMERIE_EGN"
+      ]
+    },
+    {
+      "sigle": "INSPECTEUR GENERALE DES FAC",
+      "ordre": 64,
+      "titres_lignes": [
+        "INSPECTEUR GENERALE DES FAC"
+      ]
+    },
+    {
+      "sigle": "INSPECTION GÉNÉRALE FAC",
+      "ordre": 65,
+      "titres_lignes": [
+        "INSPECTION GÉNÉRALE FAC"
+      ]
+    },
+    {
+      "sigle": "MAE",
+      "ordre": 66,
+      "titres_lignes": [
+        "MAE"
+      ]
+    },
+    {
+      "sigle": "MAEFCE",
+      "ordre": 67,
+      "titres_lignes": [
+        "MAEFCE"
+      ]
+    },
+    {
+      "sigle": "MAEP",
+      "ordre": 68,
+      "titres_lignes": [
+        "MAEP"
+      ]
+    },
+    {
+      "sigle": "MAIRE ARR6, PNR",
+      "ordre": 69,
+      "titres_lignes": [
+        "MAIRE ARR6, PNR"
+      ]
+    },
+    {
+      "sigle": "MAIRE DE MVOUMVOU",
+      "ordre": 70,
+      "titres_lignes": [
+        "MAIRE DE MVOUMVOU"
+      ]
+    },
+    {
+      "sigle": "MAIRIE CENTRALE",
+      "ordre": 71,
+      "titres_lignes": [
+        "MAIRIE CENTRALE"
+      ]
+    },
+    {
+      "sigle": "MAIRIE DE NGOYO",
+      "ordre": 72,
+      "titres_lignes": [
+        "MAIRIE DE NGOYO"
+      ]
+    },
+    {
+      "sigle": "MAIRIE PNR",
+      "ordre": 73,
+      "titres_lignes": [
+        "MAIRIE PNR"
+      ]
+    },
+    {
+      "sigle": "MASAH",
+      "ordre": 74,
+      "titres_lignes": [
+        "MASAH"
+      ]
+    },
+    {
+      "sigle": "MASSAH",
+      "ordre": 75,
+      "titres_lignes": [
+        "MASSAH"
+      ]
+    },
+    {
+      "sigle": "MBCPPP",
+      "ordre": 76,
+      "titres_lignes": [
+        "MBCPPP"
+      ]
+    },
+    {
+      "sigle": "MCEQSPLAAP",
+      "ordre": 77,
+      "titres_lignes": [
+        "MCEQSPLAAP"
+      ]
+    },
+    {
+      "sigle": "MCEQSPLCA",
+      "ordre": 78,
+      "titres_lignes": [
+        "MCEQSPLCA"
+      ]
+    },
+    {
+      "sigle": "MCM",
+      "ordre": 79,
+      "titres_lignes": [
+        "MCM"
+      ]
+    },
+    {
+      "sigle": "MCRE",
+      "ordre": 80,
+      "titres_lignes": [
+        "MCRE"
+      ]
+    },
+    {
+      "sigle": "MCUH",
+      "ordre": 81,
+      "titres_lignes": [
+        "MCUH"
+      ]
+    },
+    {
+      "sigle": "MDN",
+      "ordre": 82,
+      "titres_lignes": [
+        "MDN"
+      ]
+    },
+    {
+      "sigle": "MEDDBC",
+      "ordre": 83,
+      "titres_lignes": [
+        "MEDDBC"
+      ]
+    },
+    {
+      "sigle": "MEF",
+      "ordre": 84,
+      "titres_lignes": [
+        "MEF"
+      ]
+    },
+    {
+      "sigle": "MEFVN",
+      "ordre": 85,
+      "titres_lignes": [
+        "MEFVN"
+      ]
+    },
+    {
+      "sigle": "MEH",
+      "ordre": 86,
+      "titres_lignes": [
+        "MEH"
+      ]
+    },
+    {
+      "sigle": "MEPPSA",
+      "ordre": 87,
+      "titres_lignes": [
+        "MEPPSA"
+      ]
+    },
+    {
+      "sigle": "METP",
+      "ordre": 88,
+      "titres_lignes": [
+        "METP"
+      ]
+    },
+    {
+      "sigle": "MF",
+      "ordre": 89,
+      "titres_lignes": [
+        "MF"
+      ]
+    },
+    {
+      "sigle": "MFPTSS",
+      "ordre": 90,
+      "titres_lignes": [
+        "MFPTSS"
+      ]
+    },
+    {
+      "sigle": "MH",
+      "ordre": 91,
+      "titres_lignes": [
+        "MH"
+      ]
+    },
+    {
+      "sigle": "MID-IG",
+      "ordre": 92,
+      "titres_lignes": [
+        "MID-IG"
+      ]
+    },
+    {
+      "sigle": "MJDH",
+      "ordre": 93,
+      "titres_lignes": [
+        "MJDH"
+      ]
+    },
+    {
+      "sigle": "MJDHPPA",
+      "ordre": 94,
+      "titres_lignes": [
+        "MJDHPPA"
+      ]
+    },
+    {
+      "sigle": "MJEC",
+      "ordre": 95,
+      "titres_lignes": [
+        "MJEC"
+      ]
+    },
+    {
+      "sigle": "MJSECFQE",
+      "ordre": 96,
+      "titres_lignes": [
+        "MJSECFQE"
+      ]
+    },
+    {
+      "sigle": "MPFIFD",
+      "ordre": 97,
+      "titres_lignes": [
+        "MPFIFD"
+      ]
+    },
+    {
+      "sigle": "MPMEA",
+      "ordre": 98,
+      "titres_lignes": [
+        "MPMEA"
+      ]
+    },
+    {
+      "sigle": "MPSIR",
+      "ordre": 99,
+      "titres_lignes": [
+        "MPSIR"
+      ]
+    },
+    {
+      "sigle": "MPTEN",
+      "ordre": 100,
+      "titres_lignes": [
+        "MPTEN"
+      ]
+    },
+    {
+      "sigle": "MSP",
+      "ordre": 101,
+      "titres_lignes": [
+        "MSP"
+      ]
+    },
+    {
+      "sigle": "MTACMM",
+      "ordre": 102,
+      "titres_lignes": [
+        "MTACMM"
+      ]
+    },
+    {
+      "sigle": "MZES",
+      "ordre": 103,
+      "titres_lignes": [
+        "MZES"
+      ]
+    },
+    {
+      "sigle": "OMS",
+      "ordre": 104,
+      "titres_lignes": [
+        "OMS"
+      ]
+    },
+    {
+      "sigle": "ONU",
+      "ordre": 105,
+      "titres_lignes": [
+        "ONU"
+      ]
+    },
+    {
+      "sigle": "PCDK",
+      "ordre": 106,
+      "titres_lignes": [
+        "PCDK"
+      ]
+    },
+    {
+      "sigle": "PM",
+      "ordre": 107,
+      "titres_lignes": [
+        "PM"
+      ]
+    },
+    {
+      "sigle": "PREFET KOUILOU",
+      "ordre": 108,
+      "titres_lignes": [
+        "PREFET KOUILOU"
+      ]
+    },
+    {
+      "sigle": "PRESIDENT CC",
+      "ordre": 109,
+      "titres_lignes": [
+        "PRESIDENT CC"
+      ]
+    },
+    {
+      "sigle": "PRÉFET KOUILOU",
+      "ordre": 110,
+      "titres_lignes": [
+        "PRÉFET KOUILOU"
+      ]
+    },
+    {
+      "sigle": "ROYAUME MBAYA",
+      "ordre": 111,
+      "titres_lignes": [
+        "ROYAUME MBAYA"
+      ]
+    },
+    {
+      "sigle": "S/PREFET OYO",
+      "ordre": 112,
+      "titres_lignes": [
+        "S/PREFET OYO"
+      ]
+    },
+    {
+      "sigle": "SECTION FICHIER",
+      "ordre": 113,
+      "titres_lignes": [
+        "SECTION FICHIER"
+      ]
+    },
+    {
+      "sigle": "SENAT",
+      "ordre": 114,
+      "titres_lignes": [
+        "SENAT"
+      ]
+    },
+    {
+      "sigle": "SG MIN JUSTICE",
+      "ordre": 115,
+      "titres_lignes": [
+        "SG MIN JUSTICE"
+      ]
+    },
+    {
+      "sigle": "SNPC",
+      "ordre": 116,
+      "titres_lignes": [
+        "SNPC"
+      ]
+    },
+    {
+      "sigle": "SOUS-PREFET SGH",
+      "ordre": 117,
+      "titres_lignes": [
+        "SOUS-PREFET SGH"
+      ]
+    },
+    {
+      "sigle": "TGI-PNR",
+      "ordre": 118,
+      "titres_lignes": [
+        "TGI-PNR"
+      ]
+    },
+    {
+      "sigle": "VICE GOUVERNEUR BEAC",
+      "ordre": 119,
+      "titres_lignes": [
+        "VICE GOUVERNEUR BEAC"
+      ]
+    }
+  ]
 }

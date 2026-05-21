@@ -16,6 +16,7 @@ from sme_gend.repositories.grade_repository import GradeRepository
 from sme_gend.repositories.liste_generale_repository import ListeGeneraleRepository
 from sme_gend.repositories.sme_repository import SmeRepository
 from sme_gend.repositories.structure_repository import StructureRepository
+from sme_gend.services.detaches_service import STRUCTURE_CODE_DETACHE, is_structure_detache_row
 from sme_gend.padmin_present import padmin_counts_as_present
 from sme_gend.services import numerique_padmin as npa
 
@@ -72,6 +73,37 @@ def _padmin_eq(padmin: str | None, code: str) -> bool:
     return a == code or a.casefold() == code.casefold()
 
 
+def _structure_eq(structure: str | None, code: str) -> bool:
+    """Code structure liste générale — insensible à la casse (ex. DETACHE, detache)."""
+    s = (structure or "").strip()
+    if not s:
+        return False
+    c = (code or "").strip()
+    return s == c or s.casefold() == c.casefold()
+
+
+def _fmt_int(n: int) -> str:
+    return f"{n:,}".replace(",", "\u202f")
+
+
+def _subtitle_effectif_structure_detache(rows: list[ListeGeneraleRow], *, max_items: int = 8) -> str | None:
+    """Sous-titre : répartition par position administrative pour Structure = DETACHE."""
+    sel = [r for r in rows if is_structure_detache_row(r)]
+    if not sel:
+        return (
+            f"Aucun personnel avec structure « {STRUCTURE_CODE_DETACHE} »."
+        )
+    c: Counter[str] = Counter()
+    for r in sel:
+        lab = (r.position_admin or "").strip() or "(Padmin vide)"
+        c[lab] += 1
+    parts = [f"{name} : {_fmt_int(n)}" for name, n in c.most_common(max_items)]
+    out = "Padmin — " + " · ".join(parts)
+    if len(c) > max_items:
+        out += f" — +{len(c) - max_items} position(s)"
+    return out
+
+
 def _is_stage_interne(padmin: str | None) -> bool:
     x = " ".join((padmin or "").strip().split()).casefold().replace("é", "e")
     return x == "stageinterne" or x == "stage interne"
@@ -81,10 +113,6 @@ def _is_punis_row(row: ListeGeneraleRow) -> bool:
     return _padmin_eq(row.position_admin, npa.PADMIN_PUNIS) or _padmin_eq(
         row.position_admin, npa.PADMIN_PRISON_MA
     )
-
-
-def _fmt_int(n: int) -> str:
-    return f"{n:,}".replace(",", "\u202f")
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,7 +136,7 @@ def build_main_kpi_cards(
     Cartes « indicateurs principaux » : effectifs + répartition Padmin (données ListeGenerale).
     Aligné sur les codes utilisés pour la situation numérique (numerique_padmin).
     """
-    c_present = sum(1 for r in rows if padmin_counts_as_present(r.position_admin))
+    c_present = sum(1 for r in rows if padmin_counts_as_present(r.position_admin, "present"))
     c_det = sum(1 for r in rows if _padmin_eq(r.position_admin, npa.PADMIN_DETACHE))
     c_si = sum(1 for r in rows if _is_stage_interne(r.position_admin))
     c_miss = sum(1 for r in rows if _padmin_eq(r.position_admin, npa.PADMIN_MISSION))
@@ -119,8 +147,11 @@ def build_main_kpi_cards(
     c_imr = sum(1 for r in rows if _padmin_eq(r.position_admin, npa.PADMIN_INST_MR))
     c_ca = sum(1 for r in rows if _padmin_eq(r.position_admin, npa.PADMIN_CONGE_ADMIN))
     c_pun = sum(1 for r in rows if _is_punis_row(r))
+    c_struct_detache = sum(1 for r in rows if is_structure_detache_row(r))
 
     sub = f"{_fmt_int(presents)} / {_fmt_int(total)} présents" if total else None
+
+    struct_det_sub = _subtitle_effectif_structure_detache(rows)
 
     cards: list[DashboardKpiCard] = [
         DashboardKpiCard(
@@ -142,6 +173,13 @@ def build_main_kpi_cards(
             "Détaché",
             _fmt_int(c_det),
             None,
+            "info",
+        ),
+        DashboardKpiCard(
+            "structure_detache",
+            "Structure détachement",
+            _fmt_int(c_struct_detache),
+            struct_det_sub,
             "info",
         ),
         DashboardKpiCard(
@@ -252,7 +290,7 @@ def build_gain_perte_kpi_cards(
 
 @dataclass(frozen=True, slots=True)
 class DashboardSnapshot:
-    """Instantané tableau de bord. indisponibles = effectifs hors « présent » / stage interne (voir padmin_counts_as_present). grades_effectifs_detail : (grade, effectif, % total, écart vs uniforme)."""
+    """Instantané tableau de bord. ``presents`` = positions « présent » (mot-clé) uniquement ; le stage interne n’est plus inclus dans ce total (voir liste des présents). grades_effectifs_detail : (grade, effectif, % total, écart vs uniforme)."""
 
     total_effectifs: int
     presents: int
@@ -303,7 +341,7 @@ class DashboardService:
     def snapshot(self) -> DashboardSnapshot:
         rows = self._liste.fetch_all()
         total = len(rows)
-        presents = sum(1 for r in rows if padmin_counts_as_present(r.position_admin))
+        presents = sum(1 for r in rows if padmin_counts_as_present(r.position_admin, "present"))
         indispo = total - presents
         taux = (100.0 * presents / total) if total else 0.0
 

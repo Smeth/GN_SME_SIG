@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
@@ -32,6 +33,11 @@ _SANS_STRUCTURE_KEY = "(Sans structure)"
 _SANS_SUBDIVISION_KEY = "(Sans subdivision)"
 
 
+def _call_progress(cb: Callable[[int], None] | None, value: int) -> None:
+    if cb is not None:
+        cb(min(100, max(0, int(value))))
+
+
 @dataclass
 class PresentsAnomalies:
     """Présents avec données manquantes ou hors configuration de mise en page."""
@@ -47,6 +53,18 @@ class PresentsAnomalies:
     @property
     def total_orphans(self) -> int:
         return sum(len(v) for v in self.orphan_by_struct.values())
+
+
+# ─── Structures de données pré-calculées (cache d'un refresh) ────────────────
+
+@dataclass
+class _FetchedData:
+    """Résultat d'une seule lecture DB partagée pour toutes les méthodes du refresh."""
+    rows_all: list[ListeGeneraleRow]                    # toutes les lignes
+    presents: list[ListeGeneraleRow]                    # filtrées par padmin+mode
+    by_struct: dict[str, list[ListeGeneraleRow]]         # groupées par structure code
+    st_idx: dict[str, StructureRow]                      # index référentiel structures
+    flat: dict[str, str]                                  # hiérarchie subdivisions
 
 
 def _row_matches(row: ListeGeneraleRow, needle: str) -> bool:
@@ -81,7 +99,6 @@ def _ordered_subdivision_keys(
     if not subdivision_order:
         return _default_subdivision_key_order(present_keys)
     by_key = set(present_keys)
-    # Casse Access / saisie JSON : associer une clé normalisée à la valeur réelle des effectifs
     fold_to_actual: dict[str, str] = {}
     for k in present_keys:
         f = k.casefold()
@@ -123,19 +140,50 @@ class ListePresentService:
         self._liste = ListeGeneraleRepository(settings)
         self._structures = StructureRepository(settings)
 
-    def _structure_index(self) -> dict[str, StructureRow]:
-        return {s.code: s for s in self._structures.fetch_all()}
+    # ─── Lecture DB unique (optimisée) ────────────────────────────────────────
 
-    def _presents_by_structure(self, search_filter: str | None = None) -> dict[str, list[ListeGeneraleRow]]:
-        presents = [r for r in self._liste.fetch_all() if padmin_counts_as_present(r.position_admin)]
+    def _fetch_all_data(
+        self,
+        *,
+        search_filter: str | None = None,
+        presences_mode: str = "present",
+        on_progress: Callable[[int], None] | None = None,
+    ) -> _FetchedData:
+        """
+        **Lecture unique** : une seule requête ListeGenerale + une seule requête TabStructure
+        + une seule requête SubdivisionRepository. Toutes les méthodes du refresh partagent
+        ce résultat pour éviter 3–4 aller-retours ODBC.
+
+        ``on_progress`` reçoit des pourcentages **locaux** 0–100 (phase lecture seule).
+        """
+        _call_progress(on_progress, 5)
+        rows_all = self._liste.fetch_all()
+        _call_progress(on_progress, 22)
+        presents = [r for r in rows_all if padmin_counts_as_present(r.position_admin, presences_mode)]
+        _call_progress(on_progress, 38)
         needle = (search_filter or "").strip().lower()
-        if needle:
-            presents = [r for r in presents if _row_matches(r, needle)]
+        filtered = [r for r in presents if _row_matches(r, needle)] if needle else presents
+        _call_progress(on_progress, 48)
+
         by_struct: dict[str, list[ListeGeneraleRow]] = defaultdict(list)
-        for row in presents:
+        for row in filtered:
             key = (row.structure or "").strip() or _SANS_STRUCTURE_KEY
             by_struct[key].append(row)
-        return dict(by_struct)
+        _call_progress(on_progress, 58)
+
+        st_idx = {s.code: s for s in self._structures.fetch_all()}
+        _call_progress(on_progress, 78)
+        flat = SubdivisionRepository(self._settings).fetch_flat_hierarchy()
+        _call_progress(on_progress, 100)
+        return _FetchedData(
+            rows_all=rows_all,
+            presents=presents,
+            by_struct=dict(by_struct),
+            st_idx=st_idx,
+            flat=flat,
+        )
+
+    # ─── Helpers sections / subdivisions ──────────────────────────────────────
 
     def _blocks_for_rows(
         self,
@@ -159,18 +207,34 @@ class ListePresentService:
             blocks.append((sub, lst))
         return blocks
 
-    def collect_anomalies(self, layout: ListeLayoutConfig | None = None) -> PresentsAnomalies:
-        """Détecte les présents avec données manquantes ou hors configuration de mise en page."""
+    # ─── API publique ──────────────────────────────────────────────────────────
+
+    def collect_anomalies(
+        self,
+        layout: ListeLayoutConfig | None = None,
+        *,
+        fetched: _FetchedData | None = None,
+        presences_mode: str = "present",
+    ) -> PresentsAnomalies:
+        """Détecte les présents avec données manquantes ou hors config de mise en page."""
         if layout is None:
             layout = self._layout_config.load()
         layout_codes = {sec.structure_code.strip() for sec in layout.sections}
-        by_struct = self._presents_by_structure()
+
+        if fetched is None:
+            fetched = self._fetch_all_data(presences_mode=presences_mode)
+
+        # Pour les anomalies on travaille sur TOUS les présents (sans filtre texte)
+        unfiltered_by_struct: dict[str, list[ListeGeneraleRow]] = defaultdict(list)
+        for r in fetched.presents:
+            key = (r.structure or "").strip() or _SANS_STRUCTURE_KEY
+            unfiltered_by_struct[key].append(r)
 
         sans_subdivision: list[ListeGeneraleRow] = []
         sans_structure: list[ListeGeneraleRow] = []
         orphan_by_struct: dict[str, list[ListeGeneraleRow]] = {}
 
-        for code, rows in by_struct.items():
+        for code, rows in unfiltered_by_struct.items():
             is_sans_struct = code == _SANS_STRUCTURE_KEY
             is_orphan = not is_sans_struct and code not in layout_codes
             for r in rows:
@@ -189,22 +253,22 @@ class ListePresentService:
         *,
         search_filter: str | None = None,
         include_orphans: bool = False,
-    ) -> list[
-        tuple[str, str, str, list[tuple[str, list[ListeGeneraleRow]]]]
-    ]:
+        presences_mode: str = "present",
+        fetched: _FetchedData | None = None,
+    ) -> list[tuple[str, str, str, list[tuple[str, list[ListeGeneraleRow]]]]]:
         """
         Sections ordonnées selon la config (titres, subdivisions).
         Retourne : (title_main, title_sub, structure_code, blocks).
-        Données : table Access ListeGenerale, filtre présents / stage interne (Padmin) ;
-        `search_filter` restreint l’aperçu / export aux lignes correspondantes.
-        Si `include_orphans` est True, les personnes dont la structure est absente de la
-        configuration apparaissent à la fin dans des sections marquées ⚠.
         """
         if layout is None:
             layout = self._layout_config.load()
+        if fetched is None:
+            fetched = self._fetch_all_data(
+                search_filter=search_filter, presences_mode=presences_mode
+            )
 
-        by_struct = self._presents_by_structure(search_filter)
-        st_idx = self._structure_index()
+        by_struct = fetched.by_struct
+        st_idx = fetched.st_idx
         out: list[tuple[str, str, str, list[tuple[str, list[ListeGeneraleRow]]]]] = []
         covered_codes: set[str] = set()
 
@@ -243,40 +307,110 @@ class ListePresentService:
 
         return out
 
-    def build_preview_html(self, search_filter: str | None = None) -> str:
-        """Aperçu HTML aligné sur la même donnée que l’export (ordre config)."""
+    def build_preview_html(
+        self,
+        search_filter: str | None = None,
+        presences_mode: str = "present",
+        on_progress: Callable[[int], None] | None = None,
+    ) -> str:
+        """Aperçu HTML aligné sur la même donnée que l'export.
+        Une seule lecture DB pour sections + anomalies + hiérarchie subdivisions.
+
+        ``on_progress`` : pourcentage global 0–100 pour feedback UI (optionnel).
+        """
+        def pct(p: int) -> None:
+            _call_progress(on_progress, p)
+
+        pct(2)
         layout = self._layout_config.load()
-        sections = self.build_sections_data(layout, search_filter=search_filter, include_orphans=True)
-        anomalies = self.collect_anomalies(layout)
-        flat = SubdivisionRepository(self._settings).fetch_flat_hierarchy()
+        pct(5)
+
+        def fetch_pct(local: int) -> None:
+            """Mappe la phase lecture (0–100 locale) vers la plage 5–72 % globale."""
+            pct(5 + (local * 67 // 100))
+
+        fetched = self._fetch_all_data(
+            search_filter=search_filter,
+            presences_mode=presences_mode,
+            on_progress=fetch_pct if on_progress else None,
+        )
+        pct(74)
+
+        sections = self.build_sections_data(
+            layout,
+            search_filter=search_filter,
+            include_orphans=True,
+            presences_mode=presences_mode,
+            fetched=fetched,
+        )
+        pct(80)
+        anomalies = self.collect_anomalies(layout, fetched=fetched, presences_mode=presences_mode)
+        flat = fetched.flat  # déjà chargé, pas de 3e requête
         ncols = len(RESULTAT_HEADERS)
+        pct(82)
+
+        # ── Badge de mode ─────────────────────────────────────────────────────
+        _mode_labels = {
+            "present": "Présents uniquement",
+            "stage_interne": "Stage interne uniquement",
+            "les_deux": "Présents + Stage interne",
+        }
+        mode_label = _mode_labels.get(presences_mode, presences_mode)
 
         css = """
-        body { margin: 12px; font-family: Calibri, "Segoe UI", Arial, sans-serif; font-size: 11px; background: #fff; }
+        body { margin: 12px; font-family: Calibri, "Segoe UI", Arial, sans-serif;
+               font-size: 11px; background: #fff; }
         table.maquette { border-collapse: collapse; width: 100%; table-layout: fixed; }
-        .title { font-size: 16pt; font-weight: bold; text-align: center; padding: 8px; border: 1px solid #000; background: #fff; }
-        .hdr th { background: #d9e2f3; font-weight: bold; border: 1px solid #000; padding: 4px 3px; text-align: center; vertical-align: middle; }
-        .sec1 td { background: #e8e8e8; font-weight: bold; text-align: center; }
-        .sec1-orphan td { background: #f8d7da; font-weight: bold; text-align: center; color: #842029; }
-        .sec2 td { background: #f2f2f2; font-weight: bold; text-align: center; font-size: 11px; }
-        .subdiv td { background: #e6f0ff; font-style: italic; text-align: left; padding-left: 8px; }
-        .subdiv-warn td { background: #fff3cd; font-style: italic; text-align: left; padding-left: 8px; color: #856404; }
-        .data td { border: 1px solid #808080; padding: 2px 4px; vertical-align: top; }
-        .data tr:nth-child(even) td { background: #fafafa; }
-        .anomaly-box td { background: #fff3cd; border: 2px solid #f0ad4e; padding: 8px 12px; font-size: 11px; }
+        .title { font-size: 16pt; font-weight: bold; text-align: center;
+                 padding: 8px; border: 1px solid #000; background: #fff; }
+        .mode-badge { font-size: 9pt; font-weight: normal; float: right;
+                      background: #dbeafe; color: #1e3a5f; padding: 2px 8px;
+                      border-radius: 4px; border: 1px solid #93c5fd; }
+        .hdr th { background: #d9e2f3; font-weight: bold; border: 1px solid #000;
+                  padding: 4px 3px; text-align: center; vertical-align: middle; }
+        .sec1 td  { background: #bdd7ee; font-weight: bold; border: 1px solid #000;
+                    padding: 4px 6px; }
+        .sec1-orphan td { background: #f8d7da; font-weight: bold; border: 1px solid #842029;
+                          padding: 4px 6px; color: #842029; }
+        .sec2 td  { background: #dce6f1; font-weight: bold; text-align: center;
+                    border: 1px solid #000; font-size: 11px; padding: 2px 4px; }
+        .subdiv td { background: #e6f0ff; font-style: italic;
+                     border: 1px solid #b0c4de; padding: 2px 8px; }
+        .subdiv-warn td { background: #fff3cd; font-style: italic;
+                          border: 1px solid #f0ad4e; padding: 2px 8px; color: #856404; }
+        .data-even td { background: #ffffff; border: 1px solid #9e9e9e;
+                        padding: 2px 4px; vertical-align: top; }
+        .data-odd  td { background: #f5f8ff; border: 1px solid #9e9e9e;
+                        padding: 2px 4px; vertical-align: top; }
+        .anomaly-box td { background: #fff3cd; border: 2px solid #f0ad4e;
+                          padding: 8px 12px; font-size: 11px; }
+        .total-row td { background: #d9e2f3; font-weight: bold; text-align: center;
+                        border: 2px solid #000; padding: 8px; font-size: 12pt; }
+        .no-data td { text-align: center; padding: 40px; color: #888;
+                      font-style: italic; font-size: 13px; }
+        @media print {
+            .anomaly-box td { background: #ffe !important; }
+            .sec1 td, .sec1-orphan td { background: #ccc !important; }
+            .sec2 td { background: #eee !important; }
+        }
         """
 
         parts: list[str] = [
-            "<!DOCTYPE html><html><head><meta charset=’utf-8’><style>",
+            "<!DOCTYPE html><html><head><meta charset='utf-8'><style>",
             css,
             "</style></head><body>",
-            "<table class=’maquette’>",
-            f"<tr><td class=’title’ colspan=’{ncols}’>{html.escape(RESULTAT_DOCUMENT_TITLE)}</td></tr>",
-            f"<tr><td colspan=’{ncols}’ style=’height:8px;border:none;’></td></tr>",
+            "<table class='maquette'>",
+            (
+                f"<tr><td class='title' colspan='{ncols}'>"
+                f"{html.escape(RESULTAT_DOCUMENT_TITLE)}"
+                f"<span class='mode-badge'>{html.escape(mode_label)}</span>"
+                f"</td></tr>"
+            ),
+            f"<tr><td colspan='{ncols}' style='height:8px;border:none;'></td></tr>",
         ]
 
         if anomalies.has_issues:
-            parts.append(f"<tr class=’anomaly-box’><td colspan=’{ncols}’>")
+            parts.append(f"<tr class='anomaly-box'><td colspan='{ncols}'>")
             parts.append("<b>&#9888; Anomalies détectées</b><br>")
             if anomalies.sans_structure:
                 n = len(anomalies.sans_structure)
@@ -288,48 +422,63 @@ class ListePresentService:
                     f" : {html.escape(noms)}<br>"
                 )
             if anomalies.orphan_by_struct:
-                total = anomalies.total_orphans
+                total_orphans = anomalies.total_orphans
                 codes = ", ".join(sorted(anomalies.orphan_by_struct.keys()))
                 parts.append(
-                    f"&bull; <b>{total} personne(s) dans des structures hors configuration</b>"
+                    f"&bull; <b>{total_orphans} personne(s) dans des structures hors configuration</b>"
                     f" ({html.escape(codes)}) — affichées en fin de liste (fond rouge)<br>"
                 )
             if anomalies.sans_subdivision:
                 n = len(anomalies.sans_subdivision)
                 parts.append(
-                    f"&bull; <b>{n} personne(s) sans subdivision d’arme</b>"
+                    f"&bull; <b>{n} personne(s) sans subdivision d'arme</b>"
                     f" — apparaissent sous « (Sans subdivision) » (fond jaune)<br>"
                 )
             parts.append("</td></tr>")
-            parts.append(f"<tr><td colspan=’{ncols}’ style=’height:4px;border:none;’></td></tr>")
+            parts.append(f"<tr><td colspan='{ncols}' style='height:4px;border:none;'></td></tr>")
 
-        parts += ["<tr class=’hdr’>"]
+        parts += ["<tr class='hdr'>"]
         for label, cspan in RESULTAT_HEADER_HTML:
-            parts.append(f"<th colspan=’{cspan}’>{html.escape(label)}</th>")
+            parts.append(f"<th colspan='{cspan}'>{html.escape(label)}</th>")
         parts.append("</tr>")
 
         n_global = 0
-        for title_main, title_sub, _code, blocks in sections:
+        n_sections = len(sections)
+        for sec_idx, (title_main, title_sub, _code, blocks) in enumerate(sections):
+            n_section = sum(len(people) for _, people in blocks)
             is_orphan_sec = title_main.startswith("⚠")
             sec1_cls = "sec1-orphan" if is_orphan_sec else "sec1"
-            parts.append(
-                f"<tr class=’{sec1_cls}’><td colspan=’{ncols}’>{html.escape(title_main)}</td></tr>"
+            count_badge = (
+                f"<span style='float:right;font-size:9pt;font-weight:normal;"
+                f"background:rgba(0,0,0,.10);padding:1px 7px;border-radius:3px;'>"
+                f"{n_section}&nbsp;présent(s)</span>"
             )
             parts.append(
-                f"<tr class=’sec2’><td colspan=’{ncols}’>{html.escape(title_sub)}</td></tr>"
+                f"<tr class='{sec1_cls}'><td colspan='{ncols}'>"
+                f"{html.escape(title_main)}{count_badge}</td></tr>"
+            )
+            parts.append(
+                f"<tr class='sec2'><td colspan='{ncols}'>{html.escape(title_sub)}</td></tr>"
             )
             for sub_label, personnes in blocks:
                 is_nosub = sub_label == _SANS_SUBDIVISION_KEY
                 sub_disp = format_subdivision_arme_display(sub_label, flat)
                 subdiv_cls = "subdiv-warn" if is_nosub else "subdiv"
+                n_sub = len(personnes)
+                sub_badge = (
+                    f"<span style='float:right;font-size:9pt;opacity:.65;'>"
+                    f"{n_sub}&nbsp;pers.</span>"
+                )
                 parts.append(
-                    f"<tr class=’{subdiv_cls}’><td colspan=’{ncols}’>{html.escape(sub_disp)}</td></tr>"
+                    f"<tr class='{subdiv_cls}'><td colspan='{ncols}'>"
+                    f"{html.escape(sub_disp)}{sub_badge}</td></tr>"
                 )
                 n_interne = 0
                 for r in personnes:
                     n_global += 1
                     n_interne += 1
-                    parts.append("<tr class=’data’>")
+                    row_cls = "data-odd" if n_global % 2 else "data-even"
+                    parts.append(f"<tr class='{row_cls}'>")
                     sub_cell = format_subdivision_arme_display(r.subdivision_arme, flat)
                     for cell in row_to_resultat_cells(
                         r,
@@ -340,16 +489,49 @@ class ListePresentService:
                         parts.append(f"<td>{html.escape(cell)}</td>")
                     parts.append("</tr>")
 
+            if on_progress is not None and n_sections > 0:
+                pct(82 + (sec_idx + 1) * 17 // n_sections)
+
+        if n_global == 0:
+            parts.append(
+                f"<tr class='no-data'><td colspan='{ncols}'>"
+                "Aucun présent dans les données actuelles.<br>"
+                "<small>Vérifiez les positions administratives (colonne Padmin) "
+                "et la configuration de mise en page.</small>"
+                "</td></tr>"
+            )
+        else:
+            parts.append(
+                f"<tr class='total-row'><td colspan='{ncols}'>"
+                f"TOTAL GÉNÉRAL — {n_global} présent(s)"
+                f"</td></tr>"
+            )
+
         parts.append("</table></body></html>")
+        pct(100)
         return "".join(parts)
 
-    def export_excel(self, destination: Path, search_filter: str | None = None) -> None:
+    def export_excel(
+        self,
+        destination: Path,
+        search_filter: str | None = None,
+        presences_mode: str = "present",
+    ) -> None:
         """Export : fidèle à la maquette si `resultat.xlsx` + `liste_present_layout.json` disponibles."""
         dest = Path(destination)
         layout = self._layout_config.load()
-        sections = self.build_sections_data(layout, search_filter=search_filter)
+        fetched = self._fetch_all_data(
+            search_filter=search_filter,
+            presences_mode=presences_mode,
+        )
+        sections = self.build_sections_data(
+            layout,
+            search_filter=search_filter,
+            presences_mode=presences_mode,
+            fetched=fetched,
+        )
         tpl = self._settings.template_liste_present_path
-        flat = SubdivisionRepository(self._settings).fetch_flat_hierarchy()
+        flat = fetched.flat
         sections_disp = [
             (
                 title_main,

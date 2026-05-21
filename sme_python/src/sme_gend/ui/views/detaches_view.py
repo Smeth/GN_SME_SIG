@@ -6,15 +6,21 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
+
+from sme_gend.models.detaches_file_config import DetachesStructureEntry
 
 from sme_gend.config.settings import Settings, user_paths_config_file_hint
 from sme_gend.services.detaches_config_service import DetachesConfigService
@@ -43,6 +49,13 @@ class DetachesView(QWidget):
         self._btn_refresh = QPushButton("Actualiser l'aperçu")
         self._btn_refresh.clicked.connect(lambda: self._refresh(silent=False))
 
+        self._btn_quick_sigle = QPushButton("Nouveau sigle (config)…")
+        self._btn_quick_sigle.setToolTip(
+            "Ajoute une entrée dans detaches_config.json (sigle = subdivision arme, titres = en-têtes Excel). "
+            "Enregistre puis régénérez l'aperçu ou le fichier officiel."
+        )
+        self._btn_quick_sigle.clicked.connect(self._quick_add_sigle_config)
+
         self._btn_export = QPushButton("Exporter vers Excel…")
         self._btn_export.setToolTip(
             "Enregistre un classeur : copie du fichier officiel DETACHES.xlsx (si configuré) "
@@ -70,11 +83,17 @@ class DetachesView(QWidget):
         self._btn_official_sme.clicked.connect(self._update_official_sme_only)
 
         self._info = QLabel(
-            "<b>Détachés</b> — Les personnels en position <b>Détaché</b> dans la base configurée (SQLite ou Access) constituent la "
-            "référence pour le fichier officiel <code>DETACHES.xlsx</code>. "
-            "Le <b>sigle</b> affiché correspond à la colonne <b>subdivision arme</b>. "
-            "Configurez les titres et sigles sous <b>Référentiels → Config. fichier DETACHES</b>. "
-            "<b>Fichier → Chemins…</b> : indiquez le <code>DETACHES.xlsx</code> officiel, puis utilisez "
+            "<b>Détachés</b> — Périmètre : personnels avec <b>position administrative « Détaché »</b> "
+            "<i>ou</i> colonne <b>Structure</b> = <code>DETACHE</code> (casse ignorée). "
+            "Les écarts (<code>DETACHE</code> sans Padmin détaché) apparaissent en fin de liste avec une colonne "
+            "<b>Contrôle</b> dans l’export <code>SME_Detaches</code>. "
+            "Le <b>sigle</b> affiché correspond à la <b>subdivision arme</b> (lieu de détachement dans la feuille Excel). "
+            "Un tableau <b>Référentiels → Config. fichier DETACHES</b> lie chaque <b>sigle</b> "
+            "(subdivision arme en base) aux <b>titres</b> imprimés dans la feuille Excel DETACHE. "
+            "Bouton <b>Nouveau sigle (config)</b> pour ajouter une ligne sans ouvrir tout le référentiel. "
+            "Les <b>nouveaux détachés</b> (par rapport au mois précédent) s’affichent en bas de l’aperçu "
+            "si une archive existe dans <code>sme_archives/</code> pour ce mois. "
+            "<b>Fichier → Chemins…</b> : indiquez le <code>DETACHES.xlsx</code> officiel, puis "
             "<b>Mettre à jour le fichier officiel</b> pour enregistrer sans choisir le dossier à chaque fois."
         )
         self._info.setWordWrap(True)
@@ -87,6 +106,7 @@ class DetachesView(QWidget):
 
         bar = QHBoxLayout()
         bar.addWidget(self._btn_refresh)
+        bar.addWidget(self._btn_quick_sigle)
         bar.addWidget(self._btn_export)
         bar.addWidget(self._btn_export_full)
         bar.addStretch()
@@ -113,6 +133,68 @@ class DetachesView(QWidget):
 
     def mark_dirty(self) -> None:
         self._loaded = False
+
+    def _quick_add_sigle_config(self) -> None:
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Nouveau sigle — configuration DETACHES")
+        dlg.setMinimumWidth(420)
+        le_sigle = QLineEdit()
+        le_sigle.setPlaceholderText("Ex. MAIRIE PNR (subdivision arme en base, sera normalisé en majuscules)")
+        le_t1 = QLineEdit()
+        le_t1.setPlaceholderText("Titre ligne 1 (ex. nom complet dans Excel)")
+        le_t2 = QLineEdit()
+        le_t2.setPlaceholderText("Titre ligne 2 (optionnel)")
+        le_t3 = QLineEdit()
+        le_t3.setPlaceholderText("Titre ligne 3 (optionnel)")
+        form = QFormLayout()
+        form.addRow("Sigle (subdivision arme) :", le_sigle)
+        form.addRow("Titre 1 :", le_t1)
+        form.addRow("Titre 2 :", le_t2)
+        form.addRow("Titre 3 :", le_t3)
+        bb = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+        )
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        v = QVBoxLayout(dlg)
+        v.addLayout(form)
+        v.addWidget(bb)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        raw = le_sigle.text().strip()
+        if not raw:
+            QMessageBox.warning(self, "Sigle", "Indiquez le sigle (subdivision arme).")
+            return
+        ent_norm = DetachesStructureEntry(sigle=raw, ordre=0, titres_lignes=[])
+        sig_key = ent_norm.sigle
+        titres: list[str] = []
+        for le in (le_t1, le_t2, le_t3):
+            t = le.text().strip()
+            if t:
+                titres.append(t)
+        if not titres:
+            titres = [sig_key]
+        cfg = self._detaches_cfg.load()
+        known = {e.sigle for e in cfg.structures}
+        if sig_key in known:
+            QMessageBox.warning(self, "Sigle", f"Le sigle « {sig_key} » existe déjà dans la configuration.")
+            return
+        max_ord = max((e.ordre for e in cfg.structures), default=-1)
+        cfg.structures.append(
+            DetachesStructureEntry(sigle=sig_key, ordre=max_ord + 1, titres_lignes=titres),
+        )
+        try:
+            self._detaches_cfg.save(cfg)
+        except OSError as e:
+            QMessageBox.critical(self, "Enregistrement", str(e))
+            return
+        QMessageBox.information(
+            self,
+            "Configuration",
+            f"Sigle « {sig_key} » ajouté dans :\n{self._detaches_cfg.path()}\n\n"
+            "Actualisez l'aperçu ou régénérez le fichier Excel pour appliquer.",
+        )
+        self._do_refresh()
 
     def apply_runtime_settings(self, settings: Settings) -> None:
         self._settings = settings
@@ -280,7 +362,7 @@ class DetachesView(QWidget):
             return
         msg = (
             f"Fichier enregistré :\n{dest}\n\n"
-            "Feuille « SME_Detaches » : effectifs « Détaché » depuis la base."
+            "Feuille « SME_Detaches » : périmètre détachés (Padmin et/ou structure) depuis la base."
         )
         if use_tpl:
             msg += " Les autres feuilles du gabarit officiel sont conservées."

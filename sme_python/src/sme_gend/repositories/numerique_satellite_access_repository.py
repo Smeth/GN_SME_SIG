@@ -87,6 +87,33 @@ class AccessNumeriqueSatelliteRepository:
                 )
         return out
 
+    def upsert_malade(self, person_id: str, detail: MaladeDetail) -> None:
+        kid = _norm_id(person_id)
+        if not kid:
+            raise ValueError("Identifiant TabMalade vide.")
+        with self._factory.connect() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM TabMalade WHERE ID = ?", (kid,))
+            n = int(cur.fetchone()[0])
+            if n:
+                cur.execute(
+                    "UPDATE TabMalade SET DateConstat=?, Pathologie=?, Obs=? WHERE ID=?",
+                    (detail.date_constat, detail.pathologie, detail.obs, kid),
+                )
+            else:
+                cur.execute(
+                    "INSERT INTO TabMalade (ID, DateConstat, Pathologie, Obs) VALUES (?,?,?,?)",
+                    (kid, detail.date_constat, detail.pathologie, detail.obs),
+                )
+
+    def delete_malade(self, person_id: str) -> None:
+        kid = _norm_id(person_id)
+        if not kid:
+            return
+        with self._factory.connect() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM TabMalade WHERE ID = ?", (kid,))
+
 
 def _norm_id(v: object) -> str:
     if v is None:

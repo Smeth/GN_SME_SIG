@@ -14,7 +14,7 @@ def _norm(s: str | None) -> str:
 
 def is_present_strict(row: ListeGeneraleRow) -> bool:
     """Prédicat rubrique « présents » (matrice NUMERIQUE, blocs dérivés)."""
-    return padmin_counts_as_present(row.position_admin)
+    return padmin_counts_as_present(row.position_admin, "present")
 
 
 def _eq_padmin(row: ListeGeneraleRow, code: str) -> bool:

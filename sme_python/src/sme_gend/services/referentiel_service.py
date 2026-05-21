@@ -95,7 +95,7 @@ class ReferentielService:
                 pass
         from sme_gend.padmin_present import padmin_counts_as_present
         return [
-            PadminRefRow(libelle=v, compte_comme_present=padmin_counts_as_present(v), ordre_tri=None)
+            PadminRefRow(libelle=v, compte_comme_present=padmin_counts_as_present(v, "present"), ordre_tri=None)
             for v in self._liste_generale.fetch_distinct_padmin()
         ]
 

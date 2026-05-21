@@ -145,7 +145,7 @@ class LayoutConfigService:
         counts: dict[str, int] = {}
         try:
             for r in self._liste_generale.fetch_all():
-                if padmin_counts_as_present(r.position_admin):
+                if padmin_counts_as_present(r.position_admin, "present"):
                     code = (r.structure or "").strip()
                     if code:
                         counts[code] = counts.get(code, 0) + 1

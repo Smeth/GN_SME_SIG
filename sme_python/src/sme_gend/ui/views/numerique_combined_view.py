@@ -157,7 +157,12 @@ class NumeriqueCombinedView(QWidget):
         dest_p = Path(dest)
 
         def _work() -> bool:
-            export_numerique_workbook(self._settings, tpl, dest_p)
+            export_numerique_workbook(
+                self._preview.liste_settings,
+                tpl,
+                dest_p,
+                gain_perte_settings=self._preview.gain_perte_settings,
+            )
             return True
 
         if run_with_progress(self, "Export Excel", "Génération du classeur…", _work) is None:

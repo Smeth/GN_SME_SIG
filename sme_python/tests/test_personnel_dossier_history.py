@@ -15,7 +15,7 @@ def test_build_audit_timeline_splits_career_and_profile(monkeypatch, tmp_path) -
         "}}\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(h, "personnel_audit_file_path", lambda: p)
+    monkeypatch.setattr(h, "_all_audit_files", lambda: [p])
     entries = h.build_audit_timeline("42")
     assert len(entries) == 1
     assert "grade" in entries[0].career_changes

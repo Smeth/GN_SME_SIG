@@ -16,6 +16,11 @@ def _ym_to_cdsme(ym: str) -> str | None:
     return None
 
 
+def cdsme_from_mois_ym(ym: str) -> str | None:
+    """Public pour l’UI : mois ``YYYY-MM`` → code ``Cdsme`` TabGainPerte."""
+    return _ym_to_cdsme(ym)
+
+
 class GainPerteRepository:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
@@ -42,3 +47,18 @@ class GainPerteRepository:
         if not cdsme:
             return []
         return self._impl.fetch_for_cdsme(cdsme)
+
+    def insert_row(self, row: GainPerteRow) -> None:
+        self._impl.insert_row(row)
+
+    def update_row(
+        self,
+        row: GainPerteRow,
+        *,
+        where_id: str,
+        where_cdsme: str | None,
+    ) -> None:
+        self._impl.update_row(row, where_id=where_id, where_cdsme=where_cdsme)
+
+    def delete_row(self, row_id: str, cdsme: str | None) -> None:
+        self._impl.delete_row(row_id, cdsme)

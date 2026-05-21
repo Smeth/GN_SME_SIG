@@ -135,8 +135,10 @@ class SmeWorkflowPanel(QFrame):
         sw_lay = QVBoxLayout(self._sme_workflow)
         sw_lay.setSpacing(10)
         sw_hint = QLabel(
-            "Définissez ici le <b>mois de travail</b> (tracé dans l'audit des fiches). "
-            "<b>Clôturer</b> fige le mois dans la base et crée des copies d'archive ; "
+            "<b>Workflow léger</b> — 1) Contrôles (listes, numériques, SME) · "
+            "2) <b>Clôturer</b> : archives locales + TabSme (assistant en deux temps : confirmation puis détails) · "
+            "3) Exports officiels hors outil si besoin. "
+            "Définissez le <b>mois de travail</b> (tracé dans l'audit des fiches). "
             "<b>Réouvrir (exception)</b> autorise des corrections après clôture, avec motif. "
             "Chemins Access / SQLite : menu Fichier ou section <b>Maintenance & fichiers</b>."
         )
@@ -269,8 +271,11 @@ class SmeWorkflowPanel(QFrame):
     # ── Internal helpers ──────────────────────────────────────────────────────
 
     def _refresh_shell_period_banner(self) -> None:
+        """Rebinde la source de données du mois actif et rafraîchit toute l'UI."""
         win = self.window()
-        if hasattr(win, "_refresh_period_banner"):
+        if hasattr(win, "refresh_for_month_change"):
+            getattr(win, "refresh_for_month_change")()
+        elif hasattr(win, "_refresh_period_banner"):
             getattr(win, "_refresh_period_banner")()
 
     def _trigger_after_workflow(self) -> None:
@@ -385,6 +390,14 @@ class SmeWorkflowPanel(QFrame):
         self._refresh_shell_period_banner()
 
     def _on_sme_cloture_dialog(self) -> None:
+        if not confirm_yes_no(
+            self,
+            "Avant la clôture",
+            "La clôture fige le mois dans TabSme et crée des copies d'archive sous sme_archives/.\n\n"
+            "Confirmez que les contrôles sont terminés et que vous souhaitez ouvrir l'assistant de clôture.",
+            default_no=True,
+        ):
+            return
         ctx0 = load_sme_context()
         dlg = QDialog(self)
         dlg.setObjectName("SmeClotureDialog")

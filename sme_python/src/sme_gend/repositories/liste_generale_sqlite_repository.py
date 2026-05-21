@@ -67,25 +67,9 @@ class SqliteListeGeneraleRepository:
             return [self._row_to_liste(r) for r in cur.fetchall()]
 
     def fetch_presents(self) -> list[ListeGeneraleRow]:
-        """Personnels présents — utilise tab_padmin si renseigné, sinon heuristique."""
-        with self._connect() as conn:
-            cur = conn.cursor()
-            try:
-                cur.execute(
-                    "SELECT COUNT(*) FROM tab_padmin WHERE compte_comme_present = 1"
-                )
-                if cur.fetchone()[0] > 0:
-                    cur.execute(
-                        f"{_SELECT_ROW.strip()} "
-                        "JOIN tab_padmin ON trim(liste_generale.padmin) = trim(tab_padmin.libelle) "
-                        "WHERE tab_padmin.compte_comme_present = 1 "
-                        "ORDER BY ordre_tri, id"
-                    )
-                    return [self._row_to_liste(r) for r in cur.fetchall()]
-            except Exception:
-                pass
+        """Personnels comptés comme « présents » : uniquement Padmin « présent » (pas stage interne, etc.)."""
         rows = self.fetch_all()
-        return [r for r in rows if padmin_counts_as_present(r.position_admin)]
+        return [r for r in rows if padmin_counts_as_present(r.position_admin, "present")]
 
     def fetch_distinct_padmin(self) -> list[str]:
         q = """

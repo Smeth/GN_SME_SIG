@@ -18,7 +18,7 @@ from PySide6.QtCore import (
     Qt,
     Signal,
 )
-from PySide6.QtGui import QColor, QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QKeySequence, QShortcut, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -254,7 +254,11 @@ class _EditionModel(QAbstractTableModel):
             if not self._rows or not (0 <= index.row() < len(self._rows)):
                 return False
             row = self._rows[index.row()]
-            if int(value) == int(Qt.CheckState.Checked):
+            checked = (
+                value == Qt.CheckState.Checked
+                or value == Qt.CheckState.Checked.value
+            )
+            if checked:
                 self._checked_ids.add(row.id)
             else:
                 self._checked_ids.discard(row.id)
@@ -770,6 +774,7 @@ class EditionSmeView(QWidget):
         super().__init__(parent)
         self._settings = settings
         self._find_replace_dlg: _FindReplaceDialog | None = None
+        self._month_reload_pending = False
 
         title = QLabel("Edition SME — Mise à jour rapide")
         title.setObjectName("dashTitle")
@@ -1012,6 +1017,20 @@ class EditionSmeView(QWidget):
         lay.addWidget(self._table, stretch=1)
         lay.addLayout(action_bar)
 
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
+        super().showEvent(event)
+        if event.spontaneous():
+            return
+        if self._month_reload_pending or self._model.rowCount() == 0:
+            self._month_reload_pending = False
+            self.load_data()
+
+    def mark_dirty(self) -> None:
+        """Changement de mois actif : recharger depuis la source (base live ou archive)."""
+        self._month_reload_pending = True
+        if self.isVisible():
+            self.load_data()
+
     # ── Settings ──────────────────────────────────────────────────────────────
 
     def rebind_settings(self, settings: Settings) -> None:
@@ -1149,6 +1168,7 @@ class EditionSmeView(QWidget):
 
         repo, rows, grades, structures, subarmes, padmins = result
         self._model.load(rows, repo, grades, structures, subarmes, padmins)
+        self._month_reload_pending = False
         self._populate_filter_combos(rows, grades, structures, padmins)
         # Sync proxy filter state with combos (combos were reset to "(Tous)" with signals blocked)
         self._proxy.set_structure("")

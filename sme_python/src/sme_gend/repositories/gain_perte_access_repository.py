@@ -53,3 +53,57 @@ class AccessGainPerteRepository:
                 return [_row(r) for r in cur.fetchall()]
         except Exception:
             return []
+
+    def insert_row(self, row: GainPerteRow) -> None:
+        with self._conn.connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO TabGainPerte (ID, Grade, nom, Objet, Cdsme, Observ) VALUES (?,?,?,?,?,?)",
+                (
+                    str(row.id or "").strip(),
+                    row.grade,
+                    row.nom,
+                    row.objet,
+                    row.cdsme,
+                    row.observ,
+                ),
+            )
+
+    def update_row(
+        self,
+        row: GainPerteRow,
+        *,
+        where_id: str,
+        where_cdsme: str | None,
+    ) -> None:
+        w_id = str(where_id or "").strip()
+        w_cd = (where_cdsme or "").strip()
+        with self._conn.connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE TabGainPerte
+                SET ID = ?, Grade = ?, nom = ?, Objet = ?, Cdsme = ?, Observ = ?
+                WHERE ID = ? AND Trim(IIf(IsNull(Cdsme), '', CStr(Cdsme))) = ?
+                """,
+                (
+                    str(row.id or "").strip(),
+                    row.grade,
+                    row.nom,
+                    row.objet,
+                    row.cdsme,
+                    row.observ,
+                    w_id,
+                    w_cd,
+                ),
+            )
+
+    def delete_row(self, row_id: str, cdsme: str | None) -> None:
+        w_id = str(row_id or "").strip()
+        w_cd = (cdsme or "").strip()
+        with self._conn.connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "DELETE FROM TabGainPerte WHERE ID = ? AND Trim(IIf(IsNull(Cdsme), '', CStr(Cdsme))) = ?",
+                (w_id, w_cd),
+            )

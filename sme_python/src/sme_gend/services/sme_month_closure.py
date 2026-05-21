@@ -305,14 +305,85 @@ def import_existing_db_for_month(
     )
 
 
+def archive_slug_candidates_for_month(mois: str) -> list[str]:
+    """
+    Fragments de nom utilisés après ``sme_bundle_`` à la clôture / import.
+
+    Selon la saisie, le mois peut produire un slug ``2026-03`` ou ``202603`` : les variantes
+    pertinentes sont essayées pour ``sme_bundle_<slug>_*.sqlite|mdb``.
+    """
+    raw = (mois or "").strip()
+    if not raw:
+        return []
+
+    candidates: set[str] = set()
+    canon = canonical_sme_mois_yyyy_mm(raw) or ""
+    ex = extract_yyyy_mm(raw) or ""
+
+    for piece in (raw, canon, ex):
+        p = (piece or "").strip()
+        if not p:
+            continue
+        candidates.add(slugify_mois_label(p))
+        norm = canonical_sme_mois_yyyy_mm(p) or extract_yyyy_mm(p)
+        if norm:
+            compact = norm.replace("-", "")
+            if compact:
+                candidates.add(slugify_mois_label(compact))
+
+    return sorted(candidates)
+
+
 def find_archive_for_month(mois: str) -> Path | None:
-    """Retourne l'archive la plus récente pour le mois YYYY-MM dans sme_archives/, ou None."""
-    ym = canonical_sme_mois_yyyy_mm(mois) or mois
-    slug = slugify_mois_label(ym)
+    """Retourne l'archive la plus récente pour le mois dans sme_archives/, ou None."""
     arch_dir = sme_archives_dir()
-    candidates: list[Path] = []
-    for ext in ("sqlite", "db", "mdb", "accdb"):
-        candidates.extend(arch_dir.glob(f"sme_bundle_{slug}_*.{ext}"))
-    if not candidates:
+    slugs = archive_slug_candidates_for_month(mois)
+    if not slugs:
         return None
-    return max(candidates, key=lambda p: p.stat().st_mtime)
+    found: set[Path] = set()
+    for slug in slugs:
+        for ext in ("sqlite", "db", "mdb", "accdb"):
+            for p in arch_dir.glob(f"sme_bundle_{slug}_*.{ext}"):
+                try:
+                    found.add(p.resolve())
+                except OSError:
+                    found.add(p)
+    if not found:
+        return None
+    return max(found, key=lambda p: p.stat().st_mtime)
+
+
+def liste_generale_settings_for_archive(base: Settings, archive_path: Path) -> Settings:
+    """Construit les paramètres de lecture ListeGenerale depuis une copie d'archive (clôture / import)."""
+    import dataclasses
+
+    archive_path = Path(archive_path).expanduser().resolve()
+    ext = archive_path.suffix.lower()
+    if ext in (".sqlite", ".db"):
+        return dataclasses.replace(
+            base,
+            sqlite_liste_path=archive_path,
+            use_sqlite_liste_generale=True,
+        )
+    return dataclasses.replace(
+        base,
+        database_path=archive_path,
+        use_sqlite_liste_generale=False,
+    )
+
+
+def shift_sme_month_yyyy_mm(ym_raw: str, *, delta_months: int) -> str | None:
+    """Retourne YYYY-MM décalé de ``delta_months`` (ex. -1 = mois précédent), ou None si invalide."""
+    ym = canonical_sme_mois_yyyy_mm(ym_raw)
+    if not ym:
+        return None
+    y = int(ym[:4])
+    m = int(ym[5:7])
+    m += delta_months
+    while m < 1:
+        m += 12
+        y -= 1
+    while m > 12:
+        m -= 12
+        y += 1
+    return f"{y:04d}-{m:02d}"

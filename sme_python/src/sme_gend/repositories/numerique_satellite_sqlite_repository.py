@@ -91,6 +91,28 @@ class SqliteNumeriqueSatelliteRepository(BaseSqliteRepository):
                 )
         return out
 
+    def upsert_malade(self, person_id: str, detail: MaladeDetail) -> None:
+        kid = _norm_id(person_id)
+        if not kid:
+            raise ValueError("Identifiant tab_malade vide.")
+        with self._connect() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM tab_malade WHERE id = ?", (kid,))
+            cur.execute(
+                "INSERT INTO tab_malade (id, date_constat, pathologie, obs) VALUES (?, ?, ?, ?)",
+                (kid, detail.date_constat, detail.pathologie, detail.obs),
+            )
+            conn.commit()
+
+    def delete_malade(self, person_id: str) -> None:
+        kid = _norm_id(person_id)
+        if not kid:
+            return
+        with self._connect() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM tab_malade WHERE id = ?", (kid,))
+            conn.commit()
+
 
 def _norm_id(v: object) -> str:
     if v is None:

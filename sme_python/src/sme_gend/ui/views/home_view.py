@@ -41,7 +41,8 @@ class HomeView(QWidget):
         title.setObjectName("dashPageTitle")
         sub = QLabel(
             "Vue d'ensemble des effectifs, des positions, et du <b>cycle du mois</b> (période de travail, "
-            "clôture, archives). Les détails techniques (fichiers, import) sont sous <b>Maintenance & fichiers</b>."
+            "clôture, archives). Les détails techniques (fichiers, import) sont sous <b>Maintenance & fichiers</b>. "
+            "<b>Recherche globale</b> : <b>Ctrl+K</b> (menus Affichage et Aide)."
         )
         sub.setObjectName("dashSubtitle")
         sub.setWordWrap(True)

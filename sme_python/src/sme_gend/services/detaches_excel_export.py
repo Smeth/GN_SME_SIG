@@ -9,10 +9,58 @@ from openpyxl import Workbook, load_workbook
 from sme_gend.config.settings import Settings
 from sme_gend.models.detaches_file_config import DetachesFileConfig
 from sme_gend.repositories.grade_repository import GradeRepository
-from sme_gend.services.detaches_service import DetachesService, sigle_ou_subdivision
+from sme_gend.services.detaches_config_service import DetachesConfigService
+from sme_gend.services.detaches_service import (
+    DetachesService,
+    designation_bloc_excel,
+    detache_ecart_remarque,
+    sigle_ou_subdivision,
+)
 from sme_gend.services.detaches_sheet_writer import fill_detache_sheet
 
 SHEET_SME = "SME_Detaches"
+
+
+def _sme_detaches_headers() -> tuple[str, ...]:
+    return (
+        "N°",
+        "Nom(s) et prénom(s)",
+        "Grade",
+        "Sigle / subdivision arme",
+        "Désignation bloc (titres Excel / config)",
+        "Structure",
+        "Réf. note (décision)",
+        "Date grade",
+        "Matricule militaire",
+        "Matricule solde",
+        "Position administrative",
+        "Fonction",
+        "Observations",
+        "Contrôle liste détachés",
+    )
+
+
+def _write_sme_detaches_sheet(ws, rows, cfg: DetachesFileConfig) -> None:
+    headers = _sme_detaches_headers()
+    for col, h in enumerate(headers, start=1):
+        ws.cell(row=1, column=col, value=h)
+    for i, r in enumerate(rows, start=1):
+        sig = sigle_ou_subdivision(r)
+        ws.cell(row=i + 1, column=1, value=i)
+        ws.cell(row=i + 1, column=2, value=r.noms)
+        ws.cell(row=i + 1, column=3, value=r.grade)
+        ws.cell(row=i + 1, column=4, value=sig)
+        ws.cell(row=i + 1, column=5, value=designation_bloc_excel(cfg, sig))
+        ws.cell(row=i + 1, column=6, value=r.structure)
+        ws.cell(row=i + 1, column=7, value=r.ndecision)
+        dg = r.date_grade
+        ws.cell(row=i + 1, column=8, value=dg.strftime("%d/%m/%Y") if dg else None)
+        ws.cell(row=i + 1, column=9, value=r.matricule_militaire)
+        ws.cell(row=i + 1, column=10, value=r.matricule_solde)
+        ws.cell(row=i + 1, column=11, value=r.position_admin)
+        ws.cell(row=i + 1, column=12, value=r.fonction)
+        ws.cell(row=i + 1, column=13, value=r.obs)
+        ws.cell(row=i + 1, column=14, value=detache_ecart_remarque(r))
 
 
 def count_official_detache_lignes(template_path: Path | None) -> int | None:
@@ -52,6 +100,8 @@ def export_detaches_workbook(
     rows = svc.fetch_detaches()
     tpl = settings.template_detaches_path
 
+    cfg = DetachesConfigService(settings).load()
+
     if use_template and tpl is not None and tpl.is_file():
         wb = load_workbook(tpl, data_only=False, keep_vba=False)
     else:
@@ -61,38 +111,7 @@ def export_detaches_workbook(
     if SHEET_SME in wb.sheetnames:
         wb.remove(wb[SHEET_SME])
     ws = wb.create_sheet(SHEET_SME)
-
-    headers = (
-        "N°",
-        "Nom(s) et prénom(s)",
-        "Grade",
-        "Sigle / subdivision arme",
-        "Structure",
-        "Réf. note (décision)",
-        "Date grade",
-        "Matricule militaire",
-        "Matricule solde",
-        "Position administrative",
-        "Fonction",
-        "Observations",
-    )
-    for col, h in enumerate(headers, start=1):
-        ws.cell(row=1, column=col, value=h)
-
-    for i, r in enumerate(rows, start=1):
-        ws.cell(row=i + 1, column=1, value=i)
-        ws.cell(row=i + 1, column=2, value=r.noms)
-        ws.cell(row=i + 1, column=3, value=r.grade)
-        ws.cell(row=i + 1, column=4, value=sigle_ou_subdivision(r))
-        ws.cell(row=i + 1, column=5, value=r.structure)
-        ws.cell(row=i + 1, column=6, value=r.ndecision)
-        dg = r.date_grade
-        ws.cell(row=i + 1, column=7, value=dg.strftime("%d/%m/%Y") if dg else None)
-        ws.cell(row=i + 1, column=8, value=r.matricule_militaire)
-        ws.cell(row=i + 1, column=9, value=r.matricule_solde)
-        ws.cell(row=i + 1, column=10, value=r.position_admin)
-        ws.cell(row=i + 1, column=11, value=r.fonction)
-        ws.cell(row=i + 1, column=12, value=r.obs)
+    _write_sme_detaches_sheet(ws, rows, cfg)
 
     dest = Path(destination)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -131,36 +150,7 @@ def export_detaches_workbook_full(
     if SHEET_SME in wb.sheetnames:
         wb.remove(wb[SHEET_SME])
     ws_s = wb.create_sheet(SHEET_SME)
-    headers = (
-        "N°",
-        "Nom(s) et prénom(s)",
-        "Grade",
-        "Sigle / subdivision arme",
-        "Structure",
-        "Réf. note (décision)",
-        "Date grade",
-        "Matricule militaire",
-        "Matricule solde",
-        "Position administrative",
-        "Fonction",
-        "Observations",
-    )
-    for col, h in enumerate(headers, start=1):
-        ws_s.cell(row=1, column=col, value=h)
-    for i, r in enumerate(rows, start=1):
-        ws_s.cell(row=i + 1, column=1, value=i)
-        ws_s.cell(row=i + 1, column=2, value=r.noms)
-        ws_s.cell(row=i + 1, column=3, value=r.grade)
-        ws_s.cell(row=i + 1, column=4, value=sigle_ou_subdivision(r))
-        ws_s.cell(row=i + 1, column=5, value=r.structure)
-        ws_s.cell(row=i + 1, column=6, value=r.ndecision)
-        dg = r.date_grade
-        ws_s.cell(row=i + 1, column=7, value=dg.strftime("%d/%m/%Y") if dg else None)
-        ws_s.cell(row=i + 1, column=8, value=r.matricule_militaire)
-        ws_s.cell(row=i + 1, column=9, value=r.matricule_solde)
-        ws_s.cell(row=i + 1, column=10, value=r.position_admin)
-        ws_s.cell(row=i + 1, column=11, value=r.fonction)
-        ws_s.cell(row=i + 1, column=12, value=r.obs)
+    _write_sme_detaches_sheet(ws_s, rows, cfg)
 
     dest = Path(destination)
     dest.parent.mkdir(parents=True, exist_ok=True)

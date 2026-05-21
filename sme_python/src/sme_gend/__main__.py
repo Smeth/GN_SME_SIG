@@ -65,13 +65,15 @@ def main() -> int:
     from sme_gend.services.referentiel_service import ReferentielService
     from sme_gend.ui.config_paths_dialog import ConfigPathsDialog
     from sme_gend.ui.resources import load_app_icon
-    from sme_gend.ui.shell_window import ShellWindow
     from sme_gend.ui.sme_session_dialog import run_startup_sme_session_dialog
     from sme_gend.ui.theme import apply_app_theme
 
     from sme_gend.config.sme_context import load_sme_context as _load_theme_ctx
 
     app = QApplication(sys.argv)
+    # Qt WebEngine (aperçu « Liste des présents ») doit être chargé **après** QApplication,
+    # sinon le moteur Chromium peut ne pas s’initialiser (zone HTML blanche / vide).
+    from sme_gend.ui.shell_window import ShellWindow
     app.setApplicationName("SME Gendarmerie")
     app.setApplicationDisplayName("SME — Effectifs")
 

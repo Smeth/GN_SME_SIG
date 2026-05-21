@@ -59,3 +59,63 @@ class SqliteGainPerteRepository(BaseSqliteRepository):
                 return [_row(r) for r in cur.fetchall()]
         except Exception:
             return []
+
+    def insert_row(self, row: GainPerteRow) -> None:
+        import sqlite3
+        with self._connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO tab_gain_perte (id, grade, nom, objet, cdsme, observ) VALUES (?,?,?,?,?,?)",
+                (
+                    str(row.id or "").strip(),
+                    row.grade,
+                    row.nom,
+                    row.objet,
+                    row.cdsme,
+                    row.observ,
+                ),
+            )
+            conn.commit()
+
+    def update_row(
+        self,
+        row: GainPerteRow,
+        *,
+        where_id: str,
+        where_cdsme: str | None,
+    ) -> None:
+        import sqlite3
+        w_id = str(where_id or "").strip()
+        w_cd = (where_cdsme or "").strip() or None
+        with self._connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE tab_gain_perte
+                SET id = ?, grade = ?, nom = ?, objet = ?, cdsme = ?, observ = ?
+                WHERE id = ? AND IFNULL(trim(cdsme), '') = IFNULL(trim(?), '')
+                """,
+                (
+                    str(row.id or "").strip(),
+                    row.grade,
+                    row.nom,
+                    row.objet,
+                    row.cdsme,
+                    row.observ,
+                    w_id,
+                    w_cd if w_cd is not None else "",
+                ),
+            )
+            conn.commit()
+
+    def delete_row(self, row_id: str, cdsme: str | None) -> None:
+        import sqlite3
+        w_id = str(row_id or "").strip()
+        w_cd = (cdsme or "").strip() or None
+        with self._connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "DELETE FROM tab_gain_perte WHERE id = ? AND IFNULL(trim(cdsme), '') = IFNULL(trim(?), '')",
+                (w_id, w_cd if w_cd is not None else ""),
+            )
+            conn.commit()

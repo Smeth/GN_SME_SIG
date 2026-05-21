@@ -52,6 +52,14 @@ from sme_gend.ui.personnel_edit_dialog import PersonnelEditDialog
 from sme_gend.ui.personnel_table_model import PersonnelTableModel
 
 
+def _padmin_matches_filter(row_padmin: str | None, selected: str) -> bool:
+    """Aligné tableau de bord : Padmin comparé sans tenir compte de la casse."""
+    a = (row_padmin or "").strip()
+    if not a:
+        return False
+    return a == selected or a.casefold() == selected.casefold()
+
+
 # Colonnes par défaut masquables (indice → clé). Col 1 (noms) et col 19 (Actions) toujours visibles.
 _HIDEABLE_COLS: dict[int, str] = {
     0: "id",
@@ -679,7 +687,7 @@ class PersonnelListView(QWidget):
             if (row.structure or "").strip():
                 return False
         p = self._padmin_combo.currentData()
-        if p is not None and (row.position_admin or "").strip() != p:
+        if p is not None and not _padmin_matches_filter(row.position_admin, p):
             return False
         g = self._grade_combo.currentData()
         if g is not None and (row.grade or "").strip() != g:
@@ -1014,7 +1022,7 @@ class PersonnelListView(QWidget):
         hdr = self._table.horizontalHeader()
         actions_col = self._model.columnCount() - 1
         for c in range(actions_col):
-            hdr.resizeSectionToContents(c)
+            hdr.resizeSection(c, hdr.sectionSizeHint(c))
 
     def _reset_sort_order(self) -> None:
         self._proxy.sort(-1)

@@ -20,7 +20,9 @@ from sme_gend.services.numerique_excel_export import (
     SHEET_STAGE_LOC,
     collect_indispo_structure_meta,
     read_numerique_grades_from_template,
+    read_recap_cd_values_from_template_path,
     read_satellite_grade_columns_from_template,
+    recap_column_headers_from_mois_actif,
     satellite_grade_count_pairs,
     sorted_rows_for_padmin,
 )
@@ -85,66 +87,35 @@ h3 { font-size: 12pt; margin: 18px 0 8px 0; color: #283593; border-bottom: 1px s
 """
 
 
-_MOIS_FR = (
-    "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
-    "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre",
-)
-
-
-def _ym_to_label(ym: str) -> str:
-    """'2026-04' → 'Avril 2026'"""
-    try:
-        y, m = int(ym[:4]), int(ym[5:7])
-        return f"{_MOIS_FR[m - 1]} {y}"
-    except (ValueError, IndexError):
-        return ym
-
-
-def _prev_ym_label(ym: str) -> str:
-    """Mois précédent de 'YYYY-MM' formaté en français."""
-    try:
-        y, m = int(ym[:4]), int(ym[5:7])
-        m -= 1
-        if m < 1:
-            m, y = 12, y - 1
-        return _ym_to_label(f"{y:04d}-{m:02d}")
-    except (ValueError, IndexError):
-        return "Mois précédent"
-
-
-def _read_recap_mois_fige_cd(template_path: Path | None) -> list[int | None]:
-    """Valeurs colonne CD (mois figé dans le gabarit) pour le récap variation, lignes 5–14."""
-    out: list[int | None] = [None] * 10
-    if template_path is None or not template_path.is_file():
-        return out
-    wb = load_workbook(template_path, read_only=True, data_only=True)
-    try:
-        if "NUMERIQUE" not in wb.sheetnames:
-            return out
-        ws = wb["NUMERIQUE"]
-        for i, r in enumerate(range(5, 15)):
-            v = ws.cell(r, 82).value  # CD
-            if v is None:
-                continue
-            try:
-                out[i] = int(v)
-            except (TypeError, ValueError):
-                out[i] = None
-        return out
-    finally:
-        wb.close()
-
-
 class NumeriquePreviewService:
     """Aperçus HTML alignés sur les calculs d'export (SQLite ou Access)."""
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+        self._gain_perte_settings = settings
         self._repo = ListeGeneraleRepository(settings)
 
-    def rebind_settings(self, settings: Settings) -> None:
+    @property
+    def liste_settings(self) -> Settings:
+        """Source ListeGenerale / satellites (peut être une archive mensuelle)."""
+        return self._settings
+
+    @property
+    def gain_perte_settings(self) -> Settings:
+        """Source TabGainPerte : toujours la base d'exploitation (saisie gains/pertes)."""
+        return self._gain_perte_settings
+
+    def rebind_settings(
+        self,
+        settings: Settings,
+        *,
+        gain_perte_settings: Settings | None = None,
+    ) -> None:
         self._settings = settings
         self._repo = ListeGeneraleRepository(settings)
+        self._gain_perte_settings = (
+            gain_perte_settings if gain_perte_settings is not None else settings
+        )
 
     def _build_html_gain_perte_section(self) -> str:
         """Section HTML résumant les gains & pertes du mois actif (TabGainPerte)."""
@@ -156,7 +127,7 @@ class NumeriquePreviewService:
             return ""
 
         try:
-            repo = GainPerteRepository(self._settings)
+            repo = GainPerteRepository(self._gain_perte_settings)
             gp_rows = repo.fetch_for_month(mois_actif)
         except Exception:
             return ""
@@ -164,7 +135,9 @@ class NumeriquePreviewService:
         if not gp_rows:
             return (
                 f"<h3>7. Gains &amp; Pertes — {html.escape(mois_actif)}</h3>"
-                "<p class='section-note'>Aucune donnée TabGainPerte pour ce mois.</p>"
+                "<p class='section-note'>Aucune ligne TabGainPerte pour ce mois dans la <b>base d'exploitation</b> "
+                "(les archives mensuelles ne contiennent en général pas cette table ; "
+                "le filtre utilise le code mois Cdsme, ex. 052026).</p>"
             )
 
         n_gains = sum(1 for r in gp_rows if r.is_gain)
@@ -204,7 +177,7 @@ class NumeriquePreviewService:
         cat_pres = sum_by_grade_category(matrix["presents"], grades)
         cat_ind = category_indisponibles(matrix["inscrits"], matrix["presents"], grades)
 
-        cd_vals = _read_recap_mois_fige_cd(tpl)
+        cd_vals = read_recap_cd_values_from_template_path(tpl) if tpl and tpl.is_file() else [None] * 10
         recap_rows_html: list[str] = []
         for idx, ((key, lib), cd_cell) in enumerate(zip(RECAP_INDISPO_KEYS, cd_vals[:9], strict=True)):
             cur = matrix_row_total(matrix, key, grades)
@@ -329,8 +302,12 @@ class NumeriquePreviewService:
 
         _ym = (_lsc().mois_actif or "").strip()
         if _ym:
-            mois_courant = _ym_to_label(_ym)
-            mois_fige = _prev_ym_label(_ym)
+            hdr = recap_column_headers_from_mois_actif(_ym)
+            if hdr:
+                mois_fige, mois_courant = hdr
+            else:
+                mois_courant = _ym
+                mois_fige = "Mois précédent"
         else:
             mois_courant = "Mois courant (Σ T)"
             mois_fige = "Mois figé (CD gabarit)"

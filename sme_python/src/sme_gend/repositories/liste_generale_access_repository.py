@@ -63,7 +63,7 @@ class AccessListeGeneraleRepository:
 
     def fetch_presents(self) -> list[ListeGeneraleRow]:
         rows = self.fetch_all()
-        return [r for r in rows if padmin_counts_as_present(r.position_admin)]
+        return [r for r in rows if padmin_counts_as_present(r.position_admin, "present")]
 
     def fetch_distinct_padmin(self) -> list[str]:
         q = """

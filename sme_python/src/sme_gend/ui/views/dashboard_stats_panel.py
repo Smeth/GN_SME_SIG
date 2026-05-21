@@ -45,6 +45,7 @@ _KPI_ICON_META: dict[str, tuple[QStyle.StandardPixmap, str]] = {
     "effectifs": (QStyle.StandardPixmap.SP_DriveHDIcon, "#eceff1"),
     "present": (QStyle.StandardPixmap.SP_DialogApplyButton, "#e8f5e9"),
     "detache": (QStyle.StandardPixmap.SP_ArrowLeft, "#e3f2fd"),
+    "structure_detache": (QStyle.StandardPixmap.SP_DirIcon, "#e8eaf6"),
     "stage_interne": (QStyle.StandardPixmap.SP_FileDialogInfoView, "#f3e5f5"),
     "mission": (QStyle.StandardPixmap.SP_ArrowForward, "#e3f2fd"),
     "malade": (QStyle.StandardPixmap.SP_FileIcon, "#eceff1"),

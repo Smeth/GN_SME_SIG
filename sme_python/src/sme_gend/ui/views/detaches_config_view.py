@@ -50,12 +50,13 @@ class DetachesConfigView(QWidget):
         form_opt.addRow("Sigle présidence (toujours en tête) :", self._presidence)
 
         hint = QLabel(
-            "Le tableau est rempli à partir de ce fichier JSON : au départ il est <b>vide</b>. "
-            "Utilisez <b>Importer les sigles depuis Access</b> pour créer une ligne par "
-            "<b>subdivision arme</b> distincte parmi les personnels en position <b>Détaché</b>, "
-            "puis complétez les titres Excel. "
-            "Chaque <b>sigle</b> doit correspondre à la subdivision arme (normalisée en majuscules). "
-            "L’<b>ordre</b> classe les blocs (sauf le sigle « présidence » défini ci-dessus, placé en tête)."
+            "Configuration lue depuis ce fichier JSON. Utilisez <b>Importer les sigles depuis la base</b> "
+            "pour une ligne par <b>subdivision arme</b> (périmètre détachés) ; complétez les titres. "
+            "Les <b>titres (lignes 1 à 3)</b> pour chaque sigle sont ceux imprimés dans la feuille <code>DETACHE</code> "
+            "(souvent le <b>nom complet</b> de la structure). "
+            "Chaque <b>sigle</b> = subdivision arme en base (majuscules). "
+            "L’<b>ordre</b> classe les blocs (sauf <b>sigle présidence</b> en tête). "
+            "Enregistrez pour que les exports Excel et l’aperçu Détachés reflètent les titres."
         )
         hint.setWordWrap(True)
         hint.setTextFormat(Qt.TextFormat.RichText)
@@ -73,8 +74,8 @@ class DetachesConfigView(QWidget):
         self._btn_reload.clicked.connect(self._reload)
         self._btn_import = QPushButton("Importer les sigles depuis Access (détachés)")
         self._btn_import.setToolTip(
-            "Ajoute les lignes manquantes : une par valeur distincte de « subdivision arme » "
-            "pour les personnes dont la position administrative est « Détaché »."
+            "Ajoute les lignes manquantes : une par « subdivision arme » distincte dans le "
+            "périmètre détachés (Padmin « Détaché » ou Structure DETACHE)."
         )
         self._btn_import.clicked.connect(self._import_sigles_access)
         self._btn_save = QPushButton("Enregistrer")
@@ -147,7 +148,7 @@ class DetachesConfigView(QWidget):
         if not confirm_yes_no(
             self,
             "Importer depuis Access",
-            "Importer les sigles distincts des personnels « Détaché » depuis la base ?\n"
+            "Importer les sigles distincts (subdivision arme) du périmètre détachés depuis la base ?\n"
             "Les lignes déjà présentes (même sigle) ne seront pas dupliquées.",
             default_no=True,
         ):
@@ -162,9 +163,8 @@ class DetachesConfigView(QWidget):
             QMessageBox.information(
                 self,
                 "Aucun sigle",
-                "Aucune ligne « Détaché » avec subdivision arme dans la base, "
-                "ou aucun personnel en position administrative « Détaché ».\n\n"
-                "Vérifiez la liste générale et le champ « subdivision arme ».",
+                "Aucune ligne au périmètre détachés avec subdivision arme renseignée dans la base.\n\n"
+                "Vérifiez la liste générale (Padmin « Détaché » ou Structure DETACHE, champ « subdivision arme »).",
             )
             return
         existing: set[str] = set()

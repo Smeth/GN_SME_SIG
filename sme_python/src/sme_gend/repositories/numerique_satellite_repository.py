@@ -51,3 +51,9 @@ class NumeriqueSatelliteRepository:
 
     def load_stages_ex(self) -> dict[str, StageDetail]:
         return self._impl.load_stages_ex()
+
+    def upsert_malade(self, person_id: str, detail: MaladeDetail) -> None:
+        self._impl.upsert_malade(person_id, detail)
+
+    def delete_malade(self, person_id: str) -> None:
+        self._impl.delete_malade(person_id)

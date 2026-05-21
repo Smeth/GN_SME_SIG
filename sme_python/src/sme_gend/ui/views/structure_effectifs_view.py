@@ -21,6 +21,11 @@ from sme_gend.config.settings import Settings
 from sme_gend.services.personnel_service import PersonnelService
 from sme_gend.services.referentiel_service import ReferentielService
 
+_DEFAULT_INTRO = (
+    "<b>Parcourir par structure</b> — liste des codes structure avec effectifs ; "
+    "double-clic ou bouton pour ouvrir la <b>liste générale</b> déjà filtrée sur cette structure."
+)
+
 
 class StructureEffectifsView(QWidget):
     """
@@ -34,6 +39,9 @@ class StructureEffectifsView(QWidget):
         personnel: PersonnelService,
         referentiel: ReferentielService,
         open_liste_generale_for_structure: Callable[[str], None],
+        *,
+        exclude_structure_codes: frozenset[str] | None = None,
+        intro_html: str | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -41,11 +49,11 @@ class StructureEffectifsView(QWidget):
         self._personnel = personnel
         self._referentiel = referentiel
         self._open_liste = open_liste_generale_for_structure
+        self._exclude_fold: set[str] = {
+            (c or "").strip().casefold() for c in (exclude_structure_codes or ())
+        }
 
-        title = QLabel(
-            "<b>Parcourir par structure</b> — liste des codes structure avec effectifs ; "
-            "double-clic ou bouton pour ouvrir la <b>liste générale</b> déjà filtrée sur cette structure."
-        )
+        title = QLabel(intro_html if intro_html is not None else _DEFAULT_INTRO)
         title.setWordWrap(True)
         title.setTextFormat(Qt.TextFormat.RichText)
         title.setObjectName("dashSubtitle")
@@ -112,6 +120,8 @@ class StructureEffectifsView(QWidget):
             return
         rows_data: list[tuple[str, str, int]] = []
         for s in sorted(structs, key=lambda x: (x.ordre_tri is None, x.ordre_tri or 0, x.code)):
+            if (s.code or "").strip().casefold() in self._exclude_fold:
+                continue
             n = int(counts.get(s.code, 0))
             rows_data.append((s.code, s.designation or "", n))
         sans = counts.get("(Sans structure)", 0)
