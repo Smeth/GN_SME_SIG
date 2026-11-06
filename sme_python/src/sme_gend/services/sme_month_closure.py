@@ -34,14 +34,12 @@ def slugify_mois_label(label: str) -> str:
 
 
 def extract_yyyy_mm(s: str) -> str | None:
-    """Extrait ``YYYY-MM`` si présent dans la chaîne."""
+    """Extrait un véritable mois ``YYYY-MM`` présent dans la chaîne."""
     t = (s or "").strip()
-    m = re.match(r"^(\d{4})-(\d{2})$", t)
-    if m:
-        return f"{m.group(1)}-{m.group(2)}"
-    m2 = re.search(r"(\d{4})-(\d{2})", t)
-    if m2:
-        return f"{m2.group(1)}-{m2.group(2)}"
+    for match in re.finditer(r"(?<![0-9])([0-9]{4})-([0-9]{2})(?![0-9])", t):
+        year, month = int(match.group(1)), int(match.group(2))
+        if 1 <= year <= 9999 and 1 <= month <= 12:
+            return f"{year:04d}-{month:02d}"
     return None
 
 
@@ -204,6 +202,8 @@ def _commit_closure_transition(settings, source, target, *, action, audit_payloa
     No local UI preference or legacy context is written to promote a month:
     sme_periode is already the authoritative state for every workstation.
     """
+    from sme_gend.services.action_permissions import assert_any_permission
+    assert_any_permission("workflow.close_month")
     from sme_gend.repositories.mysql_connection import MySQLConnection, mysql_import_transaction
     from sme_gend.services.active_month_guard import period_state_write,check_month_snapshot
     from sme_gend.repositories.reference_write_guard import ReferenceConflictError
@@ -276,6 +276,8 @@ def run_piste_a_month_closure(
     - Mois actif et mois fermés relus depuis MySQL, sans promotion via un contexte local.
     - Audit et révision partagée validés dans la même transaction que la clôture.
     """
+    from sme_gend.services.action_permissions import assert_any_permission
+    assert_any_permission("workflow.close_month")
     ym_cloture, ym_suivant = _validated_closure_months(mois_cloture, mois_suivant)
     if ym_suivant is None:
         raise ValueError("Le mois suivant est requis pour cette clôture.")
@@ -372,6 +374,10 @@ def import_existing_db_for_month(
     - Charge liste générale, carrière, référentiels et satellites dans MySQL (ODBC).
     - Audit : événement ``sme_month_import_existing_db`` (toujours émis).
     """
+    from sme_gend.services.action_permissions import assert_any_permission
+    assert_any_permission("workflow.import_archive")
+    if archive_and_close:
+        assert_any_permission("workflow.close_month")
     warnings: list[str] = []
     data_archive: Path | None = None
     n_closed = n_open = 0
@@ -445,11 +451,12 @@ def import_existing_db_for_month(
                     "data_archive": str(data_archive) if data_archive else None,
                     "mysql_bundle": mysql_bundle_result},
             )
-        except ReferenceConflictError as exc:
+        except (ReferenceConflictError, PermissionError) as exc:
             if mysql_bundle_result is not None:
-                raise ReferenceConflictError(
+                cause = "vos droits ont changé" if isinstance(exc, PermissionError) else "les périodes ont changé"
+                raise type(exc)(
                     "L'import MySQL est enregistré, mais la clôture ou l'activation est refusée : "
-                    "les périodes ont changé. Rechargez et vérifiez le mois actif avant de clôturer. "
+                    f"{cause}. Rechargez et vérifiez le mois actif avant de clôturer. "
                     "Ne relancez pas automatiquement l'import."
                 ) from exc
             raise

@@ -64,6 +64,15 @@ def _entry_details(entry: dict) -> str:
     lines = [f"Type : {_fmt_type(str(entry.get('doc_type') or ''), str(entry.get('format') or ''))}",
              f"Effectif total : {entry.get('count', 1)}", f"Fichier : {entry.get('dest') or '—'}",
              "", "Personnes enregistrées :"]
+    meta = entry.get("meta") or {}
+    if isinstance(meta, dict) and meta.get("revision_id"):
+        lines[3:3] = ["", f"Version SME : {meta['revision_id']}",
+                      f"Capture UTC : {meta.get('captured_at_utc') or '—'}",
+                      f"Dossier archivé : {meta.get('revision_folder') or '—'}",
+                      f"SHA-256 classeur : {meta.get('workbook_sha256') or '—'}",
+                      f"SHA-256 modèle : {meta.get('template_sha256') or '—'}",
+                      f"SHA-256 données : {meta.get('dataset_sha256') or '—'}",
+                      "Export versionné ; validation officielle distincte."]
     lines.extend(f"{i}. {person}" for i, person in enumerate(persons, 1))
     if _incomplete_persons(entry):
         lines.extend(["", "Liste nominative non enregistrée ou incomplète pour cette génération. Les noms manquants ne sont pas disponibles dans cette trace."])
@@ -120,6 +129,8 @@ def _years_from_mois(values: list[str]) -> list[int]:
 def _fmt_meta(meta: dict | None) -> str:
     if not isinstance(meta, dict) or not meta:
         return ""
+    if meta.get("revision_id"):
+        return "Version SME : " + str(meta["revision_id"])
     parts: list[str] = []
     for key, val in meta.items():
         if val is None:
@@ -624,9 +635,36 @@ class DocGenLogView(QWidget):
         content.setPlainText(_entry_details(entry))
         layout.addWidget(content)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        meta = entry.get("meta") or {}
+        if entry.get("doc_type") == "numerique" and isinstance(meta, dict) and meta.get("revision_folder"):
+            retrieve = buttons.addButton("Récupérer le classeur archivé…", QDialogButtonBox.ButtonRole.ActionRole)
+            retrieve.setEnabled(can_export())
+            retrieve.clicked.connect(lambda: self._retrieve_sme_revision(entry))
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
         dialog.exec()
+
+    def _retrieve_sme_revision(self, entry) -> None:
+        if not self._attestation_history_access() or not require_export(self):
+            return
+        from pathlib import Path
+        from sme_gend.ui.confirm_dialogs import confirm_overwrite_file
+        from sme_gend.ui.bg_task import run_with_progress
+        from sme_gend.services.sme_export_revision import retrieve_export_revision
+        from sme_gend.services.sme_publication_backup import locate_revision
+        meta = entry.get("meta") or {}
+        if not meta.get("revision_folder"):
+            return
+        destination, _ = QFileDialog.getSaveFileName(self, "Récupérer la version SME",
+            f"SME_{entry.get('mois') or 'archive'}_{meta['revision_id']}.xlsx", "Excel (*.xlsx)")
+        if not destination or not confirm_overwrite_file(self, destination):
+            return
+        def work():
+            folder = locate_revision(meta, str(entry.get("mois") or ""))
+            retrieve_export_revision(folder, Path(destination), expected=meta)
+            return True
+        if run_with_progress(self, "Version SME", "Vérification et copie du classeur archivé…", work) is not None:
+            QMessageBox.information(self, "Version SME récupérée", f"Copie exacte enregistrée :\n{destination}")
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)

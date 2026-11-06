@@ -127,6 +127,8 @@ class BackupRestoreView(QWidget):
             "Restaurer les fichiers data\\ (configs JSON, journaux locaux non sensibles)"
         )
         self._chk_data.setChecked(False)
+        self._chk_publications = QCheckBox("Restaurer les versions archivées des classeurs SME")
+        self._chk_publications.setChecked(True)
         self._lbl_warn = QLabel(
             "⚠ La restauration complète <b>remplace</b> toute la base MySQL de l'archive "
             "(sauf audit si option cochée). Fermez les autres sessions SME avant de continuer."
@@ -143,6 +145,7 @@ class BackupRestoreView(QWidget):
         rl.addWidget(self._chk_media)
         rl.addWidget(self._chk_preserve_audit)
         rl.addWidget(self._chk_data)
+        rl.addWidget(self._chk_publications)
         rl.addWidget(self._btn_restore)
 
         g_partial_r, self._restore_scope = scope_group_box(
@@ -455,6 +458,7 @@ class BackupRestoreView(QWidget):
                 scope.include_app_config,
                 scope.include_media_photos,
                 scope.include_media_grades,
+                scope.include_publications,
             )
         ):
             QMessageBox.warning(
@@ -552,6 +556,8 @@ class BackupRestoreView(QWidget):
             )
         if m.app_data_files:
             lines.append(f"Fichiers data\\ : {', '.join(m.app_data_files)}")
+        if m.publication_files:
+            lines.append(f"Versions archivées SME : {len(m.publication_files) // 4}")
         self._append_log("Inspection " + zip_p.name + ":\n" + "\n".join(lines))
         QMessageBox.information(self, "Contenu de l'archive", "\n".join(lines))
 
@@ -590,6 +596,7 @@ class BackupRestoreView(QWidget):
             has_mysql=hints["mysql"],
             has_user=hints["user_config"],
             has_data=hints["app_data"],
+            has_publications=m.has_publications(),
             has_appcfg=hints["app_config"],
             has_media=hints["media"],
             saved=m.saved_scope(),
@@ -658,6 +665,7 @@ class BackupRestoreView(QWidget):
                 zip_p,
                 restore_user_config=self._chk_config.isChecked(),
                 restore_app_data=self._chk_data.isChecked(),
+                restore_publications=self._chk_publications.isChecked(),
                 restore_personnel_media=self._chk_media.isChecked(),
                 preserve_mysql_connection=self._chk_mysql.isChecked(),
                 preserve_audit_journal=preserve_audit,
@@ -732,6 +740,7 @@ class BackupRestoreView(QWidget):
                 scope.restore_app_config,
                 scope.restore_media_photos,
                 scope.restore_media_grades,
+                scope.restore_publications,
             )
         ):
             QMessageBox.warning(self, "Restauration", "Cochez au moins un composant.")
@@ -747,6 +756,7 @@ class BackupRestoreView(QWidget):
                 "app_config" if scope.restore_app_config else None,
                 "Photos" if scope.restore_media_photos else None,
                 "Insignes" if scope.restore_media_grades else None,
+                "Versions archivées SME" if scope.restore_publications else None,
             ]
             if x
         )

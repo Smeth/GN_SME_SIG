@@ -10,6 +10,7 @@ from zipfile import ZipFile, ZIP_DEFLATED
 from sme_gend.repositories.mysql_connection import MySQLConnection, mysql_import_transaction
 from sme_gend.services.mysql_import_period import normalize_import_mois
 from sme_gend.services.month_period_scope import month_period_ids
+from sme_gend.services.automatic_position_links import automatic_source, source_match_fields
 
 MEMBER = 'month_backup.json'
 EXTRA = ('workflow_task', 'career_alert_ack', 'career_alert_ack_occurrence')
@@ -148,10 +149,7 @@ def _create_month_backup(settings, month, destination):
             for event in tables.get('agent_position_event', []):
                 reference=str(event.get('reference_decision') or '')
                 if not reference.startswith('sgi:auto:'): continue
-                parts=reference.split(':')
-                if len(parts)!=4 or parts[2] not in EVENTS:
-                    raise ValueError('Reference automatique non reconnue.')
-                source_table,source_id=parts[2],int(parts[3])
+                source_table,source_id,_,_=automatic_source(reference)
                 if not any(r['id']==source_id for r in tables.get(source_table, [])):
                     found=read_rows(cur,source_table,'id=%s',(source_id,))
                     if len(found)!=1: raise ValueError('Source de position introuvable.')
@@ -346,7 +344,13 @@ def restore_month_backup(settings, archive, *, confirmed_month, _safety_backup=N
                             cur.execute('INSERT INTO sme_periode ('+','.join(map(quote,cols))+') VALUES ('+','.join(['%s']*len(cols))+')',tuple(period[c] for c in cols))
                             target_period = cur.lastrowid
                             ids=(target_period,)
-                purge_sme_periode_for_reimport(settings, month, imported_only=False, preserve_manual_passations=True)
+                        from sme_gend.services.month_purge_plan import month_purge_plan
+                        from sme_gend.services.automatic_position_links import external_position_links
+                        position_dependencies = external_position_links(cur,
+                            [item for pid in ids for item in month_purge_plan(pid, month,
+                             imported_only=False, target_period_ids=ids)], month)
+                purge_sme_periode_for_reimport(settings, month, imported_only=False,
+                    preserve_manual_passations=True, _replace_position_links=True)
                 with MySQLConnection(settings).connect() as conn:
                     with conn.cursor() as cur:
                         for pid in ids:
@@ -390,22 +394,22 @@ def restore_month_backup(settings, archive, *, confirmed_month, _safety_backup=N
                                         cur.execute("SELECT statut FROM sme_periode WHERE id=%s",(target_period,))
                                         row['est_actuelle']=int(str(cur.fetchone()[0] or '').casefold() in ('ouvert','open','r\u00e9ouvert','reouvert'))
                                     if table=='agent_position_event' and str(row.get('reference_decision') or '').startswith('sgi:auto:'):
-                                        parts=row['reference_decision'].split(':')
-                                        key=(parts[2],'id',int(parts[3]))
+                                        source_table,source_id,prefix,suffix=automatic_source(row['reference_decision'])
+                                        key=(source_table,'id',source_id)
                                         if key not in mapping:
-                                            if any(r['id']==int(parts[3]) for r in rows.get(parts[2], [])):
+                                            if any(r['id']==source_id for r in rows.get(source_table, [])):
                                                 next_round.append((table,original));continue
-                                            descriptors=[d for d in payload.get('auto_sources',[]) if d['table']==parts[2] and d['row']['id']==int(parts[3])]
+                                            descriptors=[d for d in payload.get('auto_sources',[]) if d['table']==source_table and d['row']['id']==source_id]
                                             if not descriptors:
                                                 raise ValueError('Source automatique absente de la sauvegarde.')
                                             source={k:decode(v) for k,v in descriptors[0]['row'].items()}
-                                            fields=[c for c in source if c.startswith('date_') or c in ('type_stage_code','reference_dossier','libelle_stage','session')]
+                                            fields=source_match_fields(source)
                                             conditions=['agent_id=%s']+[quote(c)+' <=> %s' for c in fields]
-                                            matches=read_rows(cur,parts[2],' AND '.join(conditions),(row['agent_id'],*(source[c] for c in fields)))
+                                            matches=read_rows(cur,source_table,' AND '.join(conditions),(row['agent_id'],*(source[c] for c in fields)))
                                             if len(matches)!=1:
                                                 raise ValueError('Le stage ou evenement source appartient a un autre mois. Restaurez son mois en premier ; aucune modification enregistrée.')
                                             mapping[key]=matches[0]['id']
-                                        row['reference_decision']='sgi:auto:'+parts[2]+':'+str(mapping[key])
+                                        row['reference_decision']=prefix+str(mapping[key])+suffix
                                     auto=meta['auto']
                                     if auto: row.pop(auto)
                                     cols=list(row)
@@ -419,6 +423,8 @@ def restore_month_backup(settings, archive, *, confirmed_month, _safety_backup=N
                                 progress=True
                             if not progress: raise ValueError('Dépendances circulaires ou références automatiques incomplètes. Restauration annulée.')
                             pending=next_round
+                        from sme_gend.services.automatic_position_links import remap_external_position_links
+                        remap_external_position_links(cur, position_dependencies)
                         from sme_gend.services.grade_history_merge import reconcile_restored_grades
                         grade_corrections = reconcile_restored_grades(settings, restored_careers, month)
                         if other_month_displays(cur, month) != other_before:

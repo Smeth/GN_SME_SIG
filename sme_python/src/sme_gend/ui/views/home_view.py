@@ -116,6 +116,7 @@ class HomeView(QWidget):
             self._reload_stats(silent=True)
 
     def _on_dashboard_load_error(self, exc: BaseException) -> None:
+        self._stats_dirty = True
         import logging
 
         logging.getLogger(__name__).error(
@@ -149,18 +150,19 @@ class HomeView(QWidget):
                 return
             from sme_gend.services.liste_generale_cache import dashboard_snapshot_epoch
 
-            self._stats_dirty = False
-            self._shown_epoch = dashboard_snapshot_epoch()
-            self._update_scope_subtitle(s)
             try:
                 self._stats_panel.update(s)
+                self._update_scope_subtitle(s)
             except Exception:
+                self._stats_dirty = True
                 import logging
 
                 logging.getLogger(__name__).exception("Tableau de bord — mise à jour indicateurs")
                 if self._shown_epoch < 0:
                     self._stats_panel.clear()
                 return
+            self._stats_dirty = False
+            self._shown_epoch = dashboard_snapshot_epoch()
             if schedule_deferred:
                 self._reload_deferred(generation)
 
@@ -203,15 +205,18 @@ class HomeView(QWidget):
                 return
             from sme_gend.services.liste_generale_cache import dashboard_snapshot_epoch
 
-            self._shown_epoch = dashboard_snapshot_epoch()
             try:
                 self._stats_panel.update(s)
             except Exception:
+                self._stats_dirty = True
                 import logging
 
                 logging.getLogger(__name__).exception(
                     "Tableau de bord — indicateurs complémentaires"
                 )
+                return
+            self._stats_dirty = False
+            self._shown_epoch = dashboard_snapshot_epoch()
 
         run_in_background(
             self,

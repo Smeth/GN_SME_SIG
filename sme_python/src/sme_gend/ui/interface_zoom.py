@@ -43,6 +43,10 @@ def set_interface_zoom(app, percent):
             font.setPixelSize(max(1, round(font.pixelSize() * percent / 100)))
         else:
             font.setPointSizeF(max(1, font.pointSizeF() * percent / 100))
-    app.setFont(font)
-    app.setStyleSheet(scaled_stylesheet(str(app.property('sme_unscaled_stylesheet') or ''), percent))
+    if app.font() != font:
+        app.setFont(font)
+    stylesheet = scaled_stylesheet(str(app.property('sme_unscaled_stylesheet') or ''), percent)
+    # Reapplying an identical global QSS repolishes every cached page.
+    if app.styleSheet() != stylesheet:
+        app.setStyleSheet(stylesheet)
     return percent

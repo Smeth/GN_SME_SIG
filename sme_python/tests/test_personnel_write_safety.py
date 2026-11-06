@@ -13,7 +13,7 @@ def row(**kwargs):
 
 
 def test_historical_edit_uses_selected_month(monkeypatch):
-    repo = MagicMock()
+    repo = MagicMock(spec=sync.MySQLAgentDossierRepository)
     repo.resolve_agent_id.return_value = 7
     monkeypatch.setattr(sync, "MySQLAgentDossierRepository", lambda st: repo)
     monkeypatch.setattr(sync, "_active_mois", lambda: "2026-09")

@@ -175,6 +175,8 @@ def reopen_closed_month_for_corrections(
     Passe les lignes sme_periode du mois indiqué de statut « fermé » à « Réouvert ».
     Enregistre un événement d'audit applicatif.
     """
+    from sme_gend.services.action_permissions import assert_any_permission
+    assert_any_permission("workflow.reopen_month")
     warnings: list[str] = []
     auteur_s = (auteur or "").strip()
     motif_s = (motif or "").strip()

@@ -214,6 +214,7 @@ def export_auth_activity_csv(lines: list[dict[str, Any]]) -> str:
     """Export CSV (;) des lignes du journal auth."""
     import csv
     import io
+    from sme_gend.services.csv_safety import spreadsheet_cell
 
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";", lineterminator="\n")
@@ -223,13 +224,13 @@ def export_auth_activity_csv(lines: list[dict[str, Any]]) -> str:
         if not detail and isinstance(row.get("payload"), dict):
             detail = str(row["payload"].get("detail") or "")
         writer.writerow(
-            [
+            [spreadsheet_cell(value) for value in [
                 row.get("ts_utc") or "",
                 row.get("actor") or "",
                 row.get("action") or "",
                 row.get("module") or "auth",
                 detail,
-            ]
+            ]]
         )
     return buf.getvalue()
 

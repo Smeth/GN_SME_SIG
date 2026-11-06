@@ -1502,6 +1502,8 @@ def test_existing_workspace_cannot_be_overwritten_by_old_local_month(isolated_my
     if has_workspace:
         AppConfigRepository(settings).set_json('sme_workspace',{'editeur_defaut':'CURRENT CONFIG'})
     service=SmeWorkspaceService(settings)
+    from sme_gend.services.sme_editing_policy import reopen_closed_month_for_corrections
+    reopen_closed_month_for_corrections(settings,'2026-10','synthetic','Prepare the authorized activation fixture')
     service.set_active_mois('2026-10',expected=service.load_active_month_snapshot())
     legacy=tmp_path/'legacy_context.json';legacy.write_text(json.dumps({'mois_actif':'2026-09','editeur_defaut':'OBSOLETE'}))
     monkeypatch.setattr(sme_context,'_legacy_context_file',lambda:legacy)
@@ -4731,7 +4733,7 @@ def test_workspace_lot25_legacy_initializer_does_not_replace_a_concurrent_winner
 
 
 
-def _month_lot26_setup(isolated_mysql,monkeypatch,tmp_path):
+def _month_lot26_setup(isolated_mysql,monkeypatch,tmp_path,*,prepare_activation=True):
     from sme_gend.config import sme_context
     from sme_gend.services import app_config_store
     from sme_gend.services.sme_workspace_service import SmeWorkspaceService
@@ -4740,6 +4742,11 @@ def _month_lot26_setup(isolated_mysql,monkeypatch,tmp_path):
     monkeypatch.setattr(sme_context,'_migrate_legacy_context_to_db',lambda st:None)
     monkeypatch.setattr(sme_context,'_load_local_ui_prefs',lambda:{})
     monkeypatch.setattr(sme_context,'_save_local_ui_prefs',lambda ctx:None)
+    if prepare_activation:
+        # Version/concurrency scenarios use a legally reopened target. Separate
+        # permission tests assert that activating a still closed month fails.
+        from sme_gend.services.sme_editing_policy import reopen_closed_month_for_corrections
+        reopen_closed_month_for_corrections(settings,'2026-10','synthetic','Prepare the authorized activation fixture')
     return settings,connect,params,closure,SmeWorkspaceService(settings)
 
 
@@ -4772,6 +4779,8 @@ def test_month_lot26_context_keeps_the_displayed_operational_month_version(isola
 def test_month_lot26_return_to_the_old_month_does_not_revive_an_old_snapshot(isolated_mysql,monkeypatch,tmp_path):
     settings,connect,params,closure,service=_month_lot26_setup(isolated_mysql,monkeypatch,tmp_path)
     old=_month_lot26_load(service);_month_lot26_set(service,'2026-10',old)
+    from sme_gend.services.sme_editing_policy import reopen_closed_month_for_corrections
+    reopen_closed_month_for_corrections(settings,'2026-09','synthetic','Explicitly authorize the return for the ABA scenario')
     _month_lot26_set(service,'2026-09',_month_lot26_load(service))
     with pytest.raises(ValueError,match='modifié|changé'):_month_lot26_set(service,'2026-11',old)
 
@@ -4825,15 +4834,15 @@ def test_month_lot26_statuses_projection_revision_and_memory_follow_only_real_co
     original=cfg._month_snapshot if route=='context' else cfg
     try:
         with mysql_import_transaction(settings):
-            save('2026-10');save('2026-09')
+            save('2026-10');save('2026-11')
             assert _month_lot26_observe(connect,params)==before
             if route=='context':assert cfg._month_snapshot is original
             if not commit:raise ValueError('synthetic outer rollback')
     except ValueError:assert not commit
     after=_month_lot26_observe(connect,params)
     if commit:
-        assert after!=before and service.get_active_mois()=='2026-09'
-        if route=='context':assert cfg._month_snapshot==service.load_active_month_snapshot() and cfg._loaded_mois_actif=='2026-09'
+        assert after!=before and service.get_active_mois()=='2026-11'
+        if route=='context':assert cfg._month_snapshot==service.load_active_month_snapshot() and cfg._loaded_mois_actif=='2026-11'
     else:
         assert after==before
         if route=='context':assert cfg._month_snapshot is original
@@ -4965,6 +4974,9 @@ def test_month_lot26_month_changed_during_backup_prevents_a_stale_closure(isolat
     expected=service.load_active_month_snapshot();backup_file=tmp_path/'new_safety.sql';backup_file.write_bytes(b'SYNTHETIC BACKUP')
     def backup(*a):
         service.set_active_mois('2026-10',expected=service.load_active_month_snapshot())
+        if aba:
+            from sme_gend.services.sme_editing_policy import reopen_closed_month_for_corrections
+            reopen_closed_month_for_corrections(settings,'2026-09','synthetic','Explicitly authorize the ABA return')
         service.set_active_mois('2026-09' if aba else '2026-11',expected=service.load_active_month_snapshot())
         return backup_file,[]
     monkeypatch.setattr(mysql_backup_service,'backup_mysql_database',backup)
@@ -4974,7 +4986,7 @@ def test_month_lot26_month_changed_during_backup_prevents_a_stale_closure(isolat
 
 def test_month_lot26_archive_cannot_replace_existing_live_statuses(isolated_mysql,monkeypatch,tmp_path):
     from sme_gend.services.active_month_guard import period_state_write,preserved_import_period
-    settings,connect,params,closure,service=_month_lot26_setup(isolated_mysql,monkeypatch,tmp_path)
+    settings,connect,params,closure,service=_month_lot26_setup(isolated_mysql,monkeypatch,tmp_path,prepare_activation=False)
     with period_state_write(settings,reason='career_import'):
         with __import__('sme_gend.repositories.mysql_connection',fromlist=['MySQLConnection']).MySQLConnection(settings).connect() as conn:
             preserved_import_period(conn,'2026-09',statut='Fermé',selected_month='2026-09')
@@ -4989,7 +5001,7 @@ def test_month_lot26_archive_cannot_replace_existing_live_statuses(isolated_mysq
 @pytest.mark.parametrize('fail_audit',[False,True])
 def test_month_lot26_reopening_preserves_active_month_and_is_transactional(isolated_mysql,monkeypatch,tmp_path,fail_audit):
     from sme_gend.services import sme_editing_policy as policy
-    settings,connect,params,closure,service=_month_lot26_setup(isolated_mysql,monkeypatch,tmp_path)
+    settings,connect,params,closure,service=_month_lot26_setup(isolated_mysql,monkeypatch,tmp_path,prepare_activation=False)
     before=_month_lot26_observe(connect,params)
     if fail_audit:
         def failed(**kw):raise OSError('synthetic reopen audit failure')
@@ -5047,7 +5059,7 @@ def test_month_lot26_import_remains_committed_if_another_post_prevents_its_closu
 
 def test_month_lot26_reopening_on_another_post_invalidates_an_old_month_choice(isolated_mysql,monkeypatch,tmp_path):
     from sme_gend.services.sme_editing_policy import reopen_closed_month_for_corrections
-    settings,connect,params,closure,service=_month_lot26_setup(isolated_mysql,monkeypatch,tmp_path)
+    settings,connect,params,closure,service=_month_lot26_setup(isolated_mysql,monkeypatch,tmp_path,prepare_activation=False)
     old=service.load_active_month_snapshot()
     reopen_closed_month_for_corrections(settings,'2026-10',auteur='synthetic',motif='test')
     with pytest.raises(ValueError,match='changé'):service.set_active_mois('2026-11',expected=old)

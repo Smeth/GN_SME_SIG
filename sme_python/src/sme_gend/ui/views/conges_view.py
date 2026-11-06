@@ -174,8 +174,8 @@ class CongesView(QWidget):
         self._btn_select_all = QPushButton("Tout cocher")
         self._btn_select_all.setToolTip("Cocher toutes les lignes actuellement affichées.")
         self._btn_select_all.clicked.connect(self._toggle_select_all_visible)
-        self._btn_present = QPushButton("Remettre à Présent (cochés)")
-        self._btn_present.setToolTip("Repasser en « Présent » toutes les lignes cochées.")
+        self._btn_present = QPushButton("Fin de congé / retour (cochés)")
+        self._btn_present.setToolTip("Enregistrer la date réelle de fin des congés cochés et le retour à Présent.")
         self._btn_present.clicked.connect(self._reset_checked)
         self._btn_refresh = QPushButton("Rafraîchir")
         self._btn_refresh.clicked.connect(self._reload_lists)
@@ -413,7 +413,7 @@ class CongesView(QWidget):
         else:
             self._lbl_mois_actif_ref.setText("")
 
-    def _reload_lists_async(self) -> None:
+    def _reload_lists_async(self, *, preserve_checked: bool = False) -> None:
         if not self._view_data.needs_load():
             return
         self._request_generation = getattr(self, "_request_generation", 0) + 1
@@ -425,6 +425,7 @@ class CongesView(QWidget):
             return (generation == self._request_generation and revision == self._view_data.revision
                     and base is self._settings and month == self._view_mois)
 
+        checked_after_load = set(self._checked) if preserve_checked else set()
         self._all_rows, self._history_rows, self._conges_by_legacy = [], [], {}
         self._checked.clear()
         self._apply_filters()
@@ -456,6 +457,9 @@ class CongesView(QWidget):
             self._history_rows = build_conge_history_rows(
                 liste_rows, conges, scoped_settings
             )
+            if checked_after_load:
+                self._checked.update(checked_after_load.intersection(
+                    self._movement_key(m) for m in self._all_rows + self._history_rows))
             self._apply_filters()
             self._view_data.finish_load()
             self._refresh_action_state()
@@ -731,44 +735,24 @@ class CongesView(QWidget):
     def _reset_checked(self) -> None:
         if not self._check_can_edit():
             return
-        keys = sorted(self._checked)
-        if not keys:
-            QMessageBox.information(self, "Congés", "Cochez au moins une ligne.")
+        if not self._checked:
+            QMessageBox.information(self, "Fin de congé / retour", "Cochez au moins une ligne.")
             return
-        if not confirm_yes_no(
-            self,
-            "Remettre à Présent",
-            f"Repasser {len(keys)} personne(s) en « Présent » ?",
-            default_no=True,
-        ):
-            return
+        from sme_gend.ui.activity_return_action import run_activity_return
         from sme_gend.services.liste_generale_cache import invalidate_liste_cache
-        from sme_gend.services.personnel_service import PersonnelService
 
-        personnel = PersonnelService(self._scoped_settings)
-        by_id = {r.id: r for r in self._liste.fetch_all() if r.id}
-        n_ok = 0
-        for key in keys:
-            m = next((x for x in self._display_rows if self._movement_key(x) == key), None)
-            if m is None or not m.liste.id:
-                continue
-            cur = by_id.get(m.liste.id)
-            if cur is None:
-                continue
-            try:
-                personnel.update_personnel(
-                    cur,
-                    replace(cur, position_admin="Présent"),
-                    edit_motif="Fin de congé depuis module Congés",
-                )
-                n_ok += 1
-            except Exception:
-                pass
-        self._checked.clear()
+        requests = []
+        for key in sorted(self._checked):
+            movement = next((m for m in self._display_rows if self._movement_key(m) == key), None)
+            requests.append((key, movement.liste if movement else None, movement.conge if movement else None))
+        confirmed = run_activity_return(self, self._scoped_settings, 'conge', requests,
+                                        title="Fin de congé / retour")
+        if confirmed is None:
+            return
+        self._checked.difference_update(confirmed)
         invalidate_liste_cache(self._scoped_settings)
         self._view_data.mark_stale()
-        self._reload_lists_async()
-        QMessageBox.information(self, "Congés", f"{n_ok} ligne(s) mise(s) à jour.")
+        self._reload_lists_async(preserve_checked=True)
 
     def _on_export(self) -> None:
         from sme_gend.services.auth_guard import require_permission

@@ -124,7 +124,7 @@ def _open_mysql_config_dialog(settings, *, parent=None) -> bool:
     from sme_gend.config import get_settings
     from sme_gend.ui.config_paths_dialog import ConfigPathsDialog
 
-    dlg = ConfigPathsDialog(parent, settings=settings, focus_database=True)
+    dlg = ConfigPathsDialog(parent, settings=settings, focus_database=True, bootstrap_configuration=True)
     if dlg.exec() != QDialog.DialogCode.Accepted:
         return False
     get_settings()  # recharge le cache interne si besoin

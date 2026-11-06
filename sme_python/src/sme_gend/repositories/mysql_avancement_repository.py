@@ -114,7 +114,9 @@ class MySQLAvancementRepository(BaseMySQLRepository):
                     )
                     mark_reference_write(True)
 
-    def load_agents(self) -> list[AgentAvancementInput]:
+    def load_agents(self, *, on: date | None = None) -> list[AgentAvancementInput]:
+        from sme_gend.services.avancement_reference_date import avancement_reference_date
+        on = avancement_reference_date(self._settings, on=on)
         sql, params = _select_liste(self._scope_mois())
         sql = sql.replace(
             "c.id AS carriere_id",
@@ -141,8 +143,9 @@ class MySQLAvancementRepository(BaseMySQLRepository):
                     FROM agent_diplome d
                     LEFT JOIN ref_diplome rd ON rd.id = d.ref_diplome_id
                     WHERE d.agent_id IN ({placeholders})
+                      AND (d.date_obtention IS NULL OR d.date_obtention <= %s)
                     """,
-                    tuple(agent_ids),
+                    (*agent_ids, on),
                 )
                 diplomes: dict[int, list[str]] = {}
                 for aid, libelle in cur.fetchall():
@@ -154,9 +157,10 @@ class MySQLAvancementRepository(BaseMySQLRepository):
                     SELECT agent_id, grade_libelle, date_passation, obs
                     FROM agent_passation_grade
                     WHERE agent_id IN ({placeholders})
+                      AND (date_passation IS NULL OR date_passation <= %s)
                     ORDER BY date_passation IS NULL, date_passation, id
                     """,
-                    tuple(agent_ids),
+                    (*agent_ids, on),
                 )
                 passations: dict[int, list[tuple]] = {}
                 for row in cur.fetchall():
@@ -171,6 +175,8 @@ class MySQLAvancementRepository(BaseMySQLRepository):
             grade = (liste.grade or "").strip()
             code = canonical_grade(grade)
             date_grade = _as_date(liste.date_grade)
+            if date_grade is not None and date_grade > on:
+                date_grade = None
             issu = False
             for _aid, glib, pdt, obs in passations.get(agent_id, []):
                 glibelle = (glib or "").strip()
@@ -181,7 +187,8 @@ class MySQLAvancementRepository(BaseMySQLRepository):
                 if canonical_grade(glibelle) == "SLT" and "ecole" in normalize_grade_key(obs or ""):
                     issu = True
             labels = list(diplomes.get(agent_id, []))
-            if (liste.diplome or "").strip():
+            diploma_date = _as_date(liste.date_obtention)
+            if (liste.diplome or "").strip() and (diploma_date is None or diploma_date <= on):
                 labels.append(liste.diplome or "")
             grade_code = grade_abbr(grade, settings=self._settings)
             out.append(

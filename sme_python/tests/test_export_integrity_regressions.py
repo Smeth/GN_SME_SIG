@@ -8,6 +8,7 @@ from openpyxl import load_workbook
 from sme_gend.config.settings import Settings
 from sme_gend.models.liste_generale import ListeGeneraleRow
 from sme_gend.models.numerique_satellite import MissionDetail, StageDetail
+from sme_gend.models.agent_evenement import AgentCongeRow
 from sme_gend.services.sme_dpf_service import SmeDpfBundle
 
 
@@ -32,8 +33,8 @@ def scenario(monkeypatch):
         "stages_loc": {}, "stages_ex": {"7": StageDetail("Stage extérieur", "Pays", "01/09/2026 - 30/09/2026")},
         "stages_internal": {"3": StageDetail("Formation interne", "Centre", "01/09/2026 - 30/09/2026")},
         "malades": {}, "deserteurs": {},
-        "conges": {"4": SimpleNamespace(type_label="Congé administratif", date_debut="2026-09-05",
-                                          date_fin="2026-09-15", observation="Autorisation congé")},
+        "conges": {"4": AgentCongeRow("ADMIN", "Congé administratif", "2026-09-05",
+                                     "2026-09-15", "11", "Autorisation congé", "2026-09", "MANUEL")},
         "positions": {("5", "punis"): ("2026-09-02", "2026-09-07", "Unité punition", "DEC-P", "Motif réel")},
     }
     methods = {"load_missions": "missions", "load_malades": "malades", "load_deserteurs": "deserteurs",
@@ -44,7 +45,7 @@ def scenario(monkeypatch):
             assert st.mysql_view_mois == "2026-09"
     for method, key in methods.items():
         setattr(Satellites, method, lambda self, key=key: detail[key])
-    monkeypatch.setattr(export, "cached_numerique_liste_rows", lambda st: rows if st.mysql_view_mois == "2026-09" else [])
+    monkeypatch.setattr("sme_gend.services.liste_generale_cache.cached_numerique_liste_rows", lambda st: rows if st.mysql_view_mois == "2026-09" else [])
     monkeypatch.setattr(export, "NumeriqueSatelliteRepository", Satellites)
     monkeypatch.setattr(export, "SubdivisionRepository", lambda st: SimpleNamespace(fetch_flat_hierarchy=lambda: []))
     class EmptyGainPerteRepository:
@@ -72,31 +73,36 @@ def scenario(monkeypatch):
 def test_complete_sme_has_selected_period_details_and_no_template_records(monkeypatch, tmp_path):
     from sme_gend.services.numerique_excel_export import export_numerique_workbook
     settings, rows, detail = scenario(monkeypatch)
+    from sme_gend.models.detaches_file_config import DetachesFileConfig
+    from sme_gend.services import numerique_excel_export as export
+    def capture(st, mois, grade_order, movement_settings):
+        assert mois == st.mysql_view_mois == "2026-09"
+        return {"mois": mois, "rows": rows, "grades": [], "details": detail,
+                "detaches": [rows[5]], "previous_counts": [0] * 10, "movements": [],
+                "detaches_config": DetachesFileConfig().to_dict()}, {"captured_at_utc": "2026-11-06T10:00:00+00:00"}
+    monkeypatch.setattr(export, "_capture_numerique_workbook_data", capture)
+    monkeypatch.setattr("sme_gend.services.sme_export_revision.revision_root", lambda st: tmp_path / "revisions")
     target = tmp_path / "SME.xlsx"
-    template = Path(__file__).resolve().parents[1] / "modeles/numerique.xlsx"
-    # Le mois explicite d'export prime sur un ancien mois actif transmis par l'UI.
-    export_numerique_workbook(settings, template, target, export_mois="2026-09", mois_actif="2026-02")
+    template = Path(__file__).resolve().parents[2] / "SME_GEND_model.xlsx"
+    revision = export_numerique_workbook(settings, template, target, export_mois="2026-09", mois_actif="2026-02")
     wb = load_workbook(target)
-    assert sum(1 for r in range(4, wb["LISTE GENERALE"].max_row + 1)
-               if wb["LISTE GENERALE"].cell(r, 2).value) == len(rows)
-    assert wb["MISSION"]["E4"].value == "Mission test"
-    assert wb["MISSION"]["G4"].value == "NDS-42"
-    assert wb["CONGé ADMIN"]["H4"].value.date().isoformat() == "2026-09-05"
-    assert wb["CONGé ADMIN"]["I4"].value.date().isoformat() == "2026-09-15"
-    assert wb["DETENTION-PRISON"]["F4"].value == "Unité punition"
-    assert wb["DETENTION-PRISON"]["J4"].value == "Motif réel"
-    assert wb["STAGE-INTERNE"]["E4"].value == "Formation interne"
-    summary = wb["NUMERIQUE"]
-    assert summary.cell(8, summary.max_column).value == len(rows)
-    assert sum(summary.cell(r, summary.max_column).value for r in range(9, summary.max_row)) == len(rows)
-    for sheet in wb:
-        assert sheet.print_area
-        assert "2026-09" in str(sheet.cell(3 if sheet.title == "NUMERIQUE" else 2, 1).value)
-        assert not any("février" in str(c.value).casefold() for line in sheet for c in line)
-        assert not any(c.data_type == "f" for line in sheet for c in line)
-        for merged in sheet.merged_cells.ranges:
-            assert merged.max_row <= 3
-    wb.close()
+    cached = load_workbook(target, data_only=True)
+    original = load_workbook(template)
+    try:
+        assert sum(1 for r in range(4, wb["LISTE GENERALE"].max_row + 1)
+                   if wb["LISTE GENERALE"].cell(r, 2).value) == len(rows)
+        assert wb["MISSION"]["E4"].value == "Mission test"
+        assert wb["MISSION"]["G4"].value == "NDS-42"
+        assert wb["Feuil4"]["E5"].value == "Formation interne"
+        assert wb["DETENTION-PRISON"]["E4"].value == "Unité punition"
+        assert cached["NUMERIQUE"]["T8"].value == len(rows)
+        assert wb.sheetnames == original.sheetnames
+        assert wb["NUMERIQUE"]["B8"].data_type == "f"
+        assert target.read_bytes() == revision.workbook.read_bytes()
+    finally:
+        wb.close()
+        cached.close()
+        original.close()
 
 
 def test_dpf_includes_all_control_positions_and_excludes_other_structures(monkeypatch, tmp_path):

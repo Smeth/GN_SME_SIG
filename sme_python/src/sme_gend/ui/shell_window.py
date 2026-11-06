@@ -1427,20 +1427,25 @@ class ShellWindow(QMainWindow):
         w = self._page_widget(self._stack.currentIndex())
         if w is None:
             return
-        if hasattr(w, "mark_view_stale"):
-            w.mark_view_stale()
-        elif hasattr(w, "mark_dirty"):
-            w.mark_dirty()
         if hasattr(w, 'refresh_from_database'):
+            if hasattr(w, "mark_view_stale"):
+                w.mark_view_stale()
             w.refresh_from_database()
-        elif hasattr(w, "load_data"):
-            w.load_data()
-        elif hasattr(w, "_reload_stats"):
-            w._reload_stats(silent=False)
-        elif hasattr(w, "on_page_activated"):
-            w.on_page_activated()
-        elif hasattr(w, "apply_runtime_after_config_change"):
-            w.apply_runtime_after_config_change()
+        else:
+            # mark_dirty may itself start a load. Explicit database refreshes
+            # own their single load and preserve the current search/selection.
+            if hasattr(w, "mark_view_stale"):
+                w.mark_view_stale()
+            elif hasattr(w, "mark_dirty"):
+                w.mark_dirty()
+            if hasattr(w, "load_data"):
+                w.load_data()
+            elif hasattr(w, "_reload_stats"):
+                w._reload_stats(silent=False)
+            elif hasattr(w, "on_page_activated"):
+                w.on_page_activated()
+            elif hasattr(w, "apply_runtime_after_config_change"):
+                w.apply_runtime_after_config_change()
         from sme_gend.services.sme_editing_policy import peek_editing_state
 
         st = peek_editing_state(self._settings)
@@ -1460,11 +1465,6 @@ class ShellWindow(QMainWindow):
         """Retourne (peut_reculer, peut_avancer) selon les mois connus en base."""
         from sme_gend.services.sme_month_closure import canonical_sme_mois_yyyy_mm
         from sme_gend.services.sme_workspace_service import SmeWorkspaceService
-        from sme_gend.services.workflow_permissions import session_can_perform_action
-
-        if not session_can_perform_action("workflow.set_active_month"):
-            return False, False
-
         current = self._display_mois()
 
         try:
@@ -1529,71 +1529,26 @@ class ShellWindow(QMainWindow):
             return canonical_sme_mois_yyyy_mm(load_sme_context().mois_actif or "") or ""
 
     def _activate_period(self, target: str) -> None:
-        """
-        Active un mois pour l'affichage.
-
-        - Mois **fermé** : consultation seule (filtre MySQL), sans rouvrir sme_periode.
-        - Mois **ouvert** : devient le mois de travail en base (set_active_mois).
-        """
-        from sme_gend.config.sme_context import is_mois_ferme
+        """Change only this workstation's displayed month, never global statuses."""
         from sme_gend.services.sme_editing_policy import invalidate_editing_state_cache
-        from sme_gend.services.sme_month_closure import canonical_sme_mois_yyyy_mm, find_archive_for_month
-        from sme_gend.services.sme_workspace_service import SmeWorkspaceService
+        from sme_gend.services.sme_month_closure import canonical_sme_mois_yyyy_mm
 
         if self._has_unsaved_changes():
             QMessageBox.warning(self, "Brouillons en cours", "Enregistrez vos modifications avant de changer de mois.")
             return
-        ym = canonical_sme_mois_yyyy_mm(target) or (target or "").strip()
+        ym = canonical_sme_mois_yyyy_mm(target)
         if not ym:
             return
 
         invalidate_editing_state_cache()
 
-        ws = SmeWorkspaceService(self._settings)
-        in_mysql = ym in set(ws.list_mysql_months())
-        archive_only = find_archive_for_month(ym) is not None and not in_mysql
-
-        if is_mois_ferme(ym) or archive_only:
-            self._consultation_mois = ym
-            self.refresh_for_month_change()
-            return
-
-        self._consultation_mois = None
         op = self._operational_mois()
-        if op == ym:
-            self.refresh_for_month_change()
-            return
-        ctx = load_sme_context()
-        displayed = getattr(self._context_banner,"_month_snapshot",None)
-        if displayed is not None:
-            ctx._month_snapshot = displayed
-            ctx._loaded_mois_actif = displayed.active_month
-        else:
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(self,"Mois de travail","Actualisez les périodes avant de changer le mois actif.")
-            return
-        ctx.mois_actif = ym
-        try:
-            save_sme_context(ctx,force_month_change=True)
-        except Exception as exc:
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.critical(self,"Mois de travail",str(exc))
-            return
+        self._consultation_mois = None if op == ym else ym
         self.refresh_for_month_change()
 
     def _navigate_month(self, direction: int) -> None:
         from sme_gend.services.sme_month_closure import canonical_sme_mois_yyyy_mm
         from sme_gend.services.sme_workspace_service import SmeWorkspaceService
-        from sme_gend.services.workflow_permissions import session_can_perform_action
-
-        if not session_can_perform_action("workflow.set_active_month"):
-            from PySide6.QtWidgets import QMessageBox
-
-            QMessageBox.warning(
-                self, "Droits", "Vous n'avez pas la permission de changer de période."
-            )
-            return
-
         current = self._display_mois()
 
         mois_list: list[str] = []
@@ -1835,9 +1790,9 @@ class ShellWindow(QMainWindow):
             f"<b>Archive disque</b> = copie .mdb{arch_hint}. "
             "<b>Données MySQL</b> = période en base (import ① requis pour la liste générale).<br><br>"
             f"<b>Mois de travail actuel :</b> {op_mois or '—'}.<br>"
-            "Double-clic : <b>consulter</b> un mois clôturé (lecture seule, sans rouvrir la période) "
-            "ou <b>activer</b> un mois ouvert. "
-            "Bouton « Définir comme mois de travail » pour forcer l'activation (Pilotage SME)."
+            "Double-clic : <b>consulter</b> un mois sans changer le mois de travail des autres postes. "
+            "L'activation est réservée au bouton « Définir comme mois de travail » ; "
+            "un mois clôturé doit d'abord être réouvert avec un motif dans le pilotage SME."
         )
         info.setWordWrap(True)
         info.setTextFormat(Qt.TextFormat.RichText)
@@ -1927,8 +1882,7 @@ class ShellWindow(QMainWindow):
         btn_row = QHBoxLayout()
         btn_consult = QPushButton("Consulter la sélection")
         btn_consult.setToolTip(
-            "Affiche le mois en lecture seule s'il est clôturé ; "
-            "active le mois de travail s'il est ouvert."
+            "Affiche ce mois sur ce poste sans modifier les périodes partagées."
         )
         btn_consult.clicked.connect(lambda: _on_activate(_selected_ym()))
         btn_work = QPushButton("Définir comme mois de travail…")
@@ -1938,8 +1892,17 @@ class ShellWindow(QMainWindow):
         )
 
         def _on_set_work() -> None:
+            from sme_gend.services.auth_guard import require_permission
+            if not require_permission(dlg, "workflow.set_active_month"):
+                return
+            if self._has_unsaved_changes():
+                QMessageBox.warning(dlg, "Brouillons en cours", "Enregistrez vos modifications avant de changer le mois de travail.")
+                return
             target = _selected_ym()
             if not target:
+                return
+            if ws.is_month_closed(target):
+                QMessageBox.warning(dlg, "Mois clôturé", "Utilisez la réouverture exceptionnelle avec un motif avant d'activer ce mois.")
                 return
             from sme_gend.ui.confirm_dialogs import confirm_yes_no
 
@@ -1952,7 +1915,6 @@ class ShellWindow(QMainWindow):
                 default_no=True,
             ):
                 return
-            self._consultation_mois = None
             from copy import deepcopy
             ctx2 = deepcopy(ctx)
             ctx2.mois_actif = target
@@ -1961,10 +1923,13 @@ class ShellWindow(QMainWindow):
             except Exception as exc:
                 QMessageBox.critical(dlg,"Mois de travail",str(exc))
                 return
+            self._consultation_mois = None
             self.refresh_for_month_change()
             dlg.accept()
 
         btn_work.clicked.connect(_on_set_work)
+        from sme_gend.services.auth_guard import session_has_permission
+        btn_work.setEnabled(session_has_permission("workflow.set_active_month"))
         btn_row.addWidget(btn_consult)
         btn_row.addWidget(btn_work)
         btn_row.addStretch()
@@ -2094,6 +2059,7 @@ class ShellWindow(QMainWindow):
             "Rechargement immédiat après enregistrement."
         )
         act_paths.triggered.connect(self._open_paths_config)
+        self._act_paths_configuration = act_paths
         m_file.addAction(act_paths)
 
         m_import = m_file.addMenu("Import & archives")
@@ -2245,13 +2211,21 @@ class ShellWindow(QMainWindow):
 
     def _open_paths_config(self) -> None:
         from PySide6.QtWidgets import QMessageBox
+        from sme_gend.services.auth_guard import require_permission
+
+        if not require_permission(self, "system.settings"):
+            return
 
         from sme_gend.ui.config_paths_dialog import ConfigPathsDialog
 
         if self._has_unsaved_changes():
             QMessageBox.warning(self, "Brouillons en cours", "Enregistrez vos modifications avant de changer la configuration.")
             return
-        dlg = ConfigPathsDialog(self, settings=self._settings)
+        try:
+            dlg = ConfigPathsDialog(self, settings=self._settings)
+        except PermissionError as exc:
+            QMessageBox.warning(self, "Droits", str(exc))
+            return
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         self.reload_runtime_configuration(show_success_dialog=True)
@@ -2439,6 +2413,10 @@ class ShellWindow(QMainWindow):
 
     def _apply_nav_permissions(self) -> None:
         """Masque les entrées de menu sans permission (auth activée)."""
+        from sme_gend.services.auth_guard import session_has_permission
+        config_action = getattr(self, "_act_paths_configuration", None)
+        if config_action is not None:
+            config_action.setEnabled(session_has_permission("system.settings"))
         for item in self._walk_nav_items():
             idx = item.data(0, ROLE_STACK)
             if idx is None:

@@ -15,13 +15,15 @@ class ConfigPathsDialog(QDialog):
         *,
         settings: Settings | None = None,
         focus_database: bool = False,
+        bootstrap_configuration: bool = False,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Configuration des données (MySQL)")
         self.setModal(True)
         self.resize(720, 520)
 
-        self._form = PathsConfigForm(self, settings=settings, focus_database=focus_database)
+        self._form = PathsConfigForm(self, settings=settings, focus_database=focus_database,
+                                     bootstrap_configuration=bootstrap_configuration)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )

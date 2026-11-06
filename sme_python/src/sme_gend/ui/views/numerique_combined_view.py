@@ -266,21 +266,22 @@ class NumeriqueCombinedView(QWidget):
             return
         dest_p = Path(dest)
 
-        def _work() -> bool:
-            export_numerique_workbook(
+        def _work():
+            return export_numerique_workbook(
                 self._preview.liste_settings,
                 tpl,
                 dest_p,
                 export_mois=export_mois,
                 gain_perte_settings=self._preview.gain_perte_settings,
             )
-            return True
-
-        if run_with_progress(self, "Export Excel", "Génération du classeur…", _work) is None:
+        revision = run_with_progress(self, "Export Excel", "Génération du classeur…", _work)
+        if revision is None:
             return
         month_lbl = month_title_de_lowercase(export_mois) or export_mois or "—"
-        QMessageBox.information(
-            self,
-            "Export",
-            f"Fichier enregistré :\n{dest}\n\nMois SME : {month_lbl}",
-        )
+        receipt = (f"Fichier enregistré :\n{dest}\n\nMois SME : {month_lbl}"
+                   f"\nVersion : {revision.revision_id}\nDossier conservé : {revision.folder}")
+        if revision.journal_warning:
+            QMessageBox.warning(self, "Export enregistré — historique à vérifier",
+                                receipt + "\n\n" + revision.journal_warning)
+        else:
+            QMessageBox.information(self, "Export enregistré", receipt)

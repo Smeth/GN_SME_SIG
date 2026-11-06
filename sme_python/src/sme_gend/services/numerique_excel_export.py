@@ -5,13 +5,16 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sme_gend.services.sme_export_revision import ExportRevision
 
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 from sme_gend.config.settings import Settings
 from sme_gend.models.liste_generale import ListeGeneraleRow
-from sme_gend.services.liste_generale_cache import cached_numerique_liste_rows
 from sme_gend.repositories.subdivision_repository import SubdivisionFlatRow, SubdivisionRepository
 from sme_gend.repositories.numerique_satellite_repository import (
     DeserteurDetail,
@@ -1418,6 +1421,56 @@ def fill_indispo_sheet(
         write_cell_value(ws, INDISPO_TOTAL_ROW, c, t)
 
 
+def _capture_numerique_workbook_data(settings, mois, grade_order, movement_settings):
+    """All report inputs share one fresh MySQL snapshot, never the UI cache."""
+    from datetime import timezone
+    from sme_gend.repositories.mysql_connection import mysql_read_snapshot
+    from sme_gend.repositories.liste_generale_repository import ListeGeneraleRepository
+    from sme_gend.repositories.grade_repository import GradeRepository
+    from sme_gend.services.detaches_service import in_detaches_scope, _sort_key_detaches
+    from sme_gend.services.numerique_recap_baseline import resolve_recap_cd_baseline
+    from sme_gend.services.clean_sme_exports import _movements
+    from sme_gend.services.detaches_config_service import DetachesConfigService
+    from sme_gend.services.export_workbook_tables import export_details
+
+    with mysql_read_snapshot(settings) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT DATABASE(), @@hostname, UTC_TIMESTAMP(6)")
+            database, server, captured = cursor.fetchone()
+            cursor.execute("SELECT table_name FROM information_schema.tables "
+                           "WHERE table_schema=DATABASE() AND table_type='BASE TABLE' "
+                           "AND engine <> 'InnoDB'")
+            non_transactional = [str(item[0]) for item in cursor.fetchall()]
+            if non_transactional:
+                raise ValueError("Lecture SME cohérente impossible : tables non transactionnelles : "
+                                 + ", ".join(non_transactional))
+            cursor.execute("SELECT l.id, p.annee_mois, l.chemin_fichier, l.checksum, l.importe_le "
+                           "FROM import_lot l LEFT JOIN sme_periode p ON p.id=l.sme_periode_id "
+                           "WHERE p.annee_mois IN (%s,%s) ORDER BY l.id", (mois, _prev_ym_canon(mois)))
+            imports = [{"id": item[0], "mois": item[1], "source_path": item[2],
+                        "source_checksum": item[3],
+                        "imported_at": item[4].isoformat() if hasattr(item[4], "isoformat") else item[4]}
+                       for item in cursor.fetchall()]
+        rows = ListeGeneraleRepository(settings).fetch_all_at_mois(mois)
+        grades = GradeRepository(settings).fetch_all()
+        previous = resolve_recap_cd_baseline(settings, mois, grade_order,
+                                             grade_abbrev_map=build_grade_abbrev_map(grades))
+        dataset = {
+            "mois": mois, "rows": rows, "grades": grades,
+            "details": export_details(NumeriqueSatelliteRepository(settings)),
+            "detaches": sorted((row for row in rows if in_detaches_scope(row)), key=_sort_key_detaches),
+            "previous_counts": previous, "movements": _movements(movement_settings, mois, rows),
+            "detaches_config": DetachesConfigService(settings).load().to_dict(),
+        }
+    source = {
+        "kind": "mysql_monthly_snapshot", "database": database, "server": server,
+        "captured_at_utc": captured.replace(tzinfo=timezone.utc).isoformat(),
+        "imports": imports,
+        "history_policy": "Imported monthly observations retained; no dates inferred between archives.",
+    }
+    return dataset, source
+
+
 def export_numerique_workbook(
     settings: Settings,
     template_path: Path,
@@ -1427,19 +1480,26 @@ def export_numerique_workbook(
     mois_actif: str | None = None,
     export_mois: str | None = None,
     gain_perte_settings: Settings | None = None,
-) -> None:
-    """Remplit le modèle officiel avec les données du mois choisi."""
-    from dataclasses import replace
-    from sme_gend.config.liste_generale_scope import resolve_export_mois, settings_for_chosen_export_mois
-    from sme_gend.repositories.grade_repository import GradeRepository
-    from sme_gend.services.detaches_service import DetachesService
-    from sme_gend.services.numerique_recap_baseline import resolve_recap_cd_baseline
-    from sme_gend.services.numerique_model_export import build_from_model
-    from sme_gend.services.clean_sme_exports import _movements
-    from sme_gend.services.detaches_config_service import DetachesConfigService
-    from sme_gend.services.export_workbook_tables import export_details
-    from sme_gend.services.doc_gen_log import log_doc_generation
+) -> ExportRevision:
+    """Export the faithful model and retain a new verifiable revision.
 
+    This does not validate/close the month or change any imported Access archive.
+    """
+    from dataclasses import replace
+    from io import BytesIO
+    from sme_gend.config.liste_generale_scope import resolve_export_mois, settings_for_chosen_export_mois
+    from sme_gend.repositories.mysql_connection import mysql_database_key
+    from sme_gend.models.detaches_file_config import DetachesFileConfig
+    from sme_gend.services.numerique_model_export import build_from_model
+    from sme_gend.services.doc_gen_log import log_doc_generation
+    from sme_gend.services.auth_guard import session_can_export_documents
+    from sme_gend.services.auth_context import resolve_audit_actor
+    from sme_gend.services.sme_export_revision import (
+        revision_root, validate_export_destination, save_export_revision, retrieve_export_revision,
+    )
+
+    if not session_can_export_documents():
+        raise PermissionError("Le droit d'exporter les effectifs est nécessaire.")
     tpl = Path(template_path)
     if not tpl.is_file():
         raise FileNotFoundError(f"Gabarit situation numérique introuvable :\n{tpl}")
@@ -1448,23 +1508,52 @@ def export_numerique_workbook(
     if not eff_mois:
         raise ValueError("Choisissez le mois SME avant l'export.")
     data_settings = settings_for_chosen_export_mois(settings, eff_mois)
-    rows = cached_numerique_liste_rows(data_settings)
-    grades = GradeRepository(data_settings).fetch_all()
-    grade_map = build_grade_abbrev_map(grades)
-    grade_order = read_numerique_grades_from_template(tpl)
-    previous = resolve_recap_cd_baseline(data_settings, eff_mois, grade_order, grade_abbrev_map=grade_map)
-    details = export_details(NumeriqueSatelliteRepository(data_settings))
-    detaches = DetachesService(data_settings).fetch_detaches()
-    dest = Path(destination).expanduser().resolve()
     movement_settings = replace(gain_perte_settings, mysql_view_mois=eff_mois) if gain_perte_settings else data_settings
-    sheets = build_from_model(
-        tpl, dest, mois=eff_mois, rows=rows, grades=grades, details=details,
-        detaches=detaches, previous_counts=previous,
-        movements=_movements(movement_settings, eff_mois, rows),
-        detaches_config=DetachesConfigService(data_settings).load(),
+    if mysql_database_key(movement_settings) != mysql_database_key(data_settings):
+        raise ValueError("Le classeur SME doit lire les effectifs et les mouvements dans la même base.")
+    root = revision_root(data_settings)
+    dest = validate_export_destination(destination, template=tpl, root=root)
+    # Read once. Editing the source template during capture cannot change the
+    # model used to generate a revision or its recorded hash.
+    template_bytes = tpl.read_bytes()
+    model = load_workbook(BytesIO(template_bytes), read_only=True, data_only=True)
+    try:
+        grade_order = _parse_grade_columns(model["NUMERIQUE"])[0] if "NUMERIQUE" in model.sheetnames else []
+    finally:
+        model.close()
+    dataset, source = _capture_numerique_workbook_data(data_settings, eff_mois, grade_order, movement_settings)
+    actor = resolve_audit_actor()
+
+    def render(model_path, workbook_path):
+        values = dict(dataset)
+        values["detaches_config"] = DetachesFileConfig.from_dict(values["detaches_config"])
+        return build_from_model(model_path, workbook_path, **values)
+
+    revision = save_export_revision(
+        root=root, mois=eff_mois, template_bytes=template_bytes, dataset=dataset,
+        source=source, actor=actor, renderer=render,
     )
-    log_doc_generation(settings=data_settings, doc_type="numerique", format="xlsx",
-                       count=len(rows), dest_path=str(dest), mois=eff_mois, meta={"sheets": list(sheets)})
+    try:
+        retrieve_export_revision(revision.folder, dest, expected=revision.journal_metadata())
+    except Exception as exc:
+        raise RuntimeError("La version SME a été conservée, mais la copie vers le fichier choisi a échoué. "
+                           f"Version récupérable : {revision.workbook}") from exc
+    try:
+        log_doc_generation(settings=data_settings, doc_type="numerique", format="xlsx",
+                           count=len(dataset["rows"]), dest_path=str(dest), mois=eff_mois,
+                           meta=revision.journal_metadata())
+    except Exception as exc:
+        # Both durable outputs exist. A missing receipt must never be presented
+        # as a failed generation encouraging the operator to create duplicates.
+        from sme_gend.repositories.mysql_connection import CommittedMirrorError
+        import logging
+        logging.getLogger(__name__).warning("Export SME conservé ; journal à vérifier.", exc_info=True)
+        warning = ("Historique confirmé dans MySQL ; sa copie locale reste à vérifier."
+                   if isinstance(exc, CommittedMirrorError) else
+                   "L'enregistrement dans l'historique central n'a pas pu être confirmé.")
+        revision = replace(revision, journal_warning=warning + " Le fichier et sa version sont conservés ; "
+                           "aucune nouvelle génération n'est nécessaire.")
+    return revision
 
 
 def workbook_sheet_names(path: Path) -> list[str]:

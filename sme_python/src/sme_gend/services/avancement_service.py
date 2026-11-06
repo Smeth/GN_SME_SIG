@@ -56,7 +56,9 @@ class AvancementService:
         on: date | None = None,
         horizon_days: int = 365,
     ) -> list[VigilanceRow]:
-        agents = self._repo.load_agents()
+        from sme_gend.services.avancement_reference_date import avancement_reference_date
+        on = avancement_reference_date(self._settings, on=on)
+        agents = self._repo.load_agents(on=on)
         book = self.regles()
         # annee/trimestre remain accepted for existing callers; retired
         # campaign tables no longer supply any input to this calculation.

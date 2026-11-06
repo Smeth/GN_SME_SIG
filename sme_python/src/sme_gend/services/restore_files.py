@@ -74,7 +74,8 @@ class RestoreFiles:
             target=Path(entry['target'])
             if digest(target)!=entry['before']:raise RuntimeError('Un fichier a changé pendant la préparation ; restauration annulée.')
             entry['publishing']=True;self.record()
-            with atomic_destination(target,before_publish=lambda:self._expect_digest(target,entry['before'])) as temporary:
+            with atomic_destination(target,replace_existing=entry['before'] is not None,
+                                    before_publish=lambda:self._expect_digest(target,entry['before'])) as temporary:
                 shutil.copyfile(entry['staged'],temporary)
             entry['published']=True;self.record()
         self.phase='published';self.record()

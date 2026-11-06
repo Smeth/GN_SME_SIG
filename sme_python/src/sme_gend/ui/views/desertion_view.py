@@ -160,8 +160,8 @@ class DesertionView(QWidget):
         self._btn_select_all = QPushButton("Tout cocher")
         self._btn_select_all.setToolTip("Cocher toutes les lignes actuellement affichées.")
         self._btn_select_all.clicked.connect(self._toggle_select_all_visible)
-        self._btn_reset = QPushButton("Remettre à Présent (cochés)")
-        self._btn_reset.setToolTip("Repasser en « Présent » toutes les lignes cochées.")
+        self._btn_reset = QPushButton("Retour après désertion (cochés)")
+        self._btn_reset.setToolTip("Enregistrer le retour daté des agents cochés en conservant la désertion au dossier.")
         self._btn_reset.clicked.connect(self._reset_checked)
         self._btn_del = QPushButton("Supprimer les fiches cochées")
         self._btn_del.setToolTip("Supprime les fiches désertion des lignes cochées.")
@@ -365,7 +365,7 @@ class DesertionView(QWidget):
         else:
             self._lbl_mois_actif_ref.setText("")
 
-    def _reload_lists_async(self) -> None:
+    def _reload_lists_async(self, *, preserve_checked: bool = False) -> None:
         if not self._view_data.needs_load():
             return
         self._request_generation = getattr(self, "_request_generation", 0) + 1
@@ -377,6 +377,7 @@ class DesertionView(QWidget):
             return (generation == self._request_generation and revision == self._view_data.revision
                     and base is self._settings and month == self._view_mois)
 
+        checked_after_load = set(self._checked) if preserve_checked else set()
         self._rows_all, self._rows_history, self._details = [], [], {}
         self._checked.clear()
         self._apply_filters()
@@ -408,6 +409,9 @@ class DesertionView(QWidget):
                 r for r in rows
                 if r.satellite_join_key() in details and r.satellite_join_key() not in keys
             ]
+            if checked_after_load:
+                self._checked.update(checked_after_load.intersection(
+                    r.satellite_join_key() for r in self._rows_all + self._rows_history))
             self._apply_filters()
             self._view_data.finish_load()
             self._refresh_action_state()
@@ -646,47 +650,25 @@ class DesertionView(QWidget):
     def _reset_checked(self) -> None:
         if not self._check_can_edit():
             return
-        keys = sorted(self._checked)
-        if not keys:
-            QMessageBox.information(self, "Désertions", "Cochez au moins une ligne.")
+        if not self._checked:
+            QMessageBox.information(self, "Retour après désertion", "Cochez au moins une ligne.")
             return
-        if not confirm_yes_no(
-            self,
-            "Remettre à Présent",
-            f"Repasser {len(keys)} personne(s) en « Présent » ?",
-            default_no=True,
-        ):
-            return
+        from sme_gend.ui.activity_return_action import run_activity_return
         from sme_gend.services.liste_generale_cache import invalidate_liste_cache
-        from sme_gend.services.personnel_service import PersonnelService
 
-        personnel = PersonnelService(self._scoped_settings)
-        by_id = {r.id: r for r in self._liste.fetch_all() if r.id}
-        n_ok = 0
-        errors: list[str] = []
-        for key in keys:
+        requests = []
+        for key in sorted(self._checked):
             row = next((r for r in self._rows if self._row_key(r) == key), None)
-            if row is None or not row.id:
-                continue
-            cur = by_id.get(row.id)
-            if cur is None:
-                continue
-            try:
-                personnel.update_personnel(
-                    cur,
-                    replace(cur, position_admin="Présent"),
-                    edit_motif="Retour présent depuis module Désertions",
-                )
-                n_ok += 1
-            except Exception as exc:
-                errors.append(f"{key}: {exc}")
-        self._checked.clear()
+            detail = desertion_detail_for_row(row, self._details) if row is not None else None
+            requests.append((key, row, detail))
+        confirmed = run_activity_return(self, self._scoped_settings, 'desertion', requests,
+                                        title="Retour après désertion")
+        if confirmed is None:
+            return
+        self._checked.difference_update(confirmed)
         invalidate_liste_cache(self._scoped_settings)
         self._view_data.mark_stale()
-        self._reload_lists_async()
-        if errors:
-            QMessageBox.warning(self, "Désertions", "Échecs :\n" + "\n".join(errors[:8]))
-        QMessageBox.information(self, "Désertions", f"{n_ok} ligne(s) mise(s) à jour.")
+        self._reload_lists_async(preserve_checked=True)
 
     def _on_export(self) -> None:
         from sme_gend.services.auth_guard import require_permission

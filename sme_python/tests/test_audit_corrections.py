@@ -75,6 +75,7 @@ def test_old_satellite_response_or_error_cannot_replace_the_current_context(app,
     if kind == "conges":
         monkeypatch.setattr(module, "build_conge_movement_rows", lambda rows, *args: rows)
         monkeypatch.setattr(module, "build_conge_history_rows", lambda *args: [])
+        view._movement_key = lambda row: row.satellite_join_key()
     cls._reload_lists_async(view)
     if change == "month":
         view._view_mois = "2026-09"
@@ -86,7 +87,9 @@ def test_old_satellite_response_or_error_cannot_replace_the_current_context(app,
     if change == "invalidate":
         pending[0][0](([old], {}, []))
         assert not view._view_data.is_ready()
-        assert view._apply_filters.call_count == 1  # Effacement de l'ancien mois seulement.
+        # Missions keeps the displayed rows and nature filter until a current
+        # response arrives. Other satellite lists clear their previous month.
+        assert view._apply_filters.call_count == (0 if kind == "missions" else 1)
     else:
         cls._reload_lists_async(view)
         pending[1][0](([new], {}, []))

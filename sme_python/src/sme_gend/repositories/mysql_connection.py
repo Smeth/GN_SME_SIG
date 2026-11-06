@@ -21,6 +21,7 @@ _import_transaction: ContextVar[tuple[tuple[str, int, str], Any] | None] = Conte
 )
 _transaction_settings: ContextVar[Settings | None] = ContextVar("mysql_transaction_settings", default=None)
 _commit_hooks: ContextVar[list | None] = ContextVar("mysql_commit_hooks", default=None)
+_read_snapshot: ContextVar[bool] = ContextVar("mysql_read_snapshot", default=False)
 
 
 class CommittedMirrorError(RuntimeError):
@@ -56,6 +57,42 @@ class _DeferredCommitConnection:
 
     def commit(self):
         pass
+
+
+@contextmanager
+def mysql_read_snapshot(settings: Settings):
+    """Read repositories at one committed instant without locking business writes.
+
+    Explicitly select REPEATABLE READ: a server configured READ COMMITTED would
+    otherwise silently give each SELECT a different view. The read-only server
+    transaction also rejects an accidental write/DDL from a repository loader.
+    """
+    active = _import_transaction.get()
+    if active is not None:
+        if _read_snapshot.get() and active[0] == mysql_database_key(settings):
+            yield active[1]
+            return
+        raise RuntimeError("Une lecture figée ne peut pas publier une transaction en cours.")
+    with MySQLConnection(settings).connect(read_only=True) as connection:
+        from pymysql.constants.SERVER_STATUS import SERVER_STATUS_IN_TRANS
+        if connection.server_status & SERVER_STATUS_IN_TRANS:
+            raise RuntimeError("Une transaction MySQL précédente est encore ouverte.")
+        with connection.cursor() as cursor:
+            cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            cursor.execute("START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY")
+        transaction_token = _import_transaction.set((
+            mysql_database_key(settings), _DeferredCommitConnection(connection),
+        ))
+        settings_token = _transaction_settings.set(settings)
+        snapshot_token = _read_snapshot.set(True)
+        try:
+            yield _import_transaction.get()[1]
+        finally:
+            _read_snapshot.reset(snapshot_token)
+            _transaction_settings.reset(settings_token)
+            _import_transaction.reset(transaction_token)
+            # End even a successful read before returning a pooled connection.
+            connection.rollback()
 
 
 @contextmanager

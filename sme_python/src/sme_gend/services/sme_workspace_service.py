@@ -24,7 +24,7 @@ from sme_gend.services.sme_month_closure import canonical_sme_mois_yyyy_mm
 _log = logging.getLogger(__name__)
 
 _STATUT_OUVERT = frozenset({"ouvert", "open", "ouverte"})
-_STATUT_FERME = frozenset({"fermé", "ferme", "closed", "clos", "fermée"})
+_STATUT_FERME = frozenset({"fermé", "ferme", "closed", "clos", "fermée", "clôturé", "cloture", "cloturé"})
 _STATUT_REOUVERT = frozenset({"réouvert", "reouvert", "re-open", "reopened"})
 
 
@@ -184,6 +184,8 @@ class SmeWorkspaceService:
 
     def close_month_transition(self, mois_cloture: str, mois_suivant: str) -> str:
         """Internal closure step; its outer transaction has checked the source."""
+        from sme_gend.services.action_permissions import assert_any_permission
+        assert_any_permission("workflow.close_month")
         from sme_gend.services.active_month_guard import require_period_scope
         require_period_scope(self._settings)
         self._apply_active_month_locked(mois_suivant)
@@ -191,6 +193,8 @@ class SmeWorkspaceService:
 
     def set_active_mois(self, mois: str, *, expected=None) -> str:
         """Activate a month only from an explicitly loaded operational snapshot."""
+        from sme_gend.services.action_permissions import assert_any_permission
+        assert_any_permission("workflow.set_active_month")
         from sme_gend.services.active_month_guard import period_state_write,require_month_snapshot
         from sme_gend.repositories.mysql_connection import MySQLConnection
         from datetime import datetime
@@ -201,6 +205,11 @@ class SmeWorkspaceService:
         try:datetime.strptime(ym+'-01','%Y-%m-%d')
         except ValueError as exc:raise ValueError("Mois invalide dans le calendrier.") from exc
         with period_state_write(self._settings,expected=expected,mois=ym) as change:
+            # An ordinary activation must never bypass the exceptional reopening
+            # workflow, its specific right, mandatory reason and audit.
+            if any(canonical_sme_mois_yyyy_mm(str(row[1])) == ym and _is_ferme_strict(row[2])
+                   for row in change.before.rows):
+                raise ValueError("Ce mois est clôturé. Utilisez la réouverture exceptionnelle avec un motif avant de l'activer.")
             from sme_gend.services.active_month_guard import load_active_month_snapshot
             current=load_active_month_snapshot(self._settings,current=True)
             if current.active_month==ym and current.rows==change.before.rows:

@@ -133,7 +133,7 @@ def test_present_list_preview_and_export_share_the_same_search():
 def test_structure_effectifs_search_keeps_count_and_identity(app):
     from PySide6.QtWidgets import QTableWidget,QLineEdit
     from sme_gend.ui.views.structure_effectifs_view import StructureEffectifsView
-    view=SimpleNamespace(_search=QLineEdit(),_rows_data=[('SYN','RÉGION SYNTHETIQUE',17)],_table=QTableWidget(0,3),_selected_code=lambda:None)
+    view=SimpleNamespace(_search=QLineEdit(),_rows_data=[('SYN','RÉGION SYNTHETIQUE',17)],_table=QTableWidget(0,3),_selected_code=lambda:None,_sync_print_state=lambda:None)
     view._search.setText('region');StructureEffectifsView._refill_table_filtered(view)
     assert view._table.rowCount()==1 and view._table.item(0,0).text()=='SYN'
     assert view._table.item(0,2).text()=='17'

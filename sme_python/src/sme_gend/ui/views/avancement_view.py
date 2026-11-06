@@ -105,6 +105,8 @@ class AvancementView(QWidget):
         self._rules_snapshot = None
         self._view_data = ViewDataState(stale=True)
         self._rows: list[VigilanceRow] = []
+        from sme_gend.services.avancement_reference_date import avancement_reference_date
+        self._calculation_date = avancement_reference_date(settings)
         self._opening_dossier = False
         self._dossier_open_queued = False
         self._pending_vigilance_row: VigilanceRow | None = None
@@ -375,13 +377,15 @@ class AvancementView(QWidget):
         return table
 
     def _reload(self) -> None:
-        today = date.today()
+        from sme_gend.services.avancement_reference_date import avancement_reference_date
+        today = avancement_reference_date(self._settings)
         horizon = int(self._horizon.currentData() or 365)
 
         def work() -> list[VigilanceRow]:
             return self._svc.vigilance(
                 annee=today.year,
                 trimestre=trimestre_from_date(today),
+                on=today,
                 horizon_days=horizon,
             )
 
@@ -394,6 +398,7 @@ class AvancementView(QWidget):
         )
         if result is None:
             return
+        self._calculation_date = today
         self._rows = result
         self._view_data.finish_load()
         self._refresh_filter_combos()
@@ -487,7 +492,7 @@ class AvancementView(QWidget):
         diplome_f = self._filt_diplome.currentData() or ""
         echeance_f = self._filt_echeance.currentData() or ""
         horizon_days = int(self._horizon.currentData() or 365)
-        today = date.today()
+        today = self._calculation_date
         search_all = bool(needle or needle_c)
         shown: list[VigilanceRow] = []
         for row in self._rows:
@@ -537,14 +542,14 @@ class AvancementView(QWidget):
             )
         )
         self._fill_table(shown)
-        self._count.setText(f"{len(shown)} ligne(s)")
+        self._count.setText(f"{len(shown)} ligne(s) · au {today:%d/%m/%Y}")
         has_sel = self._selected_row() is not None
         self._btn_dossier.setEnabled(has_sel)
 
     def _days_remaining(self, row: VigilanceRow) -> str:
         if row.echeance is None:
             return "—"
-        delta = (row.echeance - date.today()).days
+        delta = (row.echeance - self._calculation_date).days
         if delta < 0:
             return f"Échu ({abs(delta)} j.)"
         if delta == 0:

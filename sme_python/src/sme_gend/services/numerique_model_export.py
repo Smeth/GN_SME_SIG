@@ -214,7 +214,9 @@ def build_from_model(template, destination, *, mois, rows, grades, details, deta
                      previous_counts, movements, detaches_config):
     wb = load_workbook(template)
     try:
-        required = {'LISTE GENERALE', 'NUMERIQUE', 'PAGE INTER', 'PRESENT', 'Feuil4', 'GAIN PERTE'}
+        required = {'LISTE GENERALE', 'NUMERIQUE', 'PAGE INTER', 'PRESENT', 'Feuil4', 'GAIN PERTE',
+                    'MISSION', 'MALADE', 'DESERTEUR', 'CONGé ADMIN', 'DETENTION-PRISON',
+                    'NON-REJOINT', 'STAGE-EXT', 'STAGE-LOC', 'DETACHE', 'DETACHE PAR STRUCTURE'}
         missing = required - set(wb.sheetnames)
         if missing:
             raise ValueError('Modèle SME incomplet : ' + ', '.join(sorted(missing)))

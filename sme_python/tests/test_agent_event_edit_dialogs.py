@@ -47,6 +47,7 @@ def test_desertion_dialog_prefills_and_returns_values(qapp):
     assert dialog.values() == {
         "date_desertion": "03/04/2026",
         "observation": "Observation",
+        "reference_dossier": None,
     }
 
 

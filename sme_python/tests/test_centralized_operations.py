@@ -7,7 +7,7 @@ from sme_gend.services.backup_restore_service import RestoreScope
 
 @pytest.mark.parametrize('field', ['diplome', 'date_obtention'])
 def test_history_cannot_be_silently_removed_through_monthly_list(field):
-    before = SimpleNamespace(diplome='Diplôme conservé', date_obtention='2020-01-01')
+    before = SimpleNamespace(grade=None, diplome='Diplôme conservé', date_obtention='2020-01-01')
     after = SimpleNamespace(**vars(before))
     setattr(after, field, None)
     with pytest.raises(ValueError, match='dossier agent'):
@@ -15,8 +15,8 @@ def test_history_cannot_be_silently_removed_through_monthly_list(field):
 
 
 def test_list_can_add_a_diploma_without_removing_history():
-    validate_monthly_history_edit(SimpleNamespace(diplome=None, date_obtention=None),
-                                 SimpleNamespace(diplome='Nouveau diplôme', date_obtention=None))
+    validate_monthly_history_edit(SimpleNamespace(grade=None, diplome=None, date_obtention=None),
+                                 SimpleNamespace(grade=None, diplome='Nouveau diplôme', date_obtention=None))
 
 
 def test_restore_preserves_current_audit_by_default():

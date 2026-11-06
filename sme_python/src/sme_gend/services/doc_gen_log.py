@@ -308,6 +308,7 @@ DOC_LOG_CSV_FIELDS: tuple[str, ...] = (
     "dest",
     "actor",
     "meta",
+    "csv_encoding",
 )
 
 _PERSONS_SEP = " | "
@@ -443,6 +444,7 @@ def plan_doc_log_merge(
 
 def export_doc_log_csv(entries: list[dict[str, Any]]) -> str:
     """CSV point-virgule, réimportable, des entrées fournies (souvent le filtre affiché)."""
+    from sme_gend.services.csv_safety import CSV_TEXT_ENCODING, spreadsheet_cell
     buf = io.StringIO()
     writer = csv.DictWriter(
         buf,
@@ -455,8 +457,7 @@ def export_doc_log_csv(entries: list[dict[str, Any]]) -> str:
     for entry in entries:
         persons = _persons_list(entry.get("persons"))
         meta = _meta_dict(entry.get("meta"))
-        writer.writerow(
-            {
+        values = {
                 "ts_utc": entry.get("ts_utc") or "",
                 "doc_type": entry.get("doc_type") or "",
                 "format": entry.get("format") or "",
@@ -468,8 +469,9 @@ def export_doc_log_csv(entries: list[dict[str, Any]]) -> str:
                 "meta": json.dumps(meta, ensure_ascii=False, sort_keys=True, default=str)
                 if meta
                 else "",
+                "csv_encoding": CSV_TEXT_ENCODING,
             }
-        )
+        writer.writerow({key: spreadsheet_cell(value) for key, value in values.items()})
     return buf.getvalue()
 
 
@@ -499,6 +501,9 @@ def parse_doc_log_csv(text: str) -> tuple[list[dict[str, Any]], int]:
     for row in reader:
         if row is None:
             continue
+        from sme_gend.services.csv_safety import CSV_TEXT_ENCODING, decode_spreadsheet_cell
+        if row.get("csv_encoding") == CSV_TEXT_ENCODING:
+            row = {key: decode_spreadsheet_cell(value) for key, value in row.items()}
         if not any(str(v or "").strip() for v in row.values()):
             continue
         ts = _normalize_ts(row.get("ts_utc"))

@@ -14,7 +14,8 @@ def audit_values(value):
     return value
 
 
-def record_business_action(settings, *, action, module, entity_id=None, before=None, after=None, actor=None, mois=None):
+def record_business_action(settings, *, action, module, entity_id=None, before=None, after=None,
+                           actor=None, mois=None, personnel_id=None, personnel_nom=None):
     from sme_gend.repositories.app_config_repository import AppConfigRepository
     from sme_gend.repositories.mysql_connection import has_import_transaction
     from sme_gend.services.auth_context import resolve_write_actor
@@ -22,6 +23,8 @@ def record_business_action(settings, *, action, module, entity_id=None, before=N
         raise RuntimeError("Trace métier sans transaction ; opération non confirmée.")
     AppConfigRepository(settings).append_audit(action=action,module=module,
         actor=resolve_write_actor(actor),ts_utc=datetime.now(timezone.utc),
+        **({"personnel_id":str(personnel_id)} if personnel_id is not None else {}),
         sme_mois_context=mois if mois is not None else settings.mysql_view_mois,
         payload={"entity_id":str(entity_id) if entity_id is not None else None,
+                 **({"personnel_nom":personnel_nom} if personnel_nom is not None else {}),
                  "before":audit_values(before),"after":audit_values(after)})

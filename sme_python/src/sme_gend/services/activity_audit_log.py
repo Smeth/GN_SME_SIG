@@ -13,6 +13,7 @@ MODULE_LABELS = {
     'sensitive_data': 'Modifications sensibles', 'doc_gen': 'Documents générés',
     'workflow': 'Opérations mensuelles', 'referentiel': 'Référentiels',
     'liste_present': 'Liste des présents', 'configuration': 'Configuration',
+    'mission': 'Missions', 'conge': 'Congés', 'desertion': 'Désertions',
 }
 OPERATION_LABELS = {
     **ACTION_LABELS_FR, 'doc_gen': 'Document généré', 'create': 'Création',
@@ -20,6 +21,7 @@ OPERATION_LABELS = {
     'login': 'Connexion', 'logout': 'Déconnexion', 'login_failed': 'Échec de connexion',
     'subdivisions_merge': 'Fusion de subdivisions', 'subdivision_rename': 'Subdivision renommée',
     'sme_month_fill': 'Mois rempli à partir d’un autre mois',
+    'activity_completed': 'Fin / retour d’activité enregistré',
     'sme_month_emptied': 'Contenu du mois vidé',
     'sme_month_archives_cleaned': 'Nettoyage des archives du mois',
     'mysql_bundle_import_access': 'Import d’archive Access',

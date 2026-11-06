@@ -177,6 +177,9 @@ def _target(backup,name,kind,media_root):
         return backup._config_restore_target(parts[1])
     if kind=='data' and parts[0]==backup.DATA_DIR and len(parts)==2:
         return contained_path(backup.project_root()/'data',parts[1])
+    if kind=='publication':
+        from sme_gend.services.sme_publication_backup import restore_target
+        return restore_target(name)
     raise ValueError('Plan de récupération de configuration invalide.')
 
 
@@ -284,7 +287,11 @@ def restore_configuration_components(settings,archive,manifest,scope,rows,plan,f
                                                               preserve_all_local_paths=True)
                             files.add(target,BytesIO(content),expected_before=expected_before)
                         else:
-                            with source.open(name) as content:files.add(target,content)
+                            with source.open(name) as content:
+                                if kind=='publication':
+                                    files.add(target,content,expected_before=None)
+                                else:
+                                    files.add(target,content)
                 state=dict(version=1,operation=files.workspace.name,sql=gate is not None,
                     marker='configuration_restore:'+files.workspace.name,database=list(mysql_database_key(settings)),
                     plan=[dict(name=name,kind=kind) for name,_,kind in plan])

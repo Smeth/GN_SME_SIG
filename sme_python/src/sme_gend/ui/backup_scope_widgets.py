@@ -32,6 +32,8 @@ class _ScopeCheckboxes(QWidget):
         self.chk_user.setChecked(True)
         self.chk_data = QCheckBox("Fichiers data\\ (JSON / journaux locaux)")
         self.chk_data.setChecked(not for_restore)
+        self.chk_publications = QCheckBox("Versions archivées des classeurs SME")
+        self.chk_publications.setChecked(True)
         self.chk_appcfg = QCheckBox("Table app_config (export JSON)")
         self.chk_appcfg.setChecked(True)
         self.chk_photos = QCheckBox("Médias — photos du personnel")
@@ -61,6 +63,7 @@ class _ScopeCheckboxes(QWidget):
         lay.addLayout(row)
         lay.addWidget(self.chk_user)
         lay.addWidget(self.chk_data)
+        lay.addWidget(self.chk_publications)
         lay.addWidget(self.chk_appcfg)
         lay.addWidget(self.chk_photos)
         lay.addWidget(self.chk_grades)
@@ -142,6 +145,7 @@ class _ScopeCheckboxes(QWidget):
             include_app_config=self.chk_appcfg.isChecked(),
             include_media_photos=self.chk_photos.isChecked(),
             include_media_grades=self.chk_grades.isChecked(),
+            include_publications=self.chk_publications.isChecked(),
         )
 
     def restore_scope(
@@ -163,6 +167,7 @@ class _ScopeCheckboxes(QWidget):
             preserve_mysql_connection=preserve_mysql,
             preserve_audit_journal=preserve_audit,
             preserve_local_accounts=preserve_local_accounts,
+            restore_publications=self.chk_publications.isChecked(),
         )
 
     def apply_archive_hints(
@@ -174,6 +179,7 @@ class _ScopeCheckboxes(QWidget):
         has_appcfg: bool,
         has_media: bool,
         saved: BackupScope | None,
+        has_publications: bool = False,
     ) -> None:
         self.chk_mysql.setEnabled(has_mysql)
         self.chk_user.setEnabled(has_user)
@@ -181,6 +187,8 @@ class _ScopeCheckboxes(QWidget):
         self.chk_appcfg.setEnabled(has_appcfg)
         self.chk_photos.setEnabled(has_media)
         self.chk_grades.setEnabled(has_media)
+        self.chk_publications.setEnabled(has_publications)
+        self.chk_publications.setChecked(has_publications and (saved is None or saved.include_publications))
         if not has_mysql:
             self.chk_mysql.setChecked(False)
         if saved:

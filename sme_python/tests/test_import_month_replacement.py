@@ -49,6 +49,7 @@ def test_access_movement_import_aborts_on_unknown_month_before_replacement(monke
 
 
 def test_purge_month_covers_dossier_history_without_deleting_agents(monkeypatch):
+    monkeypatch.setattr('sme_gend.services.automatic_position_links.external_position_links', lambda *a: [])
     cursor = MagicMock()
     cursor.__enter__.return_value = cursor
     cursor.fetchone.return_value = (51,)

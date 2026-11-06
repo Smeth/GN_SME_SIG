@@ -306,7 +306,7 @@ def test_avancement_lot28_legacy_records_are_neither_altered_nor_used(advancemen
             cur.execute('CREATE TABLE avancement_ligne(id INT PRIMARY KEY,campagne_id INT,agent_id INT,grade_cible VARCHAR(16),statut VARCHAR(20)) ENGINE=InnoDB')
             cur.execute("INSERT INTO avancement_ligne VALUES(1,1,1,'MDC','nomme')")
     synthetic=AgentAvancementInput(1,'SYNTHETIC','MDL',date(2018,1,1),date(2016,1,1),date(1990,1,1),diplomes=('OPJ',),maniere_servir='favorable')
-    monkeypatch.setattr(service._repo,'load_agents',lambda:[synthetic])
+    monkeypatch.setattr(service._repo,'load_agents',lambda **kwargs:[synthetic])
     result=service.vigilance(annee=2022,trimestre=1,on=date(2022,1,1))
     assert result[0].statut=='eligible'
     shown=service.regles();save(service,replace(shown['MDC'],annees_grade=5),shown['MDC'])

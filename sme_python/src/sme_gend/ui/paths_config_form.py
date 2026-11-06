@@ -33,6 +33,18 @@ from sme_gend.config.user_paths import (
 from sme_gend.ui.confirm_dialogs import confirm_yes_no
 
 
+def _assert_configuration_access(*, bootstrap_configuration: bool = False) -> bool:
+    """Connection repair before auth cannot grant runtime administration rights."""
+    if bootstrap_configuration:
+        from sme_gend.services.auth_context import get_app_auth
+        if get_app_auth() is not None:
+            raise PermissionError("La configuration initiale est terminée. Connectez-vous avec les droits de paramétrage.")
+        return True
+    from sme_gend.services.action_permissions import assert_any_permission
+    assert_any_permission("system.settings")
+    return False
+
+
 class PathsConfigForm(QWidget):
     """Paramètres chemins — catégories : bases de données, modèles Excel, archives, médias."""
 
@@ -42,8 +54,11 @@ class PathsConfigForm(QWidget):
         *,
         settings: Settings | None = None,
         focus_database: bool = False,
+        bootstrap_configuration: bool = False,
     ) -> None:
         super().__init__(parent)
+        self._bootstrap_configuration = _assert_configuration_access(
+            bootstrap_configuration=bootstrap_configuration)
         user = load_user_paths()
         if settings is not None:
             db_init = str(settings.database_path)
@@ -81,7 +96,7 @@ class PathsConfigForm(QWidget):
         arch_init = user.sme_archives_path or ""
         media_init = user.personnel_media_root_path or ""
         from sme_gend.services.shared_media import shared_media_root
-        shared_root = shared_media_root()
+        shared_root = None if self._bootstrap_configuration else shared_media_root()
         if shared_root is not None and not user.personnel_media_local_override:
             media_init = str(shared_root)
         def_arch = user_application_data_dir() / "sme_archives"
@@ -325,6 +340,18 @@ class PathsConfigForm(QWidget):
         tab_app_lay.addStretch()
         tabs.addTab(tab_app, "Application")
 
+        if self._bootstrap_configuration:
+            # Before authentication only the local connection can be repaired.
+            # Imports and shared storage switches require an authenticated role.
+            for index in range(1, tabs.count()):
+                tabs.setTabEnabled(index, False)
+            self._btn_import_mysql.setEnabled(False)
+            self._btn_test_access.setEnabled(False)
+            self._db.setEnabled(False)
+            btn_db.setEnabled(False)
+            self._chk_startup.setEnabled(False)
+            self._import_hint.setText("Connectez-vous pour importer les archives et configurer les autres paramètres.")
+
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(5)
@@ -341,12 +368,28 @@ class PathsConfigForm(QWidget):
             self._mysql_host.setFocus()
 
     def try_save(self, *, confirm: bool) -> bool:
+        bootstrap = getattr(self, "_bootstrap_configuration", False) is True
+        try:
+            _assert_configuration_access(bootstrap_configuration=bootstrap)
+        except PermissionError as exc:
+            QMessageBox.warning(self, "Droits", str(exc))
+            return False
         db_raw = self._db.text().strip()
         tpl_raw = self._tpl.text().strip()
         tnum_raw = self._tnum.text().strip()
         tdet_raw = self._tdet.text().strip()
         arch_raw = self._arch.text().strip()
         media_raw = self._media.text().strip()
+        previous_paths = load_user_paths() if bootstrap else None
+        if bootstrap:
+            # Preserve all other local preferences, even paths unavailable on
+            # this workstation; repairing MySQL must not replace those fields.
+            db_raw = previous_paths.database_path or ""
+            tpl_raw = previous_paths.template_excel_path or ""
+            tnum_raw = previous_paths.template_numerique_path or ""
+            tdet_raw = previous_paths.template_detaches_path or ""
+            arch_raw = previous_paths.sme_archives_path or ""
+            media_raw = previous_paths.personnel_media_root_path or ""
         mysql_host = self._mysql_host.text().strip() or "127.0.0.1"
         mysql_db = self._mysql_database.text().strip() or "smegend"
         try:
@@ -356,7 +399,7 @@ class PathsConfigForm(QWidget):
             self._mysql_port.setFocus()
             return False
 
-        if db_raw:
+        if db_raw and not bootstrap:
             p = Path(db_raw)
             if not p.is_file():
                 QMessageBox.warning(
@@ -366,7 +409,7 @@ class PathsConfigForm(QWidget):
                 )
                 return False
 
-        if tpl_raw:
+        if tpl_raw and not bootstrap:
             p = Path(tpl_raw)
             if not p.is_file():
                 QMessageBox.warning(
@@ -376,7 +419,7 @@ class PathsConfigForm(QWidget):
                 )
                 return False
 
-        if tnum_raw:
+        if tnum_raw and not bootstrap:
             p = Path(tnum_raw)
             if not p.is_file():
                 QMessageBox.warning(
@@ -386,7 +429,7 @@ class PathsConfigForm(QWidget):
                 )
                 return False
 
-        if tdet_raw:
+        if tdet_raw and not bootstrap:
             p = Path(tdet_raw)
             if not p.is_file():
                 QMessageBox.warning(
@@ -396,7 +439,7 @@ class PathsConfigForm(QWidget):
                 )
                 return False
 
-        if arch_raw:
+        if arch_raw and not bootstrap:
             p = Path(arch_raw).expanduser()
             if p.is_file():
                 QMessageBox.warning(
@@ -406,7 +449,7 @@ class PathsConfigForm(QWidget):
                 )
                 return False
 
-        if media_raw:
+        if media_raw and not bootstrap:
             p = Path(media_raw).expanduser()
             if p.is_file():
                 QMessageBox.warning(
@@ -443,7 +486,13 @@ class PathsConfigForm(QWidget):
             ):
                 return False
 
-        if media_raw:
+        # Rights can change while a dialog is open or the connection is tested.
+        try:
+            _assert_configuration_access(bootstrap_configuration=bootstrap)
+        except PermissionError as exc:
+            QMessageBox.warning(self, "Droits", str(exc))
+            return False
+        if media_raw and not bootstrap:
             from sme_gend.services.personnel_media import personnel_media_root
             from sme_gend.services.shared_media import configure_shared_media
             try:
@@ -461,6 +510,11 @@ class PathsConfigForm(QWidget):
                 return False
             self._media.setText(media_raw)
 
+        try:
+            _assert_configuration_access(bootstrap_configuration=bootstrap)
+        except PermissionError as exc:
+            QMessageBox.warning(self, "Droits", str(exc))
+            return False
         save_user_paths(
             database_path=db_raw if db_raw else None,
             template_excel_path=tpl_raw if tpl_raw else None,
@@ -468,7 +522,8 @@ class PathsConfigForm(QWidget):
             template_detaches_path=tdet_raw if tdet_raw else None,
             sme_archives_path=arch_raw if arch_raw else None,
             personnel_media_root_path=media_raw if media_raw else None,
-            personnel_media_local_override=bool(media_raw and not media_raw.startswith(("\\\\", "//"))),
+            personnel_media_local_override=(previous_paths.personnel_media_local_override if bootstrap
+                                            else bool(media_raw and not media_raw.startswith(("\\\\", "//")))),
             mysql_host=mysql_host,
             mysql_port=mysql_port,
             mysql_database=mysql_db,
@@ -481,7 +536,7 @@ class PathsConfigForm(QWidget):
         audit_warning = record_connection_config_saved(mysql_st)
         if audit_warning:
             QMessageBox.warning(self, "Paramètres enregistrés", audit_warning)
-        if self._chk_startup.isEnabled():
+        if not bootstrap and self._chk_startup.isEnabled():
             from sme_gend.services.windows_startup import apply_startup_preference
 
             try:
@@ -505,6 +560,7 @@ class PathsConfigForm(QWidget):
 
     def refresh_from_disk(self, settings: Settings) -> None:
         """Met à jour les champs après un `get_settings()` (chemins déjà enregistrés)."""
+        _assert_configuration_access(bootstrap_configuration=self._bootstrap_configuration)
         self._refresh_mysql_source_label()
         user = load_user_paths()
         self._db.setText(str(settings.database_path))
@@ -669,6 +725,10 @@ class PathsConfigForm(QWidget):
             QMessageBox.critical(self, "ODBC Access", msg)
 
     def _on_import_mysql(self) -> None:
+        from sme_gend.services.auth_guard import require_permission
+        if (getattr(self, "_bootstrap_configuration", False) is True
+                or not require_permission(self, "workflow.import_archive")):
+            return
         db_raw = self._db.text().strip()
         if not db_raw or not Path(db_raw).is_file():
             QMessageBox.warning(

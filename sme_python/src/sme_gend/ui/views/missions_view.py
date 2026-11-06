@@ -177,7 +177,7 @@ class MissionsView(QWidget):
         self._btn_select_all.setToolTip("Cocher toutes les lignes actuellement affichées.")
         self._btn_select_all.clicked.connect(self._toggle_select_all_visible)
         self._btn_end = QPushButton("Terminer les missions cochées")
-        self._btn_end.setToolTip("Repasser en « Présent » toutes les lignes cochées.")
+        self._btn_end.setToolTip("Enregistrer la date réelle de fin des missions cochées et le retour à Présent.")
         self._btn_end.clicked.connect(self._end_checked_missions)
         self._btn_refresh = QPushButton("Rafraîchir")
         self._btn_refresh.clicked.connect(self._reload_lists)
@@ -757,43 +757,25 @@ class MissionsView(QWidget):
     def _end_checked_missions(self) -> None:
         if not self._check_can_edit():
             return
-        keys = sorted(self._checked)
-        if not keys:
+        if not self._checked:
+            QMessageBox.information(self, "Terminer les missions", "Cochez au moins une ligne.")
             return
-        if not confirm_yes_no(
-            self,
-            "Terminer les missions",
-            f"Repasser {len(keys)} personne(s) en « Présent » ?",
-            default_no=True,
-        ):
-            return
-        from sme_gend.services.personnel_service import PersonnelService
+        from sme_gend.ui.activity_return_action import run_activity_return
         from sme_gend.services.liste_generale_cache import invalidate_liste_cache
 
-        personnel = PersonnelService(self._scoped_settings)
-        by_id = {r.id: r for r in self._liste.fetch_all() if r.id}
-        n_ok = 0
-        for key in keys:
+        requests = []
+        for key in sorted(self._checked):
             row = next((r for r in self._rows if self._row_key(r) == key), None)
-            if row is None or not row.id:
-                continue
-            cur = by_id.get(row.id)
-            if cur is None:
-                continue
-            try:
-                personnel.update_personnel(
-                    cur,
-                    replace(cur, position_admin="Présent"),
-                    edit_motif="Fin de mission depuis module Missions",
-                )
-                n_ok += 1
-            except Exception:
-                pass
-        self._checked.clear()
+            detail = mission_detail_for_row(row, self._details) if row is not None else None
+            requests.append((key, row, detail))
+        confirmed = run_activity_return(self, self._scoped_settings, 'mission', requests,
+                                        title="Terminer les missions")
+        if confirmed is None:
+            return
+        self._checked.difference_update(confirmed)
         invalidate_liste_cache(self._scoped_settings)
         self._view_data.mark_stale()
         self._reload_lists_async()
-        QMessageBox.information(self, "Missions", f"{n_ok} ligne(s) mise(s) à jour.")
 
     def _on_export(self) -> None:
         from sme_gend.services.auth_guard import require_permission

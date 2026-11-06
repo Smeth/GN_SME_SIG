@@ -119,4 +119,6 @@ def test_repository_query_uses_legacy_identity_and_list_scope(monkeypatch):
     assert "WHERE a.legacy_access_id = %s" in sql
     assert "c.id = %s" not in sql
     assert params[-1] == "101"
-    assert "2026-09" in params[:-1]
+    from datetime import date
+    assert params[0] == "202609"
+    assert date(2026, 9, 30) in params[:-1]

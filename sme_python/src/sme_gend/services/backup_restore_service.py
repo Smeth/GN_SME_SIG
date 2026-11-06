@@ -89,6 +89,7 @@ class BackupScope:
     include_app_config: bool = True
     include_media_photos: bool = True
     include_media_grades: bool = True
+    include_publications: bool = True
 
     @classmethod
     def full(cls) -> BackupScope:
@@ -103,6 +104,7 @@ class BackupScope:
             and self.include_app_config
             and self.include_media_photos
             and self.include_media_grades
+            and self.include_publications
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -114,6 +116,7 @@ class BackupScope:
             "include_app_config": self.include_app_config,
             "include_media_photos": self.include_media_photos,
             "include_media_grades": self.include_media_grades,
+            "include_publications": self.include_publications,
         }
 
     @classmethod
@@ -132,6 +135,7 @@ class BackupScope:
             include_app_config=bool(d.get("include_app_config", True)),
             include_media_photos=bool(d.get("include_media_photos", True)),
             include_media_grades=bool(d.get("include_media_grades", True)),
+            include_publications=bool(d.get("include_publications", True)),
         )
 
 
@@ -150,6 +154,7 @@ class RestoreScope:
     preserve_audit_journal: bool = True
     preserve_local_accounts: bool = True
     maintenance_confirmed: bool = False
+    restore_publications: bool = True
 
     @classmethod
     def full(cls) -> RestoreScope:
@@ -168,6 +173,7 @@ class RestoreScope:
             "preserve_audit_journal": self.preserve_audit_journal,
             "preserve_local_accounts": self.preserve_local_accounts,
             "maintenance_confirmed": self.maintenance_confirmed,
+            "restore_publications": self.restore_publications,
         }
 
 
@@ -189,6 +195,7 @@ class BackupManifest:
     backup_scope: dict[str, Any] | None = None
     personnel_media_photos: int = 0
     personnel_media_grades: int = 0
+    publication_files: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -208,6 +215,8 @@ class BackupManifest:
             d["audit_journal_by_module"] = self.audit_journal_by_module
         if self.app_data_files:
             d["app_data_files"] = self.app_data_files
+        if self.publication_files:
+            d["publication_files"] = self.publication_files
         if self.backup_scope:
             d["backup_scope"] = self.backup_scope
         if self.personnel_media_photos or self.personnel_media_grades:
@@ -238,10 +247,13 @@ class BackupManifest:
             backup_scope=dict(bs) if isinstance(bs, dict) else None,
             personnel_media_photos=int(d.get("personnel_media_photos", 0)),
             personnel_media_grades=int(d.get("personnel_media_grades", 0)),
+            publication_files=[str(name) for name in d.get("publication_files", [])],
         )
 
     def saved_scope(self) -> BackupScope:
-        return BackupScope.from_dict(self.backup_scope)
+        stored = dict(self.backup_scope or {})
+        stored.setdefault("include_publications", bool(self.publication_files))
+        return BackupScope.from_dict(stored)
 
     def has_mysql_dump(self) -> bool:
         return bool(self.table_counts)
@@ -251,6 +263,9 @@ class BackupManifest:
 
     def has_app_data(self) -> bool:
         return bool(self.app_data_files)
+
+    def has_publications(self) -> bool:
+        return bool(self.publication_files)
 
     def has_app_config(self) -> bool:
         return self.app_config_exported
@@ -438,6 +453,8 @@ def describe_backup_scope(scope: BackupScope) -> list[str]:
         media.append("photos")
     if scope.include_media_grades:
         media.append("insignes")
+    if scope.include_publications:
+        lines.append("Versions archivées des classeurs SME")
     if media:
         lines.append(f"Médias personnel : {', '.join(media)}")
     return lines or ["(vide)"]
@@ -451,6 +468,7 @@ def archive_contents_summary(manifest: BackupManifest, zip_names: list[str]) -> 
         "app_data": any(n.startswith(DATA_DIR + "/") for n in zip_names),
         "app_config": APP_CONFIG_DUMP_NAME in zip_names,
         "media": any(n.startswith(PERSONNEL_MEDIA_DIR + "/") for n in zip_names),
+        "publications": bool(manifest.publication_files),
     }
 
 
@@ -688,6 +706,8 @@ def create_backup(
                             arc = f"{DATA_DIR}/{fp.name}"
                             zf.write(fp, arcname=arc)
                             app_data_arcs.append(fp.name)
+            from sme_gend.services.sme_publication_backup import add_to_backup
+            publication_files = add_to_backup(settings, zf) if sc.include_publications else []
             kind = "full" if sc.is_full() else "partial"
             manifest = BackupManifest(
                 format_version=BACKUP_FORMAT_VERSION,
@@ -704,9 +724,10 @@ def create_backup(
                 backup_scope=sc.to_dict(),
                 personnel_media_photos=media_photos,
                 personnel_media_grades=media_grades,
+                publication_files=publication_files or None,
             )
             zf.writestr(MANIFEST_NAME, json.dumps(manifest.to_dict(), indent=2).encode("utf-8"))
-        if not sc.include_mysql and not config_arcs and not media_files and not app_data_arcs and not app_config_rows:
+        if not sc.include_mysql and not config_arcs and not media_files and not app_data_arcs and not app_config_rows and not publication_files:
             raise ValueError("Sauvegarde vide : sélectionnez au moins un composant.")
     _log.info(
         "Sauvegarde %s créée : %s (%s tables, %s médias)",
@@ -741,6 +762,9 @@ def _validate_backup_zip(zip_path: Path) -> BackupManifest:
             raise ValueError("Archive invalide : manifest.json absent.")
         raw = json.loads(zf.read(MANIFEST_NAME).decode("utf-8"))
     manifest = BackupManifest.from_dict(raw)
+    from sme_gend.services.sme_publication_backup import PREFIX, validate_in_backup
+    with zipfile.ZipFile(zip_path, "r") as publications:
+        validate_in_backup(publications, manifest.publication_files)
     if manifest.format_version not in (1, 2, 3, BACKUP_FORMAT_VERSION):
         raise ValueError(
             f"Version de sauvegarde non supportée : {manifest.format_version}"
@@ -751,6 +775,7 @@ def _validate_backup_zip(zip_path: Path) -> BackupManifest:
         or any(n.startswith(DATA_DIR + "/") for n in names)
         or APP_CONFIG_DUMP_NAME in names
         or any(n.startswith(PERSONNEL_MEDIA_DIR + "/") for n in names)
+        or any(n.startswith(PREFIX + "/") for n in names)
     )
     if manifest.format_version <= 3 and SQL_DUMP_NAME not in names:
         raise ValueError("Archive invalide : mysql_dump.sql absent.")
@@ -863,6 +888,9 @@ def restore_backup(
     # Tout chemin et tout contenu structuré sont contrôlés avant les écritures.
     with zipfile.ZipFile(stable_archive, "r") as source:
         plan = []
+        if rs.restore_publications:
+            from sme_gend.services.sme_publication_backup import restore_plan
+            plan.extend(restore_plan(source, manifest.publication_files))
         for entry in source.infolist():
             if entry.is_dir():
                 continue
@@ -923,11 +951,22 @@ def restore_backup(
             for name, target, kind in plan]
     with zipfile.ZipFile(stable_archive, "r") as source:
         for name, target, kind in plan:
-            if kind == "config" and target.name == "paths.json" and rs.preserve_mysql_connection:
-                files.add(target, BytesIO(_merged_paths_json(json.loads(source.read(name).decode("utf-8")), target)))
+            if kind == "config" and target.name == "paths.json" and (rs.preserve_mysql_connection or (rs.restore_publications and manifest.publication_files)):
+                from sme_gend.services.restore_files import digest
+                expected_paths = digest(target)
+                restored_paths = json.loads(source.read(name).decode("utf-8"))
+                if rs.restore_publications and manifest.publication_files:
+                    from sme_gend.services.sme_publication_backup import receiving_archive_paths
+                    restored_paths = receiving_archive_paths(restored_paths, target)
+                content = (_merged_paths_json(restored_paths, target) if rs.preserve_mysql_connection else
+                           json.dumps(restored_paths, ensure_ascii=False).encode("utf-8"))
+                files.add(target, BytesIO(content), expected_before=expected_paths)
             else:
                 with source.open(name) as payload:
-                    files.add(target, payload)
+                    if kind == "publication":
+                        files.add(target, payload, expected_before=None)
+                    else:
+                        files.add(target, payload)
 
     if statements:
         from sme_gend.services.mysql_restore_staging import prepared_restore
@@ -984,6 +1023,7 @@ def restore_full_backup(
     preserve_audit_journal: bool = True,
     preserve_local_accounts: bool = True,
     maintenance_confirmed: bool = False,
+    restore_publications: bool = True,
 ) -> BackupManifest:
     """Restauration complète (API historique — préférer ``restore_backup`` + ``RestoreScope``)."""
     scope = RestoreScope(
@@ -997,6 +1037,7 @@ def restore_full_backup(
         preserve_audit_journal=preserve_audit_journal,
         preserve_local_accounts=preserve_local_accounts,
         maintenance_confirmed=maintenance_confirmed,
+        restore_publications=restore_publications,
     )
     return restore_backup(settings, zip_path, scope=scope)
 

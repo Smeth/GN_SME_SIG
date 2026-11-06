@@ -558,7 +558,8 @@ def is_historical_import(mois_import: str, mois_actif: str | None) -> bool:
 
 
 def purge_sme_periode_for_reimport(settings: Settings, mois: str, *, imported_only: bool = True,
-                                 preserve_manual_passations: bool = False) -> dict:
+                                 preserve_manual_passations: bool = False,
+                                 _replace_position_links: bool = False) -> dict:
     """Retire une période, en préservant par défaut les saisies manuelles.
 
     Les événements durables attestés par d'autres situations sont conservés.
@@ -566,6 +567,10 @@ def purge_sme_periode_for_reimport(settings: Settings, mois: str, *, imported_on
     """
     from sme_gend.services.liste_generale_cache import invalidate_liste_cache
     from sme_gend.services.month_purge_plan import month_purge_plan, preserve_supported_events
+    if _replace_position_links:
+        from sme_gend.repositories.mysql_connection import has_import_transaction
+        if not has_import_transaction(settings):
+            raise RuntimeError('Remplacement des liens de position sans transaction de restauration.')
     ym = normalize_import_mois(mois)
     from sme_gend.services.month_period_scope import month_period_ids
     counts = {"sme_mois": ym, "agent_orphans_removed": 0}
@@ -582,6 +587,11 @@ def purge_sme_periode_for_reimport(settings: Settings, mois: str, *, imported_on
                     from dataclasses import replace
                     plan = [replace(item, predicate=item.predicate + " AND COALESCE(d.obs,'') LIKE 'Import archive %%'")
                             if item.table == 'agent_passation_grade' else item for item in plan]
+                if not _replace_position_links:
+                    from sme_gend.services.automatic_position_links import external_position_links
+                    if external_position_links(cur, plan, ym):
+                        raise ValueError('Un autre mois dépend d’une activité de ce mois. '
+                                         'Le vidage / réimport est refusé pour préserver ses positions et retours validés.')
                 preserve_supported_events(cur, plan, pid, ym)
                 for item in plan:
                     cur.execute(f"DELETE d FROM {item.table} d WHERE {item.predicate}", item.params)

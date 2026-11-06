@@ -5,8 +5,8 @@ UNSET = object()
 FIELDS = {
     "agent_mission": ("id", "agent_id", "sme_periode_id", "date_debut", "date_fin", "nature_libelle", "lieu", "reference_dossier", "observation", "source_ligne_legacy", "import_lot_id"),
     "agent_malade": ("id", "agent_id", "sme_periode_id", "date_debut", "date_fin", "pathologie", "observation", "source_ligne_legacy", "import_lot_id"),
-    "agent_desertion": ("id", "agent_id", "sme_periode_id", "date_desertion", "observation", "source_ligne_legacy", "import_lot_id"),
-    "parcours_stage": ("id", "agent_id", "sme_periode_id", "type_stage_code", "date_debut", "date_fin", "nature_libelle", "lieu", "observation", "source_ligne_legacy", "import_lot_id"),
+    "agent_desertion": ("id", "agent_id", "sme_periode_id", "date_desertion", "reference_dossier", "observation", "source_ligne_legacy", "import_lot_id"),
+    "parcours_stage": ("id", "agent_id", "sme_periode_id", "type_stage_code", "date_debut", "date_fin", "nature_libelle", "lieu", "reference_dossier", "session", "observation", "source_ligne_legacy", "import_lot_id"),
 }
 
 

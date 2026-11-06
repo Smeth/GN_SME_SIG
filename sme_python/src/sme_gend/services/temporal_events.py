@@ -94,7 +94,7 @@ def project_positions(settings,aid,since,*,removed_kind=None,only_carriere_id=No
         log_temporal_projection(aid,'position_admin',since,changes)
 
 
-def record_position(settings,aid,label,start,end=None,*,reference=None,baseline='Présent'):
+def record_position(settings,aid,label,start,end=None,*,reference=None,baseline='Présent',project=True):
     start=parse_access_date(start);end=parse_access_date(end)
     if start is None: return
     if end and end<start: raise ValueError('La date de fin doit être postérieure ou égale au début.')
@@ -113,7 +113,8 @@ def record_position(settings,aid,label,start,end=None,*,reference=None,baseline=
                     (aid,baseline if baseline!=label else 'Présent',end+timedelta(days=1),(end+timedelta(days=1)).strftime('%Y-%m'),reference))
     scope=POSITION_SCOPE.get()
     if scope: scope.handled=True
-    project_positions(settings,aid,start)
+    if project:
+        project_positions(settings,aid,start)
 
 
 @contextmanager
@@ -197,10 +198,24 @@ def temporal_write(table,method):
                         ref=f'sgi:auto:{table}:{key}'
                         if current is None:
                             cur.execute('DELETE FROM agent_position_event WHERE agent_id=%s AND reference_decision=%s',(aid,ref))
+                            if table in {'agent_mission','agent_conge','agent_desertion'}:
+                                from sme_gend.services.activity_completion import activity_return_reference
+                                cur.execute('DELETE FROM agent_position_event WHERE agent_id=%s AND reference_decision=%s',
+                                            (aid,activity_return_reference(table,key)))
                             if old_start: project_positions(self._settings,aid,old_start,removed_kind=_event_position(table,previous))
                             continue
                         start=parse_access_date(current.get(start_col));end=parse_access_date(current.get(end_col)) if end_col else None
                         if not start: continue
+                        if table in {'agent_mission','agent_conge','agent_desertion'}:
+                            from sme_gend.services.activity_completion import recorded_return
+                            actual_return=recorded_return(cur,aid,table,key)
+                            if actual_return is not None:
+                                if start>actual_return or end is not None and end!=actual_return:
+                                    raise ValueError('Cette activité possède déjà un retour daté. '
+                                                     'Son début doit précéder ce retour et sa date de fin validée doit être conservée.')
+                                end=actual_return
+                                if end_col:
+                                    cur.execute(f'UPDATE {table} SET {end_col}=%s WHERE id=%s',(end,key))
                         pid=event_period(cur,start)
                         if end: event_period(cur,end)
                         cur.execute(f'UPDATE {table} SET sme_periode_id=%s WHERE id=%s',(pid,key))

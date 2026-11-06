@@ -255,6 +255,8 @@ class SharedMediaSwitchOutcomeUnknownError(RuntimeError):
 
 
 def configure_shared_media(settings, selected_path: str, previous_root: Path) -> str:
+    from sme_gend.services.action_permissions import assert_any_permission
+    assert_any_permission("system.settings")
     from sme_gend.config.user_paths import user_application_data_dir
     from sme_gend.repositories.app_config_repository import AppConfigRepository
     from sme_gend.repositories.mysql_connection import mysql_import_transaction, MySQLConnection

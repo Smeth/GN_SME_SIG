@@ -50,130 +50,38 @@ def test_settings_for_chosen_export_mois_overrides_view() -> None:
 
 
 def test_export_numerique_workbook_uses_chosen_mois(monkeypatch, tmp_path: Path) -> None:
+    from sme_gend.services import numerique_excel_export as export
+    from sme_gend.models.detaches_file_config import DetachesFileConfig
     tpl = Path(__file__).resolve().parents[2] / "SME_GEND_model.xlsx"
-    if not tpl.is_file():
-        pytest.skip("gabarit numerique.xlsx absent")
-
-    seen_mois: list[str | None] = []
-
-    def _fake_cached(settings: Settings) -> list[ListeGeneraleRow]:
-        seen_mois.append(settings.mysql_view_mois)
-        return []
-
-    class _EmptyRepo:
-        def __init__(self, _s: Settings) -> None:
-            pass
-
-        def fetch_all(self):
-            return []
-
-        def fetch_flat_hierarchy(self):
-            return []
-
-    class _EmptySat:
-        def __init__(self, _s: Settings) -> None:
-            pass
-
-        def load_missions(self):
-            return {}
-
-        def load_malades(self):
-            return {}
-
-        def load_deserteurs(self):
-            return {}
-
-        def load_stages_loc(self):
-            return {}
-
-        def load_stages_ex(self):
-            return {}
-
-    class _EmptyDetaches:
-        def __init__(self, _s: Settings) -> None:
-            pass
-
-        def fetch_detaches(self):
-            return []
-
-    class _EmptyDetachesCfg:
-        def __init__(self, _s: Settings) -> None:
-            pass
-
-        def load(self):
-            from sme_gend.models.detaches_file_config import DetachesFileConfig
-
-            return DetachesFileConfig()
-
-    monkeypatch.setattr(
-        "sme_gend.services.numerique_excel_export.cached_numerique_liste_rows",
-        _fake_cached,
-    )
-    monkeypatch.setattr(
-        "sme_gend.services.numerique_excel_export.NumeriqueSatelliteRepository",
-        _EmptySat,
-    )
-    monkeypatch.setattr(
-        "sme_gend.services.numerique_excel_export.SubdivisionRepository",
-        _EmptyRepo,
-    )
-    monkeypatch.setattr(
-        "sme_gend.repositories.grade_repository.GradeRepository",
-        _EmptyRepo,
-    )
-    monkeypatch.setattr(
-        "sme_gend.services.detaches_service.DetachesService",
-        _EmptyDetaches,
-    )
-    monkeypatch.setattr(
-        "sme_gend.services.detaches_config_service.DetachesConfigService",
-        _EmptyDetachesCfg,
-    )
-    monkeypatch.setattr(
-        "sme_gend.services.numerique_recap_baseline.resolve_recap_cd_baseline",
-        lambda *_a, **_k: [None] * 10,
-    )
-    monkeypatch.setattr(
-        "sme_gend.services.numerique_excel_export.add_liste_present_sheet",
-        lambda *_a, **_k: None,
-    )
-    monkeypatch.setattr(
-        "sme_gend.services.doc_gen_log.log_doc_generation",
-        lambda **_k: None,
-    )
-    monkeypatch.setattr("sme_gend.services.clean_sme_exports._movements", lambda *a, **kw: [])
-    class _EmptyGainPerteRepo:
-        def __init__(self, _s): pass
-        def fetch_for_month(self, _m): return []
-    monkeypatch.setattr("sme_gend.repositories.gain_perte_repository.GainPerteRepository", _EmptyGainPerteRepo)
-    monkeypatch.setattr("sme_gend.services.gain_perte_coherence.load_unsignaled_pertes", lambda *a, **kw: [])
-
+    seen_mois = []
+    def capture(settings, mois, grade_order, movement_settings):
+        seen_mois.append((settings.mysql_view_mois, mois, movement_settings.mysql_view_mois))
+        return {"mois": mois, "rows": [], "grades": [], "details": {
+            key: {} for key in ("missions", "malades", "deserteurs", "stages_loc", "stages_ex",
+                                "stages_internal", "conges", "conges_by_type", "positions")},
+            "detaches": [], "previous_counts": [None] * 10, "movements": [],
+            "detaches_config": DetachesFileConfig().to_dict()}, {"captured_at_utc": "2026-11-06T10:00:00+00:00"}
+    monkeypatch.setattr(export, "_capture_numerique_workbook_data", capture)
+    monkeypatch.setattr("sme_gend.services.sme_export_revision.revision_root", lambda settings: tmp_path / "revisions")
+    logs = []
+    monkeypatch.setattr("sme_gend.services.doc_gen_log.log_doc_generation", lambda **kw: logs.append(kw))
     dest = tmp_path / "out.xlsx"
-    st = _settings(mysql_view_mois=None)
-    with patch("sme_gend.config.liste_generale_scope.load_sme_context") as load_ctx:
-        load_ctx.return_value.mois_actif = "2026-04"
-        export_numerique_workbook(st, tpl, dest, export_mois="2025-06")
-
-    assert seen_mois == ["2025-06"]
-    assert dest.is_file()
-    wb = load_workbook(dest, read_only=False, data_only=False)
+    revision = export_numerique_workbook(_settings(), tpl, dest, export_mois="2025-06", mois_actif="2026-04")
+    assert seen_mois == [("2025-06", "2025-06", "2025-06")]
+    assert dest.read_bytes() == revision.workbook.read_bytes()
+    assert logs[0]["meta"]["revision_id"] == revision.revision_id
+    assert logs[0]["mois"] == "2025-06"
+    wb = load_workbook(dest)
+    original = load_workbook(tpl)
     try:
-        original = load_workbook(tpl)
         assert wb.sheetnames == original.sheetnames
-        assert set(map(str, wb['NUMERIQUE'].merged_cells.ranges)) == set(map(str, original['NUMERIQUE'].merged_cells.ranges))
-        assert wb['NUMERIQUE']['B8'].data_type == 'f'
-        original.close()
-        assert "LISTE GENERALE" in wb.sheetnames
-        assert "NUMERIQUE" in wb.sheetnames
-        ws_liste = wb["LISTE GENERALE"]
-        assert ws_liste.page_setup.orientation == "landscape"
-        ws_num = wb["NUMERIQUE"]
-        title = ws_num["A3"].value
-        assert title and "2025" in str(title)
-        ws_gp = wb["GAIN PERTE"]
-        assert "2025" in str(ws_gp.cell(row=3, column=1).value)
+        assert wb["NUMERIQUE"]["B8"].data_type == "f"
+        assert set(map(str, wb["NUMERIQUE"].merged_cells.ranges)) == set(map(str, original["NUMERIQUE"].merged_cells.ranges))
+        assert "2025" in str(wb["NUMERIQUE"]["A3"].value)
+        assert "2025" in str(wb["GAIN PERTE"].cell(3, 1).value)
     finally:
         wb.close()
+        original.close()
 
 
 def test_numeric_export_stops_when_gains_pertes_cannot_be_read(monkeypatch):

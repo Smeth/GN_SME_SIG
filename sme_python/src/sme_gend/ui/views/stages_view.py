@@ -1438,7 +1438,7 @@ class StagesView(QWidget):
             f"Vous allez terminer {len(keys)} {kind_label} et repasser "
             f"{'ces personnes' if len(keys) > 1 else 'cette personne'} "
             f"en position administrative « Présent » et clôturer la fiche stage du mois "
-            f"(date de fin = dernier jour du mois SME affiché, ou date du jour hors période).\n\n"
+            f"(la date réelle de fin sera demandée à l’étape suivante).\n\n"
             f"{preview_lines}\n\n"
             f"Cette action modifie {scope} : effectifs, liste des présents "
             "et situation numérique du mois concerné."

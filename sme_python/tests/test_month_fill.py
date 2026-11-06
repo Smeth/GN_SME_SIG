@@ -146,6 +146,8 @@ def test_file_menu_routes_to_same_workflow_handler(app, monkeypatch):
                  '_on_reconcile_carriere_menu', '_go_page', '_open_global_search',
                  '_reload_current_view', '_refresh_shared_data_now', '_toggle_sidebar', '_apply_theme', '_about'):
         setattr(window, name, MagicMock())
+    window._change_own_password = MagicMock()
+    window._logout_user = MagicMock()
     handler = MagicMock()
     window._pilotage_view = SimpleNamespace(_sme_panel=SimpleNamespace(_on_fill_month_dialog=handler))
     monkeypatch.setattr(ui, 'default_nav_groups', lambda: [])

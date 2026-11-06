@@ -132,7 +132,7 @@ def test_the_actual_rule_dialog_opens_and_preserves_values(rules_ui,monkeypatch,
 
 def test_vigilance_uses_only_dossier_data_and_rules_not_retired_tables():
     from sme_gend.services.avancement_engine import rules_by_cible
-    svc=AvancementService.__new__(AvancementService);svc._repo=MagicMock()
+    svc=AvancementService.__new__(AvancementService);svc._repo=MagicMock();svc._settings=MagicMock()
     svc._repo.load_agents.return_value=[agent()];svc.regles=lambda:rules_by_cible()
     result=svc.vigilance(annee=2022,trimestre=1,on=date(2022,1,1))
     assert result[0].statut==STATUT_ELIGIBLE
