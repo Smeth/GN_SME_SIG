@@ -1,0 +1,152 @@
+IMPRESSION — ÉCRITURES DIRECTES ET SYNCHRONISATION — LOT 19 — 30/10/2026
+
+Périmètre et protection
+Racine : C:\Users\MONSTER\Desktop\GN\Impression\sme_python.
+Branche feature/mysql-migration conservée. Le dépôt était déjà modifié au début
+de ce lot ; les changements précédents sont préservés par empreintes et copies
+baseline/. Aucun reset, commit, déploiement ou nettoyage de fichiers utilisateur.
+Tests sur données synthétiques et MySQL 8.0.40 jetable, datadir vérifié sous build,
+écoute 127.0.0.1:64062 ; réseau de production, ODBC et écritures hors profil de
+test bloqués. Aucune migration ni dépendance nouvelle, aucun exécutable généré.
+
+Chemins désormais raccordés
+- MySQLGradeRepository : insert, update, delete.
+- MySQLStructureRepository : insert, update, delete, rename_code.
+- MySQLFonctionsRepository : insert, update, delete.
+- MySQLPadminRepository : insert, update, delete.
+- MySQLOrganigramRepository : réordonnancement des structures/subdivisions,
+  déplacement, rattachement, ajout par délégation, renommage, suppression de
+  subdivision et suppressions contrôlées de structure/grade.
+- MySQLFonctionStructureRepository : remplacement par structure ou fonction,
+  création d'un lien manquant et backfill depuis les carrières.
+Soit 25 méthodes SQL protégées et add_subdivision qui délègue au rattachement
+protégé : 26 points d'entrée testés, 38 instructions mutatrices marquées.
+instrumented_writes.json contient l'inventaire précis des fichiers/classes/méthodes.
+
+L19-01 — P1 confirmé — modifications invisibles au mécanisme de synchronisation
+Fichiers : repositories/mysql_bundle_repositories.py,
+mysql_organigram_repository.py, mysql_fonction_structure_repository.py.
+Les écritures ci-dessus validaient leurs données sans publier shared_data_revision.
+Reproduction avant correction : les 26 opérations modifiaient leurs tables mais
+read_data_revision retournait le même signal vide ; 26 tests échouaient.
+Correction : contexte partagé dans src/sme_gend/services/shared_reference_write.py:49,
+marquage explicite après chaque DML réellement affectant des lignes, et publication
+de la révision dans la même transaction que les données. Le format de signal et
+la boucle de lecture existants sont conservés ; reason vaut reference_write.
+Si l'écriture du signal échoue, les changements métier du lot sont annulés et
+l'erreur est propagée. Aucun succès silencieux ni nouvelle tentative métier automatique.
+
+L19-02 — P1 confirmé — validations précoces et opérations imbriquées
+Certains remplacements de liens faisaient un commit explicite. Une notification
+ajoutée après ce commit n'aurait pas permis de les annuler. Deux reproductions
+avant correction confirment que la panne de publication n'était même pas appelée.
+Le contexte réutilise mysql_import_transaction et sa connexion à commit différé.
+Les appels imbriqués d'un même lot partagent l'état de changement et publient une
+fois après succès de tout le lot. Une erreur interne, même interceptée dans ce
+lot, le rend non validable ; une partie de référentiel ne reste pas enregistrée.
+Lorsqu'un appel rejoint une transaction externe déjà ouverte, un SAVEPOINT propre
+au lot permet d'annuler cet appel si son erreur est gérée par l'appelant ; les
+autres opérations de la transaction peuvent alors être conservées. Le nom est
+généré localement par UUID, jamais issu d'une entrée utilisateur. Un échec du
+retour au point de sauvegarde provoque une erreur explicite et un diagnostic
+sans contenu sensible ; la transaction externe doit être interrompue.
+Référence primaire pour la portée des SAVEPOINT et des verrous :
+https://docs.oracle.com/cd/E17952_01/mysql-8.0-en/savepoint.html
+Un retour au SAVEPOINT ne promet pas la libération immédiate de tous les verrous
+InnoDB : la transaction externe doit rester courte et se terminer normalement.
+
+L19-03 — P1/P2 confirmé — anciens indicateurs réinstallés après actualisation
+Emplacements : src/sme_gend/padmin_present.py:162,
+load_padmin_presence_index. Le cache pouvait être vidé par l'actualisation puis
+rempli à nouveau par une lecture démarrée avant la modification. Deux tests
+concurrents reproduisaient la persistance de l'ancien indicateur.
+Correction : verrou autour du dictionnaire et numéro de génération. La requête
+MySQL reste hors verrou ; une réponse antérieure à l'invalidation ne réinstalle
+plus son résultat dans le cache. La lecture déjà engagée peut finir avec son
+cliché initial ; les prochains accès ne sont plus contaminés par ce résultat.
+Après commit réel d'un référentiel, invalidation des caches locaux de liste,
+indicateurs associés et présence, y compris les différentes vues mensuelles.
+En cas de rollback, cette invalidation après commit n'est pas exécutée.
+
+L19-04 — P2 — éviter les notifications inutiles
+Le marquage utilise le nombre de lignes affectées par chaque instruction SQL.
+Une mise à jour sans effet, un lien déjà présent, un backfill sans ajout ou une
+suppression d'une clé absente ne publie pas et n'invalide pas les caches. Cela
+évite notamment qu'une vérification de lien répétée alimente le rafraîchissement.
+Un remplacement qui supprime puis recrée des lignes peut toujours notifier,
+même si son état final est identique : aucun calcul de diff métier coûteux ajouté.
+Les validations d'entrée restent avant l'ouverture de la nouvelle transaction
+lorsqu'elles l'étaient déjà, et les signatures publiques sont conservées.
+
+Vérifications exécutées
+Avant corrections : 26 échecs de signal, 2 échecs d'annulation liée au signal,
+2 échecs de cache concurrent. Les défauts n'ont pas été déduits d'une simple lecture.
+Après corrections :
+- 52 premiers cas MySQL réussis : les 26 écritures publient chacune une fois ;
+  une panne de publication annule intégralement chaque opération.
+- 69 nouveaux cas MySQL au total : visibilité avant/après commit, rollback,
+  absence d'effet, lot multiréférentiel avec signal unique, savepoint, erreur
+  imbriquée gérée, deux rédacteurs simultanés, échec explicite de récupération.
+- 5 nouveaux cas unitaires : deux lectures de cache concurrentes et trois
+  validations d'entrée qui échouent toujours avant connexion.
+- Passe finale unitaire complète : 985 réussis en 55,20 s, 8 avertissements déjà
+  présents avant ce lot. Aucun test désactivé pour obtenir ce résultat.
+- Passe finale MySQL ciblée : 110 réussis en 149,54 s, 149 non sélectionnés.
+  Elle inclut les nouveaux cas et les contrôles précédents de filtres mensuels,
+  interruptions du pool, positions/registres et synchronisation. Ce n'est pas
+  une nouvelle passe complète des 259 cas natifs désormais disponibles.
+- Total pytest de la validation finale : 1 095 réussis ; 74 nouveaux cas ajoutés.
+- Deux scénarios supplémentaires entre processus Python indépendants sur ce PC :
+  le client lecteur voit l'ancien référentiel et l'ancienne révision tant que
+  l'autre client n'a pas validé ; après commit les deux changent, après rollback
+  les deux restent inchangés. Le hash du helper testé est consigné dans la preuve.
+- Revue AST de 64 méthodes des trois dépôts : hors contextes, marquages et
+  indentation SQL ajoutés, les corps métier, paramètres, littéraux SQL et
+  méthodes de lecture sont préservés. L'inventaire documente la transformation.
+- Contrôle syntaxique global, patch séparé vérifié sans application, conservation
+  de l'état Git antérieur et des empreintes EXE/ZIP ; serveur jetable arrêté
+  après vérification de l'absence de bases de test résiduelles.
+
+Les commandes exactes, profils, durées et preuves sont dans
+build/corrections_20261030_lot19/validation_summary.json. Les scripts de processus
+et de revue sont conservés dans ce dossier ; ils exigent l'instance jetable
+contrôlée et ne doivent pas être détournés pour viser la production.
+La fixture native historique a reçu la table app_config utilisée par le déploiement
+normal ; sa création redondante a été retirée d'un cas devenu commun. Ses assertions
+de mois et de rollback ont été conservées, pas remplacées par des succès simulés.
+
+Performances et limites
+Aucun gain de vitesse globale revendiqué : pas de benchmark avant/après comparable.
+La publication de révision et les savepoints ont un coût SQL. Les appels regroupés
+dans un même contexte partagent une publication, et les DML sans effet ne notifient
+pas. Les accès réseau ne sont pas exécutés sous le verrou du cache de présence.
+La boucle de rafraîchissement existante est conservée, pas de nouveau serveur push.
+
+La preuve entre processus est locale, pas une validation SMB ni deux PC distants.
+Les anciens exécutables et outils SQL externes ne suivent pas automatiquement ces
+contextes et ne publient pas nécessairement de signal. Les conflits de saisie
+simultanée d'une même sélection de référentiels ne reçoivent pas ici de comparaison
+avec une version présentée à l'utilisateur ; les tests couvrent l'atomicité et
+des écritures simultanées, pas une détection exhaustive de ces conflits métier.
+Une perte d'acquittement du commit reste à examiner avant toute relance manuelle ;
+les données et le signal partagent la transaction, aucun rejeu automatique ajouté.
+
+Périmètre encore ouvert
+- Autres écritures directes hors référentiels : mouvements gains/pertes, tâches
+  workflow et chemins non inventoriés ici. Les services déjà protégés par les
+  lots antérieurs ne sont pas déclarés défaillants sans reproduction spécifique.
+- Comportement des vues asynchrones, saisies concurrentes fines et versions
+  anciennes à valider en préproduction ; aucune garantie exhaustive de tous les écrans.
+- Partage SMB réel, lettres de lecteurs et droits : essais sur les PC de travail
+  toujours à réaliser lorsqu'ils seront disponibles ; kit du lot 15 conservé.
+- TLS, compatibilité des mots de passe non ASCII et profilage volumétrique restent
+  des lots distincts. Aucune migration de comptes ou certificat imposé ici.
+
+Validation et contrôle du lot
+En préproduction, modifier un référentiel depuis un client, puis vérifier sa
+lecture et les indicateurs depuis un second ; tester aussi une annulation et
+la présence d'une saisie en cours pour conserver le comportement de report du refresh.
+changes_manifest.json et corrections_only.patch isolent ce lot par rapport à
+l'état initial déjà modifié ; baseline/ conserve les originaux. Un retour de sources
+doit préserver les changements ultérieurs et être contrôlé sur une copie, sans
+reset global. Aucune migration de données à annuler. Aucun exécutable généré.

@@ -1,0 +1,172 @@
+IMPRESSION — GAINS/PERTES, WORKFLOW ET SYNCHRONISATION — LOT 20
+30/10/2026
+
+Périmètre et protection
+Racine : C:\Users\MONSTER\Desktop\GN\Impression\sme_python.
+Branche feature/mysql-migration conservée ; 489 entrées Git préexistantes au
+début du lot. État initial, empreintes et copies baseline/ conservés. Aucun
+reset, commit, nettoyage, déploiement ou modification de données utilisateur.
+Tests exclusivement sur données synthétiques ; MySQL 8.0.40 local jetable,
+datadir vérifié sous build, port 64062, réseau externe et ODBC bloqués par le
+runner isolé. Les autres instances MySQL ne sont pas utilisées par ces tests.
+Aucune migration, dépendance nouvelle ni génération d'exécutable.
+
+L20-01 — P1 confirmé — validation prématurée de transactions par le workflow
+Emplacement : src/sme_gend/services/workflow_task_service.py:43.
+Cause : _ensure_table exécutait le DDL de création même lorsque workflow_task
+existait déjà. Un CREATE TABLE peut implicitement terminer la transaction active.
+Trois reproductions natives avant correction : lire, créer ou résoudre une tâche
+dans une transaction contenant une autre écriture, puis lever une exception ;
+l'écriture antérieure persistait au lieu d'être annulée. Risque : opérations
+métier partielles et sauvegardes/annulations qui ne correspondent plus à la demande.
+Référence primaire : https://docs.oracle.com/cd/E17952_01/mysql-8.0-en/implicit-commit.html
+Correction : vérification non mutatrice de présence, cache par instance du
+service, aucune exécution DDL si la table existe. Table absente pendant une
+transaction gérée : erreur explicite sans création. Initialisation autonome
+historique conservée hors transaction active, avec verrou d'initialisation et
+contrôle de l'état transactionnel de la connexion avant DDL. Schéma SQL inchangé.
+Validation : trois régressions natives d'annulation, table absente et création
+autonome, plus deux preuves workflow entre processus indépendants.
+
+L20-02 — P1 confirmé — écritures sans signal de synchronisation atomique
+Emplacements : src/sme_gend/repositories/mysql_bundle_repositories.py:373,
+update_row, delete_row ; src/sme_gend/services/workflow_task_service.py:137,
+resolve_task, sync_from_pre_closure ; helper src/sme_gend/services/shared_reference_write.py:49.
+Avant correction, les six opérations ciblées enregistraient leurs changements
+sans révision partagée ; six reproductions natives échouaient sur le signal.
+Conséquence : les postes pouvaient ne pas détecter ces mises à jour. Publier
+après un commit distinct aurait créé un autre risque : donnée enregistrée sans
+notification en cas de panne du signal.
+Correction : données et shared_data_revision dans la même transaction. Raisons
+gain_perte et workflow_task, format du signal et boucle existante conservés.
+Marquage sur les lignes affectées ; pas de signal pour une résolution déjà faite.
+Les lots imbriqués coalescent la publication, tout échec imbriqué invalide le lot.
+Dans une transaction externe, un SAVEPOINT propre à l'appel permet d'annuler
+le lot si l'appelant traite son exception tout en conservant ses autres écritures.
+L'invalidation locale des caches reste différée au véritable commit.
+L'API du helper référentiels est conservée et ses tests natifs sont rejoués.
+Validation : six mutations, six pannes de publication avec annulation complète,
+douze cas visibilité/commit/rollback externe, six erreurs gérées avec SAVEPOINT.
+Quatre cas supplémentaires entre processus : gains et workflow, commit et
+rollback. Le lecteur ne voit ni données partielles ni révision prématurée.
+
+L20-03 — P1 confirmé — doublons et sauvegardes partielles des tâches automatiques
+Emplacement : src/sme_gend/services/workflow_task_service.py:190.
+Causes : détection sur une page limitée aux 100 premières tâches et boucle de
+créations indépendantes. Un contrôle plus ancien pouvait être créé en doublon ;
+une panne à la deuxième création laissait la première enregistrée. Deux tests
+natifs reproduisaient ces défauts avant correction.
+Correction : recherche des clés de tous les contrôles concernés pour le mois,
+sans limite de page, clé utilisant le titre tronqué comme en base, lot atomique.
+Le verrou de la ligne existante shared_data_revision est pris avant lecture et
+écriture du workflow, puis conservé jusqu'au commit ; aucune table de verrou ni
+clé persistante nouvelle. Une ligne de révision absente est initialisée avec un
+token vide ; le token existant n'est pas remplacé par cette prise de verrou.
+Référence primaire sur ON DUPLICATE KEY UPDATE et son verrou exclusif :
+https://docs.oracle.com/cd/E17952_01/mysql-8.0-en/innodb-locks-set.html
+Validation : deux clients concurrents créent une seule tâche automatique et
+publient une seule révision ; deux résolutions simultanées ont un seul effet.
+Rapport répété, titres longs, plus de 100 tâches et panne au milieu du lot testés.
+Une tâche déjà résolue peut toujours être recréée si le contrôle reste en échec :
+règle historique conservée. Pas de contrainte d'unicité ajoutée aux tâches manuelles.
+
+L20-04 — P1 confirmé — erreurs workflow masquées et suivi bloquant omis
+Emplacements : src/sme_gend/services/workflow_task_service.py, src/sme_gend/ui/views/workflow_status_panel.py:90,
+services/pre_closure_service.py:finalize_pre_closure_report,
+src/sme_gend/ui/views/sme_workflow_panel.py:101.
+Le stockage pouvait rendre [], None ou False sur panne, confondant indisponibilité
+et résultat métier vide. Une actualisation pouvait effacer l'ancienne file. Les
+contrôles BLOCK sortaient avant leur enregistrement en tâches : deux scénarios
+UI reproduisaient cette omission.
+Correction : WorkflowTaskError explicite et messages publics sans contenu brut
+du pilote ; cause technique conservée dans l'exception pour diagnostic contrôlé.
+Échec de lecture : ancienne liste et sélection conservées, message visible.
+Échec de résolution : pas de faux succès ni effacement ; une tâche déjà traitée
+par un autre client provoque une actualisation normale. Droits UI conservés.
+L'échec d'enregistrement des tâches de pré-clôture est signalé par avertissement.
+Les contrôles bloquants alimentent maintenant le suivi tout en continuant de
+refuser la clôture. Un échec du suivi optionnel ne change pas les règles métier
+de confirmation existantes. Aucune clôture déclenchée sans confirmation.
+Validation : 13 nouveaux cas unitaires UI/service, dont droits, erreurs, liste
+conservée, confirmation annulée, contrôles bloquants et échec du suivi ; quatre
+tests MySQL de panne vérifient les erreurs et l'absence de détails privés en logs.
+
+L20-05 — P1/P2 — saisie groupée des écarts gains/pertes désormais atomique
+Emplacements : src/sme_gend/repositories/gain_perte_repository.py:56,
+ui/views/gain_perte_view.py:_on_record_gaps.
+La boucle UI insérait séparément chaque ligne après confirmation : une erreur
+tardive pouvait laisser un lot incomplet. Nouveau point d'entrée insert_rows :
+lot unique, une notification, annulation totale si un agent ou mois est absent.
+Aucune transaction ouverte pendant la confirmation utilisateur. Les mois de
+chaque mouvement sont conservés, même pour un lot contenant plusieurs périodes.
+Validation native : échec à la deuxième ligne, lots mono/multimois ; validation
+UI : aucune écriture en cas d'annulation. Comparaison AST des huit méthodes
+MySQLGainPerteRepository : corps métier, paramètres, validations et requêtes
+conservés hors enveloppes, marquages et espaces des chaînes.
+
+L20-06 — P2 confirmé — compteur de tâches limité à la taille de page
+Emplacements : src/sme_gend/services/workflow_task_service.py:236,
+services/workflow_alert_service.py:build_workflow_alerts.
+Le compteur utilisait la longueur de list_open, limitée par défaut à 50.
+Correction : COUNT(*) réel avec filtre mensuel ; indisponibilité du stockage
+signalée par une alerte explicite au lieu d'un compteur vide trompeur.
+Validation native : 126 tâches du mois, 127 au total, page de lecture de 50.
+
+Tests exécutés et preuves
+Avant correction : 11 échecs natifs ciblés (6 signaux, 3 validations implicites,
+1 doublon hors page, 1 lot partiel) en 11,16 s. Deux échecs UI supplémentaires
+sur le suivi des contrôles bloquants en 1,26 s. Les premiers tests de rendu UI
+ont aussi vérifié le nouveau contrat d'affichage ; ils ne sont pas tous des
+défauts indépendants. Aucun test n'a été désactivé pour obtenir un succès.
+Après correction, nouveau périmètre MySQL : 51 réussis en 52,72 s.
+Passe finale sur sources terminées :
+- Suite unitaire complète : 998 réussis, 8 avertissements, 48.76 s.
+- MySQL ciblé : 166 réussis, 144 non sélectionnés, 243.27 s.
+- Total final pytest : 1164 réussis ; 64 nouveaux cas (13 UI/unitaires, 51 natifs).
+Le filtre natif inclut le lot 20, les référentiels du lot 19, les périodes du lot
+18, le pool du lot 17, la clôture et la synchronisation du lot 12. Il ne constitue
+pas une nouvelle passe complète des 310 cas natifs disponibles. Les journaux
+final_unit.log, final_mysql.log et leurs JSON conservent commandes, profils et
+durées exactes. Quatre scénarios interprocessus supplémentaires sont consignés
+dans business_sync_*/validation.json avec empreintes des trois sources centrales.
+Contrôle syntaxique global, patch séparé contrôlé sans application et comparaison
+des empreintes EXE/ZIP. L'arrêt de l'instance jetable et l'absence de bases de test
+résiduelles sont consignés dans validation_summary.json après finalisation.
+
+Performance : résultat mesuré et limites
+Une instance workflow exécutant deux listes et un comptage sur table existante
+fait désormais une seule vérification metadata et zéro DDL : assertion native
+sur les instructions effectivement exécutées. Le compteur ne charge pas une
+page pour la compter. Aucun benchmark représentatif avant/après de latence
+globale : aucun pourcentage d'accélération revendiqué. Les savepoints et la
+révision ajoutent des requêtes ; le verrou global de révision peut occasionner
+de l'attente. Les transactions métier doivent rester courtes. Pas de rejeu
+automatique en cas d'interblocage ou d'acquittement de commit perdu : vérifier
+l'état effectif avant de recommencer une opération dont le résultat est incertain.
+
+Limites et travail restant
+- Pas de validation réelle sur SMB ou entre deux PC de travail, actuellement
+  indisponibles. Les quatre clients de preuve sont des processus de ce PC.
+  La notification utilise le polling existant, elle ne garantit pas un refresh
+  immédiat de chaque écran ni le comportement des anciens exécutables.
+- Pas de comparaison optimiste avec l'ancienne version présentée lors de deux
+  modifications concurrentes du même mouvement gains/pertes. Atomicité et
+  ciblage par clé primaire préservés ; les conflits de saisie fine restent ouverts.
+- Autres écritures hors gains/pertes et workflow non inventoriées dans ce lot,
+  vues asynchrones et règles de droits à examiner selon leur périmètre propre.
+- Garanties testées avec tables InnoDB et MySQL 8.0.40 ; aucune conversion de
+  moteur en production ni migration lancée. TLS/certificats, compatibilité des
+  mots de passe non ASCII et profilage volumétrique restent des lots distincts.
+
+Validation et retour arrière
+En préproduction isolée, créer/modifier/supprimer un mouvement depuis un client,
+observer la révision et son affichage sur un second, puis tester un lot refusé.
+Lancer deux synchronisations du même rapport, résoudre la même tâche depuis
+deux clients, simuler une rupture puis actualiser : erreur visible et absence
+de données partielles attendues. Vérifier aussi droits et saisie en cours.
+changes_manifest.json et corrections_only.patch isolent ce lot du dépôt déjà
+modifié ; baseline/ conserve les originaux. Tout retour de sources doit être
+contrôlé sur une copie et préserver les changements ultérieurs. Pas de reset
+global, aucune migration ni restauration de données nécessaire pour ce lot.
+Les scripts de validation conservés sous build exigent l'instance jetable
+vérifiée ; ne pas les rediriger vers une base réelle. Aucun exécutable généré.

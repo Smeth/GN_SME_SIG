@@ -1,0 +1,144 @@
+Structures, subdivisions et fonctions — corrections du 1 novembre 2026
+
+Périmètre : points 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15,
+16, 17 et 18 de la liste numérotée remise après l'audit.
+
+1. Le service d'organigramme est réinitialisé sur les paramètres courants.
+La sélection de l'ancien contexte est retirée. La bannière qualité change
+aussi de contexte et refuse un nettoyage sur une connexion périmée.
+
+2. Les structures, subdivisions et compteurs sont lus dans des variables
+locales avant publication dans l'écran. Un échec conserve la photographie
+précédente entière, signale son état périmé et désactive les actions. Un
+changement de contexte pendant la lecture est refusé. Le parent et la
+bannière ne présentent plus un rechargement échoué comme réussi.
+
+3. Le dialogue de structure valide les champs requis et l'ordre de tri
+avant fermeture : entier SQL signé ou vide. Une valeur invalide garde
+la fenêtre ouverte avec un message au lieu de remonter une exception.
+
+4. Les coches sont conservées par code de structure à travers les filtres
+et rechargements. Seules les structures disparues sont retirées. Le
+compteur annonce aussi les coches hors filtre ; l'action groupée utilise
+explicitement cet ensemble.
+
+5. Tri numérique des nombres de subdivisions, fonctions et effectifs.
+
+6. Une lecture de rattachements impossible est affichée comme telle.
+Elle n'est plus présentée comme « Aucune fonction ».
+
+7. Les compteurs et listes de fonctions rattachées du hub utilisent
+uniquement les liens explicites. Ils ne confondent plus les fonctions
+historiquement observées avec les rattachements officiels.
+
+9. La fenêtre Subdivisions distingue les rattachements officiels et les
+libellés seulement observés dans les dossiers du mois. Elle permet de
+créer/rattacher à une feuille T, renommer et supprimer un rattachement.
+Les actions utilisent un instantané de maintenance existant et la
+permission structures.codes. Les conflits de version sont refusés.
+La suppression contrôle situations et affectations, toutes périodes.
+Le renommage précise sa portée : référentiel et libellés du mois consulté.
+Les opérations réutilisent les services d'organigramme, de mise en page
+et de journalisation dans une transaction partagée.
+
+10. Rechercher un parent conserve ses descendants visibles. L'état des
+branches et la sélection sont conservés lors du filtrage, quand possible.
+
+11. Nomenclature, rattachements RSA et dossiers sont explicitement
+distingués. Renommer la nomenclature demande une confirmation de portée
+et annonce les affiliations connues. Aucun renommage implicite des
+archives n'est déclenché par cette action. La gestion des rattachements
+structure permet de choisir une feuille T réelle ; les libellés historiques
+ne sont pas fusionnés automatiquement.
+
+12. Les commandes Structures et Nomenclature passent à la ligne. Les
+panneaux s'empilent sur faible largeur. La désignation garde une largeur
+lisible avec défilement horizontal du tableau. Les fenêtres de maintenance
+peuvent être réduites et leur contenu défiler. Les boutons du hub suivent
+le chargement, la sélection et le verrouillage de saisie.
+
+13. Les structures non suggérées restent sélectionnables manuellement
+pour une fonction générique. Elles ne sont pas précochées. Nouvelle
+fonction transmet la structure du filtre courant au dialogue.
+
+14. Harmonisation : comparaison des deux libellés avec la même
+normalisation, supprimant le faux écart sur un libellé identique.
+
+15. Fonctions observées, compteurs de fiches et reprise des liens utilisent
+les mécanismes de périmètre de carrière existants pour le mois consulté.
+La bannière qualité annonce aussi la période consultée.
+
+16. Renommer une fonction depuis les deux dialogues concernés affiche
+le nombre de situations et d'affectations, toutes périodes confondues.
+La confirmation indique explicitement la modification globale des
+libellés historiques et la conservation des dates/événements. L'impact
+est revérifié dans la transaction ; s'il a changé, il faut le revoir.
+
+17. Retirer un poste attendu ne supprime plus la fonction du catalogue
+partagé ni ses autres rattachements. Le bouton et la confirmation
+expliquent cette portée. La suppression volontaire du catalogue reste
+distincte et refuse aussi une fonction utilisée seulement en affectation.
+
+18. Création de fonction, rattachement et nettoyage des exclusions sont
+réunis dans une transaction partagée. L'attribution d'un poste réunit
+aussi cette préparation du référentiel et l'enregistrement du personnel.
+Le retrait d'un poste n'enchaîne plus suppression globale puis exclusion :
+il réalise seulement l'exclusion atomique existante.
+
+VALIDATION
+265 tests réussis en 6,35 secondes. 35 tests ciblés nouveaux couvrent
+contexte, échec de lecture, coches, tri, validation de formulaire, arbre,
+création générique réelle via le dialogue, harmonisation, requêtes de
+période, confirmation/impact de renommage, retrait local, refus de
+permission, subdivisions et frontières de rollback. Les tests existants
+de conflits de version, relations, référentiels et synchronisation passent.
+Les fixtures de trois suites existantes ont été adaptées aux nouveaux
+états de fraîcheur et confirmations, en préservant leurs assertions de
+conservation des brouillons et des versions affichées.
+
+Captures produites et contrôlées sur objets fictifs, en clair et sombre,
+à 640x700 et 1000x700. Diff --check sans erreur.
+69 avertissements répètent l'appel Qt déprécié déjà signalé au point 31 ;
+ce point n'est pas inclus dans la sélection demandée.
+
+FICHIERS APPLICATIFS CONCERNÉS
+- ui/structure_edit_dialog.py
+- ui/structure_subdivisions_dialog.py
+- ui/fonction_smart_dialog.py
+- ui/fonction_assign_agent_dialog.py
+- ui/fonction_rename_confirmation.py (nouveau)
+- ui/views/structure_hub_view.py
+- ui/views/organigram_quality_banner.py
+- ui/views/subdivisions_hierarchy_view.py
+- ui/views/referentiel_views.py
+- ui/views/fonction_referentiel_view.py
+- services/referentiel_service.py
+- services/structure_organigram_service.py
+- services/fonction_smart_link.py
+- services/fonction_referentiel_harmonize.py
+- repositories/fonctions_repository.py
+- repositories/mysql_fonction_structure_repository.py
+- repositories/mysql_bundle_repositories.py
+Chemins relatifs à src/sme_gend/.
+
+TESTS
+- tests/test_structure_fonction_corrections.py (nouveau)
+- tests/test_catalogue_concurrency.py
+- tests/test_hierarchy_merge_ui.py
+- tests/test_reference_collection_conflicts.py
+
+LIMITES ET SUITE
+- Les points non sélectionnés, notamment 8 et 19 à 31, ne sont pas annoncés
+  comme corrigés. L'export d'harmonisation et les autres filtres Fonctions
+  conservent les limites identifiées dans l'audit.
+- Le retrait d'un poste attendu reste une exclusion toutes périodes ;
+  sa portée est maintenant explicite, mais aucun gestionnaire de restauration
+  d'exclusions n'a été ajouté.
+- Pas de propagation automatique d'un renommage de nomenclature vers
+  toutes les subdivisions et archives : ces opérations sont distinctes.
+- Les tests de base et de rollback emploient des doubles et les mécanismes
+  existants ; pas de recette native sur une base MySQL réelle, ni de
+  simulation de toutes les courses possibles entre postes utilisateurs.
+- Aucune donnée réelle modifiée, aucun exécutable généré. Les connexions
+  réelles sont interdites pendant les tests par le runner d'audit.
+- Modifications préexistantes conservées.

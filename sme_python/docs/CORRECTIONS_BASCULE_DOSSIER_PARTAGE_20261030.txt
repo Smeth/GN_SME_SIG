@@ -1,0 +1,230 @@
+IMPRESSION — LOT 13 : BASCULE COORDONNÉE DU DOSSIER PARTAGÉ
+Sources corrigées, sans génération d'exécutable ou de portable.
+
+PROTECTION DU TRAVAIL
+
+Branche feature/mysql-migration conservée. Les modifications déjà présentes
+ne sont ni annulées ni écrasées : empreintes initiales, état Git et copies
+des fichiers édités sous build/corrections_20261030_lot13/. Aucun reset,
+commit, modification des références sources/ du miroir ou nettoyage de données.
+
+Les tests bloquent les bases réelles et les écritures hors des profils jetables.
+Seul MySQL 127.0.0.1:64062 est autorisé, après vérification de @@datadir sous build/.
+Les bases UUID et les fichiers d'images sont synthétiques. Les adresses UNC de
+test sont redirigées vers ces répertoires locaux : aucun partage réel n'est monté.
+Aucun secret ou contenu utilisateur réel n'est inclus dans les preuves.
+
+L13-01 — P1 CONFIRMÉ : ÉCRITURE DANS L'ANCIEN DOSSIER APRÈS BASCULE
+
+Emplacements :
+src/sme_gend/services/media_storage_coordination.py:69 (media_storage_gate)
+src/sme_gend/services/shared_media.py:139 (shared_media_write_target)
+src/sme_gend/services/personnel_media.py:215 (_save_media)
+
+Avant : la racine était capturée par copie, mais sans coordination avec les
+changements de dossier. Un poste au cache ancien pouvait écrire après la copie
+des images vers le nouveau dossier. Le signal SQL ne déplaçait pas cette image.
+Les scénarios de poste périmé et de copie pendant la bascule ont effectivement
+échoué avant correction : le fichier final était dans old/photos au lieu de new.
+
+Correction : les bascules et les écritures UNC raccordées prennent le même
+verrou MySQL exclusif, sur une connexion dédiée hors pool et hors transaction
+métier. Le nom dépend du DATABASE() réel sur le serveur, sans dépendre de l'alias
+d'hôte saisi sur chaque poste. Le délai d'attente du verrou SQL est de 5 secondes :
+au-delà, message explicite, sans nouvelle copie effectuée par la demande en attente.
+Cela ne borne pas tous les délais des appels au serveur SMB ou au système Windows.
+
+Après acquisition, une écriture qui suit la configuration centrale relit celle-ci
+sur une connexion autocommit fraîche, puis choisit sa destination. Son ancien
+cache ne décide plus du dossier d'écriture. Les copies et nettoyages d'extensions
+restent sous le verrou d'identité du lot 12. La notification réutilise les mêmes
+paramètres MySQL capturés, puis le cache de lecture est réaligné.
+
+L13-02 — P1 CONFIRMÉ : MIGRATION DEPUIS UNE SOURCE PÉRIMÉE OU ABSENTE
+
+Emplacements :
+src/sme_gend/services/shared_media.py:254 (configure_shared_media)
+src/sme_gend/services/shared_media.py:98 (_root_file_locks)
+src/sme_gend/services/shared_media.py:213 (_verify_copied_images)
+
+Avant : le previous_root du poste et son profil local étaient les seules sources.
+Une ancienne préférence pouvait donc omettre les photos du vrai dossier partagé.
+Un dossier source inaccessible était simplement ignoré et une destination vide
+pouvait devenir active. Ces deux comportements ont été reproduits avant correction.
+
+Correction : lire la configuration centrale sous le verrou, vérifier que sa racine
+est accessible et copier d'abord ses images. Les sources locales antérieures
+restent des compléments non destructifs. Deux bascules simultanées se succèdent :
+la seconde relit la racine devenue active et reprend aussi les images que cette
+racine contenait déjà, sans se limiter à son ancien previous_root.
+
+Les anciennes et nouvelles racines possèdent un verrou de fichier root.lock,
+acquis dans un ordre stable. Il couvre les copies jusqu'à la validation SQL.
+Si la session MySQL disparaît pendant une écriture, ce verrou de fichier demeure
+détenu jusqu'à la sortie de l'opération ou la mort du processus ; une autre
+opération participante ne copie pas un état intermédiaire. Les contrôles vérifient
+l'identifiant de session et la propriété du verrou SQL avant les étapes critiques.
+Les verrous .media-locks sont persistants ; ne pas les supprimer en cours d'usage.
+
+La destination est publiée fichier par fichier, atomiquement et sans écraser
+une image différente existante. Les empreintes SHA-256 des images de référence
+sont comparées avant et après la migration, par blocs d'un Mio. Le chemin partagé
+et son signal restent validés dans une transaction SQL courte après les copies.
+Un contrôle du payload verrouillé refuse d'écraser une configuration modifiée
+par un autre chemin d'écriture pendant le traitement.
+
+La racine source et ses images ne sont pas supprimées. Une erreur laisse parfois
+des copies complètes dans la destination, mais ne publie pas le nouveau chemin
+avant cette validation. L'atomicité concerne la bascule du chemin après les copies,
+pas une transaction distribuée de MySQL et de tous les fichiers.
+
+L13-03 — P1 CONFIRMÉ : REPRISE ACTIVANT DES COPIES DEVENUES ANCIENNES
+
+Emplacements :
+src/sme_gend/services/shared_media.py:198 (_assert_shared_images_preserved)
+src/sme_gend/services/shared_media.py:190 (_file_digest)
+
+Avant : après un échec SQL, des fichiers complets pouvaient déjà exister dans
+la destination. Si une photo changeait encore dans la source, une nouvelle
+tentative sautait le fichier existant puis activait sa vieille copie. Ce scénario
+a échoué avant correction et passe maintenant.
+
+Correction : lors d'un vrai changement de racine partagée, refuser la bascule
+si la même identité photos/grades possède des contenus différents dans la source
+et la destination, y compris JPG contre PNG, ou plusieurs variantes différentes
+dans la source. Tous les fichiers sont conservés. Il faut résoudre le conflit
+en examinant les deux dossiers ou choisir une nouvelle destination vide.
+Le logiciel ne décide pas arbitrairement quelle image est la plus récente.
+
+Si les contenus déjà copiés sont identiques, une tentative interrompue peut être
+reprise sans les recopier. Une modification de paramètres sans changement de
+racine ne recalcule pas les empreintes de toutes les images et ne bloque pas
+à cause d'anciennes variantes déjà présentes dans le dossier actif.
+
+L13-04 — P1/P2 : CONFIRMATION PERDUE ET ERREURS APRÈS ÉCRITURE
+
+Emplacements :
+src/sme_gend/services/shared_media.py:254 (configure_shared_media)
+src/sme_gend/services/personnel_media.py:215 (_save_media)
+
+Après une erreur de commit, le jeton publié permet de rechercher si la bascule
+a réellement été validée. Quand chemin et jeton la confirment, l'erreur explicite
+SharedMediaSwitchCommittedError(committed=True) déconseille une seconde migration.
+Si cette preuve est indisponible ou si une autre saisie a déjà remplacé le jeton,
+SharedMediaSwitchOutcomeUnknownError(committed=None) demande de conserver les
+deux dossiers et de vérifier le dossier actif avant de relancer.
+
+Le dernier cas de révision remplacée a été reproduit par un test rouge et corrigé.
+Une perte de coordination après copie d'image est également signalée comme une
+copie déjà effectuée, sans annoncer de rollback fictif du fichier. La fermeture
+d'une connexion déjà perdue ne masque plus l'erreur initiale.
+
+L13-05 — P2 : PRÉSERVER LES AUTRES SAISIES ET L'INTERFACE
+
+Emplacements :
+src/sme_gend/services/local_audit_mirror.py:13 (locked_mirror_stream)
+src/sme_gend/services/media_storage_coordination.py:12 (locked_media_stream)
+src/sme_gend/ui/paths_config_form.py : enregistrement des médias via run_with_progress.
+
+La primitive de verrouillage de fichier permet maintenant un verrou de thread
+distinct, avec son comportement par défaut conservé pour les journaux. Le domaine
+des médias n'immobilise plus le domaine des journaux pendant toute la migration.
+Un test a effectivement reproduit ce blocage dans la première implémentation du
+lot ; il passe après séparation. Les règles d'append/fsync et de reprise JSONL
+ne sont pas remplacées. Les écritures SQL métier continuent durant le verrou
+des médias, comme le vérifie une seconde connexion native.
+
+Le formulaire de chemins exécute la coordination et la copie dans un worker
+avec progression modale, puis n'enregistre les préférences locales qu'au succès.
+Les widgets sont lus avant le lancement ; le worker ne modifie pas les widgets.
+Les copies de photos et leurs délais réseau existants ne sont pas tous déplacés
+hors du thread graphique dans ce lot.
+
+TESTS ET CONTRÔLES EXÉCUTÉS
+
+- Six tests natifs rouges avant correction : poste périmé, écriture pendant
+  bascule, source centrale omise, source absente, conflit d'images et reprise
+  de migration devenue périmée.
+- Cas supplémentaires : attente expirée sans écriture, alias d'hôte, poursuite
+  d'une saisie métier, session perdue puis reprise, bascules successives, commit
+  confirmé après accusé perdu, commit impossible à confirmer, transaction métier
+  refusée, accès à une image refusé, racine inchangée sans hachage global.
+- Hors MySQL, passe finale : 903 réussis, 139 cas natifs différés,
+  8 avertissements déjà présents, 29.33 s.
+- MySQL isolé, passe ciblée finale : 41 réussis,
+  98 non sélectionnés, 40.8 s.
+  Les cas sélectionnés couvrent bascule, synchronisation du lot 12, clôtures,
+  signaux transactionnels et journaux/reprise pertinents. Les 139 cas natifs
+  disponibles ne sont pas tous rejoués dans ce lot.
+- Total distinct de ces deux passes finales : 944 cas pytest réussis.
+  Ajouts : 16 cas unitaires et 16 cas natifs. Aucun test supprimé ou neutralisé.
+- Essai complémentaire réel : os._exit(91) après copie et avant commit SQL ;
+  ancien chemin confirmé actif. Ensuite deux processus Windows indépendants,
+  l'un basculant et l'autre écrivant avec son ancien chemin, produisent l'image
+  complète dans la nouvelle racine. Source conservée, verrou SQL libéré et
+  aucun temporaire de copie restant. MySQL réel et fichiers locaux jetables,
+  sans accès SMB réel. Preuve process_switch_validation.json, script conservé.
+- Syntaxe de tous les Python, patch inverse en lecture seule, empreintes des
+  sources finales et des anciens EXE/ZIP : validation_summary.json.
+
+Commandes depuis sme_python :
+..\.venv\Scripts\python.exe -B scripts/run_isolated_tests.py tests -q --tb=short --disable-warnings
+..\.venv\Scripts\python.exe -B scripts/run_isolated_tests.py --mysql-test-instance build/corrections_20261029/mysql_test_instance.json tests/integration/test_restore_mysql.py -k "media_lot13 or sync_lot12 or closure or position_model_register_and_revision_are_atomic or direct_registry_revision_failure_rolls_back_entry or mirror or delivery or journal" -q --tb=short --disable-warnings
+
+Les essais du dernier cas d'accusé perdu ont justifié une nouvelle passe finale :
+les sources n'ont plus changé après son lancement. Aucun gain chiffré de vitesse
+en production n'est revendiqué. Le verrou global sérialise les copies de médias
+et les empreintes ajoutent de la lecture pendant une vraie migration : coût de
+cohérence assumé, à mesurer sur le volume et le partage réels.
+
+VALIDATION ET LIMITES À CONSERVER
+
+1. Tous les postes utilisant le dossier central doivent exécuter ces sources
+   corrigées. Les anciens EXE et les écritures manuelles ne participent pas à
+   ces verrous. Ne pas mélanger les versions pour valider la garantie.
+2. Sur une copie de base et deux vrais postes, tester l'ancien et le nouveau
+   partage, les lettres de lecteurs différentes, les droits lecture/écriture/
+   renommage/verrouillage, puis une photo et une bascule simultanées. Tester
+   également la coupure SMB et MySQL, puis vérifier le chemin actif et les deux
+   dossiers avant de reprendre. Aucun essai destructif sur la production.
+3. Les fichiers et verrous doivent être accessibles avec les comptes Windows
+   des postes. MySQL coordonne les participants ; il n'attribue pas les droits
+   du partage. La durabilité après panne électrique et les particularités SMB/
+   DFS réelles restent à vérifier dans l'environnement cible.
+4. Les dérogations locales et SME_PERSONNEL_MEDIA_PATH gardent leur priorité.
+   Un poste volontairement configuré sur un autre dossier ne suit pas la bascule
+   centrale. La découverte centrale depuis un profil sans UNC connu et sans
+   MySQL disponible ne devient pas un mécanisme hors connexion dans ce lot.
+5. Les restaurations de sauvegarde, imports bruts de configuration et outils SQL
+   ne sont pas tous raccordés à ce protocole. La restauration complète conserve
+   son exigence de maintenance, autres postes fermés. La restauration de
+   configuration seule reste un chantier distinct : ne pas la combiner à des
+   écritures ou bascules en cours. Ce lot sécurise le flux de configuration de
+   dossier et les enregistrements de photos/insignes raccordés, pas tout accès
+   arbitraire au disque ou à app_config.
+6. Les conflits de contenus sont bloquants, sans écran de fusion automatique.
+   Une destination incomplète après interruption est conservée ; si la source
+   a changé depuis, résoudre les conflits ou choisir une autre destination.
+   Une image byte-identique est reconnue même si l'extension diffère ; une même
+   image recompressée a un autre contenu et demande un examen.
+7. TLS, certains cas de mots de passe, les autres écritures non couvertes,
+   dépréciations et profilage réseau/volumétrique restent des lots séparés.
+
+CONTRÔLE ET RETOUR ARRIÈRE
+
+Aucune migration de schéma ni nouveau format de configuration centrale requis :
+le payload unc_path reste compatible. Les verrous utilisent MySQL et des fichiers
+.media-locks, sans déplacer ni supprimer les sources. Pour revenir à une ancienne
+version, fermer les opérations de médias sur tous les postes, sauvegarder les
+sources corrigées et les changements ultérieurs, puis contrôler un retour sur
+copie. Ne pas appliquer aveuglément baseline/ à un dépôt ayant encore évolué.
+Un ancien logiciel ne garantit pas la coordination de ce lot.
+
+build/corrections_20261030_lot13/changes_manifest.json
+build/corrections_20261030_lot13/corrections_only.patch
+build/corrections_20261030_lot13/validation_summary.json
+Le patch isole uniquement ce lot par rapport au travail préexistant.
+Les anciens EXE et ZIP ont les mêmes empreintes ; aucun exécutable généré.
+
+Référence primaire consultée pour les verrous de session MySQL :
+https://dev.mysql.com/doc/refman/8.0/en/locking-functions.html

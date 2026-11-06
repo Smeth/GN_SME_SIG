@@ -1,0 +1,160 @@
+IMPRESSION — CONFLITS DES PRIORITÉS ET CONFIGURATIONS PARTAGÉES — LOT 24
+31/10/2026
+
+Périmètre et protection du travail existant
+Racine : C:\Users\MONSTER\Desktop\GN\Impression\sme_python.
+Branche feature/mysql-migration conservée ; 510 entrées Git déjà présentes au
+début du lot. Aucun reset, commit, déploiement ou exécutable généré. Originaux,
+empreintes et état Git initial conservés sous build/corrections_20261031_lot24.
+Aucune donnée réelle, base de production ou fichier utilisateur modifié.
+Aucun fichier sources/ du miroir modifié. Les tests sont limités à leurs profils
+jetables et à MySQL 8.0.40 sur 127.0.0.1:64062, datadir sous build vérifié.
+Les sondes interprocessus ne touchent que leur schéma UUID et leur dossier dédiés.
+Aucune évolution du schéma réel, dépendance ajoutée ou migration nécessaire.
+
+L24-01 — P1 confirmé — écrasement d'une configuration périmée
+Emplacements : src/sme_gend/services/shared_config_write.py:76,
+src/sme_gend/services/app_config_store.py, src/sme_gend/services/fonction_priority_service.py:54.
+Avant : deux clients chargent les mêmes priorités, détachés, limites d'âge ou
+paramètres Soit transmis ; le second enregistre après le premier et le remplace.
+Quatre reproductions échouaient avant correction en acceptant la seconde écriture.
+Correction : version calculée sur le contenu initial, clé et base chargées liées
+au modèle pour les quatre configurations, comparaison sous verrou avant DML.
+La version reste en mémoire et n'entre ni dans le JSON, ni dans les exports.
+Le contrôle historique du layout utilise le même moteur et conserve son API.
+Une sauvegarde manuelle d'un modèle neuf sans chargement préalable est refusée.
+Une panne de lecture est explicite, sans confondre indisponibilité et absence.
+Une première initialisation concurrente conserve puis recharge le gagnant.
+Tests : quatre sauvegardes périmées, quatre courses simultanées, quatre courses
+d'initialisation, refus des versions absentes/d'une autre clé/base, données JSON
+invalides et panne de lecture ; quatre preuves avec processus indépendants.
+
+L24-02 — P1 confirmé — relecture à l'enregistrement masquant le conflit
+Emplacements : ui/views/limite_age_view.py (_ConfigLimitesTab._save,
+_OptionsDocTab._save, _StructureFormatTab._save/_gather),
+ui/views/soit_transmis_view.py (_read_config), ui/fonction_priority_dialog.py,
+ui/views/detaches_config_view.py ; préfixe commun src/sme_gend/.
+Cause : les écrans rechargeaient la nouvelle configuration puis y recopiaient
+leurs anciens champs, ou reconstruisaient un modèle sans conserver sa version.
+Correction : copie de la configuration effectivement affichée ; conservation
+du brouillon et de l'état modifié après conflit ou échec. Aucun rechargement
+implicite au moment de sauvegarder. Recharger demande confirmation avant
+d'abandonner les champs visibles ; un chargement en échec laisse le brouillon.
+Les messages détachés indiquent la configuration MySQL partagée, plus un fichier
+JSON local. Les échecs d'alignement article 98 ne sont plus silencieux.
+Tests : six éditeurs, sauvegarde réussie/conflit, six rechargements en panne,
+messages de conflit et refus d'un brouillon sans chargement réussi.
+Les trois onglets des limites d'âge partagent un même document : sauvegarder
+l'un peut rendre les autres périmés. Le conflit impose un rechargement prudent,
+aucune fusion automatique de règles métier.
+
+L24-03 — P1 confirmé — suppression de fonction et priorités séparées
+Emplacements : src/sme_gend/services/referentiel_service.py:89,
+src/sme_gend/services/fonction_priority_service.py:100.
+Cause : suppression du catalogue puis élagage des priorités dans des transactions
+distinctes ; un échec pouvait laisser un résultat partiel. Un choix devenu absent
+du catalogue pouvait aussi être réintroduit par une sauvegarde des priorités.
+Correction : suppression, élagage et signal partagent la même transaction ; les
+fonctions sélectionnées sont vérifiées sous le verrou commun avant sauvegarde.
+Les anciens identifiants orphelins restent ignorés à l'affichage, conformément
+à la politique historique ; aucun nettoyage destructif d'anciens enregistrements.
+Tests : succès, panne d'élagage, panne de signal, fonction supprimée après affichage.
+
+L24-04 — P1 confirmé par le code — écritures ciblées avec risque de perte
+Emplacements : src/sme_gend/services/postes_tete_exclusions.py,
+src/sme_gend/config/view_state.py ; src/sme_gend/services/shared_config_write.py:181.
+Cause : chargement puis réécriture d'un dictionnaire entier hors transaction.
+Correction : verrou anticipé, lecture courante puis application de l'intention
+ciblée. Deux exclusions distinctes ou deux clés de vue/mois sont conservées.
+Le retrait ne supprime que la cible ; les autres clés de configuration restent
+présentes. Le signal est validé avec la modification ; sa panne annule l'écriture.
+Même dans une transaction REPEATABLE READ ayant déjà lu un ancien état, la
+lecture sous verrou doit prendre les données courantes.
+Ces API ciblées ordonnent les intentions sur une même cible ; elles ne prétendent
+pas détecter une édition périmée à l'intérieur d'un même bloc de vue. Aucun appel
+actif de set_view_state trouvé hors de son module ; les filtres de liste restent
+locaux à la session. Une sauvegarde globale doit utiliser le dictionnaire versionné
+retourné par load_all_view_state, sous peine de refus explicite.
+Tests : deux clients simultanés, instantané RR périmé, annulation sur signal et
+préservation des données sans rapport pour chacun des deux mécanismes.
+
+L24-05 — P2 confirmé — ordre prioritaire vide réinitialisé
+Emplacement : src/sme_gend/services/fonction_priority_service.py:85.
+Cause : une liste vide était assimilée à une clé absente et réamorcée avec
+COMGEND et les fonctions historiques au prochain chargement.
+Correction : seul l'état réellement absent autorise l'amorçage ; un ordre vide
+enregistré reste vide. Test dédié reproduit avant correction puis passé après.
+
+Transactions et synchronisation
+Le verrou anticipé existant du référentiel protège aussi les collections vides
+et les intersections catalogue/priorités. Le moteur préserve les transactions
+externes et savepoints ; aucun commit implicite, aucun rejeu automatique.
+Modification et shared_data_revision sont validées ensemble. Le jeton du modèle
+et l'invalidation des caches ne sont appliqués qu'au commit réel. Une sauvegarde
+sans changement n'émet pas de signal. Une sauvegarde répétée dans la transaction
+utilise sa version en attente ; une annulation n'avance pas la version publique.
+Tests supplémentaires : deux sauvegardes suivies de commit/rollback, observation
+par une seconde connexion, panne de signal puis reprise, sauvegarde sans effet,
+échec de savepoint pris en charge puis nouvelle sauvegarde dans le même appelant.
+
+Résultats vérifiables
+- Avant correction : 5 reproductions natives échouaient (4 écrasements acceptés,
+  1 liste vide réinitialisée). Sortie dans la session ; sources avant lot sous baseline/.
+- Suite unitaire complète : 1141 réussites, 8 avertissements signalés,
+  39.28 secondes ; profil isolé, réseau externe et ODBC interdits.
+- Régressions MySQL ciblées : 296 réussites, 185 autres cas non sélectionnés,
+  395.04 secondes. Comprend les rattachements, layout, catalogues,
+  écritures métier et signaux des lots précédents. Les autres cas non sélectionnés
+  ne sont pas déclarés exécutés par ce lot.
+- 47 nouveaux cas unitaires + 47 nouveaux cas MySQL = 94 nouveaux cas.
+- Quatre scénarios supplémentaires avec deux processus Python indépendants,
+  vraie connexion MySQL : conflit signalé, premier résultat et révision préservés.
+- Revue structurelle : 128 méthodes conservées, dépôts SQL et noyau transactionnel
+  inchangés. Sérialisation métier des quatre modèles inchangée.
+Les commandes, profils et durées sont dans final_unit.json et final_mysql.json ;
+les logs correspondants et config_conflict_*/validation.json sont conservés.
+Les empreintes figent les sources testées ; le manifeste et le patch isolent le lot
+des modifications préexistantes. Les contrôles syntaxiques et Git sont enregistrés
+dans validation_summary.json. Aucune affirmation d'absence générale de bugs.
+
+Performance et contraintes
+Aucun gain de latence globale mesuré : pas de benchmark représentatif avant/après.
+Le contrôle ajoute des empreintes et une lecture verrouillée. Les écritures du
+référentiel et de ces configurations s'attendent pendant leur transaction ; un
+lot/import long peut ralentir un autre enregistrement. Les chargements ordinaires
+d'écran restent sans verrou. Il faut réduire les longues transactions avant
+d'envisager un verrou plus fin, sans retirer la protection contre les pertes.
+
+Limites et suite prioritaire
+1. Workspace SME : load/save_sme_context et SmeWorkspaceService gardent leur
+   mécanisme distinct. La réécriture des préférences partagées et certains échecs
+   journalisés sans retour UI restent à traiter dans un lot dédié, en séparant les
+   préférences locales du changement du mois actif. Ne pas remplacer ces chemins
+   par le contrôle générique sans suivre les fermetures/imports et leurs contrats.
+2. Authentification : contrôle config_rev préexistant, non remplacé. Bascule des
+   chemins partagés et restauration : verrous et règles dédiés préservés, pas de
+   nouvelle certification exhaustive de ces mécanismes par ce lot.
+3. Validation réelle SMB et deux PC indisponible. MySQL local avec processus
+   distincts ne prouve pas la fiabilité SMB, la résolution UNC ou les ACL du site.
+4. Anciennes versions de l'application/outils SQL peuvent contourner ces contrôles.
+   Prévoir un déploiement homogène lors d'un futur packaging explicitement autorisé.
+5. Empreinte d'état : un changement suivi d'un retour exactement à l'état initial
+   n'est pas distingué. Un compteur persistant nécessite un lot de schéma avec
+   sauvegarde et retour arrière. Aucun changement de schéma réalisé ici.
+6. TLS, mots de passe non ASCII, profilage avec volumétrie réelle et maintien des
+   protections après restauration globale restent des périmètres séparés.
+7. Interblocage ou perte d'acquittement du commit : erreur explicite ; vérifier
+   le résultat réel avant de relancer. Aucun rejeu automatique d'une saisie métier.
+
+Validation avant déploiement et retour arrière
+Sur données synthétiques et mêmes sources, ouvrir les priorités sur deux clients,
+enregistrer A puis B : B doit garder son ordre visible, signaler le conflit et ne
+pas remplacer A. Refaire pour détachés, chaque onglet limite d'âge, Soit transmis.
+Tester Recharger annulé/confirmé et en panne, puis nouvelle sauvegarde réussie.
+Enregistrer une priorité vide, rouvrir : elle reste vide. Supprimer une fonction
+prioritaire et vérifier le retrait atomique. Tester deux exclusions distinctes.
+Répéter ensuite depuis deux PC du site, avec le partage UNC réel, avant diffusion.
+changes_manifest.json, corrections_only.patch et baseline/ permettent la revue
+et un retour sélectif des sources sur copie, en préservant les changements ultérieurs.
+Ne jamais réinitialiser globalement le dépôt. Aucune base réelle à restaurer ni
+migration à annuler. EXE et ZIP précédents inchangés ; aucun exécutable généré.

@@ -1,0 +1,218 @@
+AUDIT IMPRESSION — 1er novembre 2026
+
+MISE À JOUR : ce document conserve les constats de l'audit initial.
+Les anomalies B01 à B13 ont ensuite été corrigées. Voir le compte rendu
+CORRECTIONS_AUDIT_2026-11-01.txt pour les changements et les validations.
+Les améliorations M01 et M02 restent différées à la demande de l'utilisateur.
+
+Objet : corriger l'erreur ConfigPathsDialog, puis rechercher les anomalies
+fonctionnelles, de filtres, de navigation, d'interface et les fonctions incomplètes.
+
+PÉRIMÈTRE ET MÉTHODE
+Le README confirme le dépôt Impression / S.G.I DPF, application PySide6 / MySQL.
+Les README racine et sme_python ont été lus. Aucun AGENTS.md n'a été trouvé
+dans le dépôt. Les nombreuses modifications préexistantes ont été conservées.
+391 fichiers Python source ont été analysés syntaxiquement. Les déclarations
+de navigation comportent 34 positions, dont une position virtuelle de redirection.
+Contrôle statique transversal des appels aux constructeurs, branchements de
+signaux, filtres, rechargements de configuration et traitements asynchrones.
+Les cas signalés comme reproduits l'ont été avec des identités synthétiques
+et/ou des collaborateurs simulés ; aucun dossier réel n'a été modifié.
+Rendus Qt hors écran et mesure du bandeau de contexte.
+
+Les tests bloquent MySQL, Access, les connexions réseau, les processus externes
+et les écritures hors du répertoire de test. Le profil LOCALAPPDATA est jetable.
+Aucune compilation, aucun lancement d'exécutable généré, aucune migration ni
+opération métier sur la base réelle. Aucun test ne vaut validation générale
+des données de production ou de tous les scénarios interactifs de l'application.
+
+CORRECTION EFFECTUÉE
+Le menu appelait ConfigPathsDialog(self, self._settings), alors que settings
+est un argument nommé obligatoire après l'astérisque du constructeur.
+Correction : ConfigPathsDialog(self, settings=self._settings).
+Fichier : src/sme_gend/ui/shell_window.py, méthode _open_paths_config.
+Test ajouté : tests/test_paths_config_menu.py, 2 cas (annuler / enregistrer),
+avec le vrai constructeur du dialogue et un formulaire simulé. Annuler ne
+recharge rien ; accepter demande le rechargement de configuration.
+Les autres anomalies ci-dessous sont recensées, sans correction dans ce lot.
+
+ANOMALIES RESTANTES — PRIORITÉ HAUTE
+
+B01 — Recherche globale : mauvais dossier après tri. REPRODUIT.
+Trier les résultats par nom décroissant puis ouvrir la première ligne.
+La ligne affiche AGENT ZULU, mais le callback reçoit AGENT ALPHA.
+Cause : le tableau est triable ; _selected_hit utilise l'indice visuel pour
+indexer la liste _hits dans son ordre initial, sans identifiant attaché à la ligne.
+Impact : consultation du mauvais dossier ; confusion sur l'identité sélectionnée.
+Source : ui/global_search_dialog.py:221.
+Correction à prévoir : conserver l'objet ou une clé stable dans UserRole.
+
+B02 — Missions, Désertions, Congés : réponse d'un ancien mois acceptée. REPRODUIT.
+Lancer une lecture pour août, puis pour septembre ; livrer septembre avant août.
+Le dernier callback remet la ligne d'août alors que le contexte est septembre,
+et marque la vue comme à jour. Aucun contrôle de génération / mois ne l'écarte.
+Impact : liste et contexte temporel incohérents, sélection d'une ancienne donnée.
+Sources : ui/views/missions_view.py:385 ; desertion_view.py:362 ; conges_view.py:415.
+Correction à prévoir : capturer le contexte, invalider les générations et ignorer
+les anciennes réponses ; contrôler aussi le contexte dans les chemins d'erreur.
+
+B03 — Nouvelle configuration non propagée à certaines pages. REPRODUIT.
+_apply_runtime_to_view ne traite ni CareerAlertsView ni DeletedPersonnelView.
+Leur objet settings reste celui d'avant après le changement de configuration.
+Alertes parcours manque aussi dans _rebind_data_services, utilisé pour consulter
+un autre mois : la portée historique ne suit donc pas nécessairement le bandeau.
+Les fabriques différées capturent également le settings initial pour ces pages.
+Impact : alertes / historique lus dans une ancienne portée ou ancienne connexion.
+Sources : ui/shell_window.py:395,400,1512,2172 ;
+          ui/views/career_alerts_view.py:25 ; deleted_personnel_view.py:31.
+Correction à prévoir : un contrat uniforme de rebinding, y compris pour les pages
+créées après le changement, avec invalidation des lectures déjà lancées.
+
+B04 — Export SME numérique incomplet. REPRODUIT, test existant en échec isolé.
+Le scénario synthétique fournit dates de congé, motif de punition et stage interne.
+Dans le fichier généré : les cellules H4/I4 de CONGé ADMIN sont vides ; le motif
+attendu de punition est absent ; la feuille STAGE-INTERNE attendue est absente.
+L'export actuel remplit les congés via un ancien export à cinq colonnes et ne
+charge pas les stages internes. Un constructeur plus complet build_numerique
+existe dans clean_sme_exports.py mais n'est pas branché sur cet export.
+Impact : document officiel moins complet que les données saisies.
+Sources : services/numerique_excel_export.py:998,1421,1554 ;
+          services/clean_sme_exports.py:56 ;
+          tests/test_export_integrity_regressions.py:72.
+Correction à prévoir : relier toutes les annexes aux données du mois, unifier
+le chemin d'export et faire passer ce test avant de valider la sortie.
+
+ANOMALIES RESTANTES — PRIORITÉ MOYENNE
+
+B05 — Port MySQL invalide : exception non gérée au test de connexion. REPRODUIT.
+Saisir abc dans Port, puis Tester la connexion provoque ValueError avant même
+le démarrage du worker. Le champ n'a pas de validateur. Enregistrer contrôle
+l'entier, mais le bouton de test utilise une autre voie sans gestion de l'erreur.
+Source : ui/paths_config_form.py:115,585,605.
+Correction à prévoir : validation commune, plage 1–65535, message au champ.
+
+B06 — Faux message de réussite dans Paramètres. REPRODUIT.
+SettingsView._on_save affiche « enregistrés et appliqués » même lorsque
+reload_runtime_configuration renvoie False. L'échec peut donc être suivi d'un
+message de succès contradictoire.
+Source : ui/views/settings_view.py:79 ; ui/shell_window.py:2126.
+Correction à prévoir : distinguer enregistrement et application réussie.
+
+B07 — Recherche historique : grade / structure annoncés mais non recherchés.
+CONFIRMÉ PAR LE CODE.
+L'aide de la recherche globale promet nom, matricule, grade et structure.
+La requête des dossiers hors effectif ne recherche que nom, matricules,
+identifiant et alias ; grade et structure n'en font pas partie.
+Sources : ui/global_search_dialog.py:60 ;
+          repositories/mysql_agent_repository.py:511.
+Correction à prévoir : une même définition de recherche pour les deux périmètres,
+ou une aide qui explique précisément cette restriction.
+
+B08 — Recherche historique tronquée sans avertissement. CONFIRMÉ PAR LE CODE.
+search_historical_personnel applique LIMIT 80. L'interface affiche seulement
+le nombre de résultats reçus, sans indiquer la limite ni proposer une suite.
+Avec plus de 80 correspondances, certains dossiers deviennent invisibles pour
+cette requête sans que l'utilisateur sache qu'il doit la préciser.
+Sources : repositories/mysql_agent_repository.py:512,534 ;
+          ui/global_search_dialog.py:172.
+Correction à prévoir : pagination ou résultat signalant explicitement la limite.
+
+B09 — Recherche Alertes parcours sensible aux accents. REPRODUIT.
+HERVÉ est trouvé par hervé mais pas par herve. Le filtre utilise casefold sans
+normalisation des accents, contrairement à d'autres recherches de l'application.
+Source : ui/views/career_alerts_view.py:220,249.
+Correction à prévoir : réutiliser la normalisation commune des recherches.
+
+B10 — Bandeau de contexte trop large. REPRODUIT ET RENDU CONTRÔLÉ.
+Pour une largeur demandée de 1032 pixels, le bandeau réclame au minimum 1385
+pixels avec les données synthétiques du test. Les libellés et raccourcis sont
+tous sur une seule ligne sans adaptation ; à petite largeur ou fort zoom Windows,
+le bandeau impose un débordement ou compromet la lisibilité du reste de l'écran.
+Source : ui/context_banner.py:41,80,86.
+Correction à prévoir : deux lignes adaptatives, texte de connexion abrégé avec
+infobulle, raccourcis secondaires dans une aide, tests à plusieurs résolutions.
+
+B11 — Homonymes difficiles à distinguer dans la recherche globale.
+CONFIRMÉ PAR LA STRUCTURE DU TABLEAU.
+Le tableau ne montre ni l'identifiant de fiche ni la naissance ni le matricule
+solde. Deux dossiers de même nom/grade/structure/matricule militaire peuvent
+avoir des lignes visuellement identiques. C'est précisément le type de cas
+pour lequel le module Alertes parcours fournit maintenant des identifiants.
+Source : ui/global_search_dialog.py:87.
+Correction à prévoir : identifiant stable visible et critères complémentaires.
+
+ANOMALIES RESTANTES — PRIORITÉ BASSE
+
+B12 — Sélection perdue lors d'un filtrage / rafraîchissement des alertes. REPRODUIT.
+_filter et _filter_history effacent la sélection même si la même alerte reste
+visible. Les actions sont désactivées jusqu'à une nouvelle sélection.
+Source : ui/views/career_alerts_view.py:234,260.
+Correction à prévoir : restaurer la sélection par clé d'occurrence stable.
+
+B13 — Ctrl+F annoncé globalement, disponible sur deux pages seulement.
+CONFIRMÉ PAR LE CODE.
+Le bandeau annonce « Ctrl+F filtre » dans toutes les pages. Le raccourci est
+branché dans Liste générale et Édition SME ; il manque notamment dans Alertes
+parcours, qui possède pourtant son propre champ de recherche.
+Sources : ui/context_banner.py:81 ; ui/views/personnel_list_view.py:437 ;
+          edition_sme_view.py:2101 ; career_alerts_view.py.
+Correction à prévoir : contrat commun de mise au point sur le filtre de la page,
+ou indication du raccourci seulement là où il fonctionne.
+
+MANQUES D'ERGONOMIE — À DISTINGUER DES BUGS
+
+M01 — Alertes parcours : filtre de diagnostic absent.
+Les filtres portent sur gravité, code, mois, état et référence des données.
+Le type MATRICULE_DUPLIQUE regroupe les identités divergentes, les doublons
+potentiels et les dossiers insuffisamment renseignés. Aucun filtre dédié ne
+permet de choisir directement une de ces catégories ; la recherche textuelle
+reste un contournement, avec des mots qu'il faut connaître.
+Source : ui/views/career_alerts_view.py:40 ; career_import_alerts.py.
+Amélioration proposée : filtre « Évaluation de l'identité », avec comptage.
+
+M02 — Alertes parcours : remise à zéro des filtres absente.
+Aucun bouton « Réinitialiser les filtres » ni bouton d'effacement du champ
+de recherche n'est prévu dans cette vue. Il faut remettre les critères un à un.
+Source : ui/views/career_alerts_view.py:38.
+Amélioration proposée : effacement visible, réinitialisation, état vide proposant
+de retirer les filtres, et rappel clair des critères encore actifs.
+
+RÉSULTATS ET PREUVES
+Campagne générale : 1569 cas = 1528 réussis, 39 échoués, 2 ignorés, 68,75 s.
+Parmi les 39 échecs : 1 défaut d'export B04, reproduit seul (1 échec / 1 succès
+dans test_export_integrity_regressions.py) ; 38 échecs liés aux ACL Windows ou
+aux dossiers temporaires dans cet environnement restreint. Ces 38 cas ne sont
+pas classés comme bugs métier confirmés et restent à vérifier dans un environnement
+Windows permettant les protections et nettoyages concernés.
+Les 2 tests de la correction ConfigPathsDialog passent, séparément et dans la
+campagne générale. Analyse AST : 391 sources valides ; aucun autre dépassement
+du nombre d'arguments positionnels trouvé par le contrôle statique des classes
+à définition unique. Aucun branchement direct de signal vers une méthode privée
+absente trouvé dans les classes examinées par le contrôle AST.
+
+Preuves locales dans build/audit_20261101/ :
+- run_unit_audit.py : lanceur isolant le profil, les fichiers et connexions ;
+- unit-console.txt : résultat complet de la campagne générale ;
+- export-console.txt : échec d'export reproduit séparément ;
+- ui_probe.py et ui-evidence.json : reproductions synthétiques B01/B02/B03/B04,
+  B05/B06/B09/B10/B12 ;
+- banner-1032.png : rendu hors écran du bandeau.
+Les fichiers build sont des artefacts locaux de vérification, pas un livrable
+applicatif ni une version portable.
+
+LIMITES RESTANTES
+Pas de test de bout en bout sur la base réelle, pas de fusion réelle, pas de
+clôture / restauration réelle, pas d'impression papier ni de validation sur
+plusieurs postes physiques. Les tests d'intégration MySQL n'ont pas été lancés
+dans cette campagne, les connexions étant délibérément bloquées.
+Les critères de sécurité Windows et le nettoyage des fichiers temporaires
+nécessitent encore une recette adaptée. La lecture statique et les tests ne
+garantissent pas l'absence de tous les autres défauts possibles. Ce document
+liste les anomalies établies et les manques observés, sans inventer de bugs
+pour les zones non exécutées.
+
+FICHIERS MODIFIÉS PAR CE LOT
+- src/sme_gend/ui/shell_window.py : une ligne corrigée dans _open_paths_config ;
+- tests/test_paths_config_menu.py : nouveau test de régression, deux cas ;
+- docs/AUDIT_APPLICATION_2026-11-01.txt : présent rapport ;
+- build/audit_20261101/ : scripts et résultats temporaires de l'audit.

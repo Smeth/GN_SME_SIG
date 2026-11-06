@@ -1,0 +1,261 @@
+Audit Structures / subdivisions et Fonctions — 1 novembre 2026
+
+Audit du dépôt Impression, sans correction du code applicatif et sans lecture
+ou modification de la base réelle. Les sources contiennent déjà de nombreuses
+modifications : elles sont conservées. Les reproductions utilisent des objets
+fictifs, des services simulés et le runner interdisant MySQL/Access réels.
+
+Résultat : 93 tests existants et 11 reproductions d'audit réussis (104 au total,
+4,19 s). Les reproductions réussies CONFIRMENT les défauts actuels ; ce ne sont
+pas des corrections. Six captures en clair/sombre ont été produites. Inspection
+visuelle du hub Structures et de Fonctions. Aucune promesse d'exhaustivité sur
+une base réelle ou sur l'ensemble des scénarios multi-utilisateurs.
+
+STRUCTURES ET SUBDIVISIONS
+
+S1 — Haute — Ancien contexte de connexion de l'organigramme.
+StructureHubView construit _org une fois avec service.settings. Le parent
+StructuresView.apply_runtime_after_config_change déclenche un reload, sans
+rebind_settings de _org. Si le service change de base ou de période, structures
+et fonctions peuvent être lues avec le nouveau contexte, les effectifs et
+subdivisions avec l'ancien. Même défaut de cycle de vie à examiner dans le
+service de la bannière qualité, également conservé à la construction.
+Reproduction : service.settings changé, view._org.settings reste initial.
+Sources : ui/views/structure_hub_view.py:58, reload ;
+ui/views/referentiel_views.py:162 ; ui/views/organigram_quality_banner.py:27.
+
+S2 — Haute — Rechargement partiel non atomique dans le hub.
+_structures est remplacé avant les lectures de l'arbre et des compteurs. Si
+l'arbre échoue, le tableau garde OLD tandis que la liste interne contient NEW.
+Le détail et les actions n'ont donc plus forcément la même photographie.
+Pas de bandeau permanent « données non actualisées » ni blocage des actions.
+Source : structure_hub_view.py:reload. Reproduction synthétique confirmée.
+
+S3 — Haute — Ordre de tri invalide non traité dans plusieurs actions.
+StructureEditDialog.values appelle int(texte). Le hub et la fenêtre subdivisions
+appellent values avant leur bloc try. Saisir « abc » peut donc faire remonter
+ValueError jusqu'au gestionnaire général au lieu d'une validation dans le champ.
+Sources : ui/structure_edit_dialog.py:values ; structure_hub_view.py:
+_on_add_structure/_edit_structure_identity ; structure_subdivisions_dialog.py:
+_edit_type_unite. Reproduction de ValueError confirmée.
+
+S4 — Moyenne — Les coches disparaissent à chaque recherche/filtre/rechargement.
+_refill_table recrée tous les items avec Unchecked et sélectionne la première
+ligne. Impossible de composer une sélection groupée à travers plusieurs filtres.
+Sources : structure_hub_view.py:_refill_table/_fill_structure_rows.
+Reproduction : [A] avant recherche, [] après recherche pourtant équivalente.
+
+S5 — Moyenne — Tri numérique incorrect.
+Subdivisions, fonctions et effectifs sont QTableWidgetItem(str(val)). Le tri
+ascendant donne 10 avant 2. Source : structure_hub_view.py:445.
+Reproduction confirmée.
+
+S6 — Moyenne — Erreur de lecture des fonctions déguisée en absence.
+_update_detail transforme toute exception de fonction_choices_for_structure
+en liste vide, puis affiche « Aucune ». Une panne n'est pas une absence de lien.
+Source : structure_hub_view.py:_update_detail. Reproduction confirmée.
+
+S7 — Moyenne — « Fonctions rattachées » peut compter des fonctions historiques
+qui ne sont pas rattachées. Le repository utilise les liens explicites s'ils
+existent, sinon les libellés observés dans toute la carrière. L'écran et son
+export présentent pourtant ce nombre comme un nombre de rattachements.
+Sources : repositories/fonctions_repository.py:fetch_for_structure ;
+mysql_fonction_structure_repository.py:fetch_choice_counts_by_structure ;
+structure_hub_view.py:_fonction_count ; structure_referentiel_export.py.
+
+S8 — Moyenne — Type d'unité différent entre tableau et Excel.
+Le hub utilise resolved_structure_famille (type déduit du code/désignation si
+non enregistré). L'export utilise directement st.famille_unite. Une structure
+affichée comme Direction peut donc sortir avec un type non renseigné.
+Sources : structure_hub_view.py:_fill_structure_rows ;
+services/structure_referentiel_export.py:boucle d'écriture.
+
+S9 — UX — Le bouton Subdivisions ouvre surtout une liste et un éditeur de la
+structure, sans création, renommage ou détachement direct d'une subdivision.
+Le texte annonce les SubArme de ListeGenerale ; l'appel lit le référentiel RSA
+actif. Les « données seules » visibles dans le hub peuvent donc ne pas y figurer.
+Sources : ui/structure_subdivisions_dialog.py:__init__/_reload_list ;
+services/referentiel_service.py:182 ; mysql_bundle_repositories.py:827.
+
+S10 — UX — Recherche d'un parent dans U/D/T masque ses descendants s'ils ne
+correspondent pas eux-mêmes. Chaque recherche recrée l'arbre et le développe,
+en perdant sélection et état des branches. Reproduction : parent trouvé,
+0 enfant visible alors que le parent a un enfant et un petit-enfant.
+Source : subdivisions_hierarchy_view.py:_rebuild_tree.
+
+S11 — UX / portée — Nomenclature U/D/T, affiliations RSA et libellés saisis
+sur les dossiers sont trois couches distinctes, sans parcours clair de mise
+en cohérence. Renommer un nœud U/D/T ne renomme pas les libellés RSA et ceux
+des carrières. Ce n'est pas une raison pour les propager automatiquement :
+l'interface devrait expliquer la portée et proposer un contrôle d'impact.
+Sources : mysql_subdiv_hierarchy_repository.py:update_node ;
+structure_subdivisions_dialog.py ; referentiel_views.py:Maintenance.
+
+S12 — Visuel / UX — Hub : la colonne Désignation peut être presque écrasée
+par les autres colonnes ; constaté sur capture à 1 000 pixels. Barres d'actions
+sans retour à la ligne et panneaux non adaptatifs. Les dialogues Maintenance
+imposent 900 ou 980 pixels. Boutons de modification visibles même sans sélection
+ou période modifiable, sans synchronisation de leur état ; pas de compteur
+clair du résultat filtré ni de distinction persistante vide/chargement échoué.
+Sources : structure_hub_view.py:__init__ ; referentiel_views.py:dialogues.
+
+FONCTIONS
+
+F1 — Haute — Créer une fonction générique peut être impossible.
+Le dialogue n'affiche que les structures déjà liées, courantes ou reconnues
+par les règles de postes de tête. Une fonction nouvelle non reconnue n'a
+aucune structure à cocher ; enregistrer exige au moins une coche. Depuis le
+catalogue, Nouvelle fonction ne transmet même pas le filtre de structure.
+Pas de sélecteur permettant simplement de choisir une autre structure.
+Reproduction : « ASSISTANT ADMINISTRATIF FICTIF », structure DPF existante,
+0 suggestion sans ancrage. Sources : fonction_referentiel_view.py:592 ;
+fonction_smart_link.py:build_structure_suggestions ; fonction_smart_dialog.py.
+
+F2 — Haute — Faux « écart saisie » dans l'harmonisation.
+Comparaison lib.casefold() (minuscules) à fold_label(observé) (majuscules).
+Même DIRECTEUR DPF comparé à DIRECTEUR DPF produit « OK · écart saisie ».
+Source : services/fonction_referentiel_harmonize.py:119. Reproduction confirmée.
+
+F3 — Haute — Périmètres temporels mélangés.
+Fonctions observées par structure : toute la carrière. Compteur global Fiches :
+est_actuelle=1. Postes vacants : mois consulté. « Reprendre d'après les fiches
+du mois » lit également est_actuelle=1 sans filtrer le mois consulté. En archive,
+la description de l'action et le contenu traité peuvent donc différer.
+Sources : mysql_fonction_structure_repository.py:63,284 ;
+mysql_bundle_repositories.py:659 ; fonction_referentiel_view.py:758,1177.
+
+F4 — Haute — Renommer une fonction a une portée globale sous-annoncée.
+La confirmation utilise _usage (situations actuelles), mais UPDATE modifie
+les libellés de toutes les carriere_situation et agent_affectation correspondantes,
+y compris historiques, sans filtre de période. Le nombre de « fiches seront
+mises à jour » peut être sous-estimé. Une correction de référentiel globale
+peut être voulue ; elle doit être clairement distinguée d'une correction du mois.
+Sources : fonction_referentiel_view.py:_on_edit ;
+mysql_bundle_repositories.py:705 et fetch_usage_counts.
+
+F5 — Haute — Supprimer une ligne de poste peut supprimer la fonction globale.
+delete_or_dismiss_poste recherche le libellé au catalogue. S'il existe et n'est
+pas utilisé en carrière, il supprime l'entrée et ses liens à TOUTES les structures,
+puis exclut le siège sélectionné. Le contexte d'une ligne de structure ne rend
+pas cette portée évidente. L'usage agent_affectation n'est pas contrôlé dans
+le delete de fonction, qui ne vérifie que carriere_situation.
+Sources : fonction_referentiel_view.py:795,_delete_fonction_row ;
+mysql_bundle_repositories.py:751.
+
+F6 — Haute — Certaines opérations composées peuvent réussir partiellement.
+Suppression du catalogue puis exclusion du poste : deux appels sans transaction
+englobante, deuxième exception non interceptée dans delete_or_dismiss_poste.
+Reproduction : suppression appelée puis exclusion en échec. L'attribution crée
+ou rattache le catalogue avant update_personnel, également sans transaction
+englobante. fonction_ensure_catalog_and_link sépare création, lien et nettoyage
+des exclusions. Les transactions existantes sécurisent chaque sous-opération,
+pas l'ensemble du parcours. Sources : fonction_referentiel_view.py:795 ;
+fonction_assign_agent_dialog.py:177 ; referentiel_service.py:135.
+
+F7 — Moyenne — Exclusions de postes globales et difficiles à annuler.
+La clé d'exclusion contient structure, subdivision et poste, pas le mois.
+Retirer un poste dans une archive le masque donc aussi ailleurs. Aucun écran
+dédié ne liste ces exclusions ni ne propose leur restauration ; certains
+rattachements/recréations les effacent indirectement.
+Source : services/postes_tete_exclusions.py ; delete_or_dismiss_poste.
+
+F8 — Moyenne — Décocher un rattachement dans « Modifier / rattacher » ne le
+retire pas : sauvegarde par fusion additive. Le dialogue « Structures… » fait,
+lui, un remplacement. Deux écrans de coches ont donc des effets différents.
+Source : fonction_smart_dialog.py:_on_save vs fonction_structures_dialog.py.
+
+F9 — UX — Actualiser les suggestions ou quitter le champ Libellé reconstruit
+la liste et remplace les coches manuelles par les pré-coches calculées. Des
+suggestions peuvent être pré-cochées pour plusieurs structures sans que
+l'utilisateur les ait choisies individuellement.
+Sources : fonction_smart_dialog.py:_reload_suggestions ;
+fonction_smart_link.py:build_structure_suggestions.
+
+F10 — Moyenne — Filtre « Sans structure » change de sens avec un filtre structure.
+Sans structure choisie : aucun lien global. Avec A choisie : peut inclure une
+fonction liée à B, observée sur A. Cela signifie alors « non rattachée à A ».
+Reproduction confirmée. Source : fonction_referentiel_view.py:_apply_filter.
+
+F11 — UX — Messages vides trompeurs.
+Un filtre texte sans résultat avec « Sans structure » peut afficher « Toutes
+les fonctions ont une structure ». Le compteur global ne décrit pas toujours
+le périmètre de la recherche. Le message devrait distinguer filtre vide,
+catalogue vide, absence de liens et données indisponibles.
+Source : fonction_referentiel_view.py:_apply_filter.
+
+F12 — Haute — Échec de rechargement non matérialisé dans Fonctions et Vacants.
+Le catalogue peut conserver un état ready et le bouton Modifier actif après
+un résultat None. Le tableau des postes garde aussi ses lignes/actions ;
+_sync_poste_actions ne teste ni _stale ni _loading. Les conflits de versions
+existants réduisent certains risques d'écriture, sans rendre la lecture fraîche.
+Reproduction ready=True/edit=True après échec catalogue.
+Source : fonction_referentiel_view.py:reload,_sync_actions,
+_PostesVacantsTab.reload/_sync_poste_actions.
+
+F13 — Moyenne — « Reprendre » crée aussi des entrées de catalogue manquantes,
+alors que la confirmation annonce seulement des rattachements. Pas de prévisualisation
+des fonctions et structures concernées ; une saisie erronée peut être consacrée
+comme entrée officielle. Source : mysql_fonction_structure_repository.py:284.
+
+F14 — Moyenne — Export d'harmonisation hors des mécanismes communs.
+Pas de contrôle effectifs.export dans l'action ou le service, contrairement à
+l'export Structures. Export global non limité aux filtres affichés ; lecture et
+production sur le thread UI ; wb.save direct sans publication atomique ; pas
+d'appel au journal de génération. Les cellules texte ne passent pas par le
+traitement littéral utilisé par l'export Structures : des textes commençant
+par '=' peuvent devenir des formules Excel (risque conditionnel aux données).
+Sources : fonction_referentiel_view.py:687 ;
+fonction_referentiel_harmonize.py:202-245.
+
+F15 — Visuel / UX — Largeur minimale excessive du module Fonctions.
+Demandé 1 000 pixels, obtenu 1 082 en clair et 1 194 en sombre. Les nombreuses
+actions du référentiel et les filtres Vacants restent sur une seule ligne.
+Colonnes extensibles avec textes tronqués, sans détail de ligne ni infobulle
+complète dans le modèle des postes. Captures et mesures synthétiques confirmées.
+Source : fonction_referentiel_view.py:__init__/_PostesVacantsTab.__init__.
+
+F16 — Limite fonctionnelle — « Postes vacants » n'est pas un tableau de tous les
+postes autorisés. Seulement les postes de tête générés par règles pour les
+structures/subdivisions ayant du personnel dans le mois. Une unité entièrement
+vide n'y apparaît pas. Les fonctions ordinaires du catalogue ne deviennent pas
+automatiquement des postes avec un nombre de places. Comportement voulu dans
+postes_vacants.py, mais l'écran doit expliquer clairement cette portée.
+
+F17 — Manque de contrôle — Plusieurs titulaires sont considérés comme « pourvu ».
+La ligne concatène les noms ; aucun état dédié « plusieurs titulaires », filtre
+de conflit ou parcours de résolution. Les titulaires sont affichés sans accès
+au dossier ni identifiants permettant de distinguer les homonymes. Les contrôles
+d'occupation existants sur de nouvelles saisies ne remplacent pas un contrôle
+des données déjà importées. Sources : postes_vacants.py:PosteTete ;
+fonction_referentiel_view.py:_VacantTableModel/_PostesVacantsTab._apply_filter.
+
+TRANSVERSAL
+
+T1 — Performance — Hub, détails, hiérarchie, reprise et exports comportent des
+lectures/écritures synchrones. Le détail des fonctions est relu à chaque sélection.
+Les suggestions de fonctions interrogent les subdivisions structure par structure.
+Le chargement du catalogue utilise déjà un worker ; cela ne couvre pas ces autres
+chemins. Risque de blocages UI sur un serveur lent, sans benchmark de production.
+
+T2 — Technique mineure — Appel Qt setTextAlignment(int) déprécié dans le hub.
+18 avertissements dans les reproductions ; ce n'est pas un crash actuellement.
+
+POINTS POSITIFS / NE PAS CONFONDRE AVEC DES DÉFAUTS
+- Des jetons de version, contrôles de conflit et transactions existent pour
+  les référentiels, liens et hiérarchie ; l'audit ne les décrit pas comme absents.
+- La suppression de structures utilisées bénéficie de safe_delete_structure.
+- La distinction structure / subdivision / fonction est légitime ; c'est sa
+  présentation, ses périmètres et les opérations transversales qui posent problème.
+- L'audit ne prouve pas que la base réelle est corrompue. Aucun état réel de
+  son contenu n'a été inspecté.
+
+Artefacts de reproduction (build/audit_20261101) :
+- test_structure_fonction_audit.py
+- structure-fonction-evidence.json
+- audit-StructureHubView-{light,dark}.png
+- audit-FonctionsView-{light,dark}.png
+- audit-SubdivisionsHierarchyView-{light,dark}.png
+
+Ordre de correction conseillé : S1/S2/F12 (contexte et fraîcheur), S3
+(validation), F1/F2/F3 (création et diagnostics fiables), F4/F5/F6 (portée
+et atomicité), puis rattachements, exports, filtres et présentation.

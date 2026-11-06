@@ -1,0 +1,224 @@
+IMPRESSION — FILTRES ET COHÉRENCE DES AUTRES MODULES — LOT 33
+31/10/2026
+
+Portée et protection
+Poursuite après le module Audit des données sensibles (lot 32). Recherche libre,
+critères combinés, dates, compteurs et restitution des journaux. Travail sur
+feature/mysql-migration, sans reset ni commit, avec les changements antérieurs
+intégralement préservés. sources/ du miroir reste en lecture seule.
+Aucune donnée réelle, aucun fichier utilisateur ou journal opérationnel ouvert
+pour le diagnostic. Essais sur profils temporaires et données synthétiques.
+Aucune migration, dépendance ajoutée, aucun exécutable généré. Empreintes des
+anciens EXE/ZIP contrôlées inchangées. Patch et manifeste limités à ce lot.
+
+Cartographie examinée
+- Liste du personnel : filtres rapides, proxy, critères structure/grade/Padmin,
+  recherche libre et interaction avec les règles avancées/en-têtes.
+- Édition SME : recherche libre, critères cumulés et matricule solde absent.
+- Congés, missions, désertions, malades/punis et les trois types de stages :
+  recherche sur la fiche et ses détails satellites, catégories et compteurs.
+- Gains/pertes : type de mouvement, périmètre temporel et recherche visible.
+- Grades, fonctions, organigramme/postes, médailles/décorations, positions admin,
+  structures/effectifs, hiérarchie U→D→T, dialogues fonction-structure.
+- Détachés, listes de présents, limite d'âge/retraites, soit transmis et Avancement.
+- Comptes utilisateurs, journal d'authentification et historique des documents.
+Le hub des structures utilisait déjà fold_label : ses règles restent inchangées
+et ses tests existants sont rejoués. Modules sans recherche autonome (vues
+numériques conteneurs, écrans supprimés/campagnes) non réinventés.
+
+L33-01 — P1/P2 confirmé — champs visibles absents de la recherche
+Emplacements : src/sme_gend/ui/personnel_list_filters.py:116,
+ui/list_table_filter.py:row_matches_search, ui/views/edition_sme_view.py:filterAcceptsRow,
+ui/personnel_filter_proxy.py:filterAcceptsRow et services/liste_present_service.py:_row_matches.
+Avant : Édition SME ne trouvait pas un numéro carrière ou une décision visibles ;
+la liste générale omettait notamment lieu, naissance/grade et décision ; le motif
+de punition visible dans Observations ne passait pas le filtre générique satellite.
+Correction : prédicat commun couvrant les champs de la ligne utilisés par ces
+listes, incluant dates ISO et jj/mm/aaaa pour les valeurs date/datetime, décisions,
+lieu, observations et identifiants. Le libellé/code de grade affiché est également
+pris en compte quand le référentiel de grades est fourni au proxy.
+Les champs de contact cachés, secrets et versions d'écriture ne sont pas ajoutés
+à la recherche. Les critères exacts structure/grade/position restent combinés
+avec la recherche ; aucun filtre métier n'est court-circuité par cette correction.
+La liste des présents utilise le même prédicat pour l'aperçu et l'export.
+Tests : valeurs visibles, n° 12, décision, motif, dates des deux formats,
+structure exacte + recherche et correspondance du filtre aperçu/export présents.
+
+L33-02 — P2 confirmé — accents et libellés incohérents entre modules
+Emplacement commun : src/sme_gend/services/search_text.py:6 ;
+les méthodes de recherche des vues sont listées dans structural_review.json.
+Avant : eloi/eloise, securite ou general ne trouvaient pas leurs valeurs accentuées.
+Certains modules géraient déjà les accents, d'autres seulement la casse.
+Correction : normalisation Unicode de la recherche libre, insensible à la casse
+et aux accents, espaces normalisés ; aucun changement des données stockées.
+Application aux détails satellites, référentiels, comptes, détachés, Avancement,
+limite d'âge/retraites, soit transmis, hiérarchie et sélecteurs de rattachement.
+Les codes et identifiants des critères exacts ne sont pas réécrits ou fusionnés.
+Les fautes de frappe ne sont pas assimilées à une correspondance : pas de fuzzy.
+Le libellé long d'une distinction, utilisé en affichage quand le court est absent,
+est désormais également recherchable.
+Tests : ÉLOÏSE/eloise, SÉCURITÉ/securite, GÉNÉRAL/general, décision accentuée,
+label long d'une médaille, comptes et retraites. %, _ restent des caractères
+littéraux ; une orthographe différente n'est pas acceptée arbitrairement.
+
+L33-03 — P2 confirmé — matricule absent et compteur de nature de stage
+Emplacements : ui/views/edition_sme_view.py:filterAcceptsRow et
+src/sme_gend/services/stages_list_filter.py:99, row_matches_nature_filter.
+Avant : le placeholder métier / était considéré absent dans une liste, mais
+présent par le filtre Sans matricule solde d'Édition SME. Les options de stage
+SYNTHETIQUE (1) et synthetique (1) appliquaient toutes deux un filtre retournant
+deux personnes : le compteur affiché contredisait les résultats.
+Correction : réutilisation de matricule_solde_is_empty ; options comptées selon
+la même clé normalisée que leur filtre, avec conservation d'un libellé original.
+Aucune fusion/suppression d'enregistrements métier. Les choix Sans nature et
+Toutes les natures restent distincts et les trois catégories de stage préservées.
+Tests : placeholder /, deux variantes de même nature donnant une option (2)
+et deux lignes, régressions des natures vides et détails des stages existantes.
+
+L33-04 — P2 confirmé — recherche gains/pertes différente de la date affichée
+Emplacement : ui/views/gain_perte_view.py:_apply_filter.
+Avant : une date stockée 2026-02-03 était affichée 03/02/2026 ; rechercher cette
+dernière valeur ne trouvait rien. Le nom du mois affiché n'était pas recherché.
+Correction : ajout de date_display, libellé du mois et observation affichée aux
+valeurs recherchées. Type de mouvement, mois/année cible, gains/pertes calculés,
+indicateurs mensuels et règles d'écriture restent inchangés.
+Test : date française visible trouvée dans le périmètre de février 2026.
+
+L33-05 — P1 confirmé — journaux centraux remplacés par des données locales
+Emplacements : src/sme_gend/services/audit_log.py:172, src/sme_gend/services/doc_gen_log.py:139.
+Avant : résultat SQL vide ou panne entraînait un repli local ; le journal auth
+renvoyait alors des lignes ne respectant même pas les filtres. Un ancien miroir
+pouvait provenir d'une autre base ou d'une période restaurée.
+Correction : consultations de ces vues fondées sur la base centrale sélectionnée,
+y compris si la liste est vide. Erreur explicite et sans paramètres privés du
+driver ; droits et dates vérifiés avant SQL. Horodatages interprétés en UTC,
+puis affichés et filtrés en calendrier local de façon cohérente.
+Les écritures et les mécanismes de miroir/reprise sont inchangés ; aucun journal
+local n'est supprimé. Les outils explicites d'import CSV et dédoublonnage d'archives
+continuent de lire leurs sources locales dédiées.
+Tests : zéro résultat ne réaffiche pas l'ancien miroir synthétique ; erreur de
+lecture visible, dates inversées refusées, droits absents avant SQL, ordre conservé.
+
+L33-06 — P1 confirmé — historique documents limité AVANT ses filtres/droits
+Emplacements : src/sme_gend/repositories/app_config_repository.py:503, list_doc_gen_months,
+src/sme_gend/ui/views/doc_gen_log_view.py:395 et services/doc_gen_log.py:_allowed_doc_types.
+Reproduction MySQL : une attestation de février 2024, puis 2 000 exports numériques
+plus récents ; le filtre Attestation affichait zéro, bien que l'attestation existe.
+Correction : filtre type, période, recherche et périmètre d'accès appliqués en SQL
+avant LIMIT. Le mode historique attestations ne charge plus d'abord les 2 000
+documents de tous types. Le catalogue des périodes est lu distinctement sur
+l'ensemble du périmètre autorisé, pas déduit seulement des lignes limitées.
+Les libellés français des types sont pris en compte dans la recherche SQL.
+Tri par date d'action puis ID, limite signalée explicitement. Le mois sélectionné
+et le type survivent à un retour sur la page et à une reconstruction du catalogue.
+Le tableau et le CSV utilisent les mêmes lignes centrales validées ; ils ne sont
+pas filtrés une seconde fois avec une sémantique différente après LIMIT.
+Tests natifs : document ancien retrouvé, filtres type/période/nom/label avant
+limite, scope attestations avant limite/catalogue, type interdit vide, caractères
+spéciaux littéraux, dates réimportées triées par événement et lecture sans mutation.
+
+L33-07 — P1/P2 confirmé — réponses périmées et cache CSV des journaux
+Emplacements : src/sme_gend/ui/views/users_auth_view.py:1692,
+src/sme_gend/ui/views/doc_gen_log_view.py:395, shell_window.py:_apply_runtime_to_view.
+Correction : recherche automatique après 300 ms de stabilité, Enter/Filtrer/
+Actualiser immédiats ; une seule lecture active, demandes suivantes regroupées.
+Réglages capturés par recherche et numéro de requête pour rejeter les réponses
+anciennes après changement de filtre, de connexion ou d'accès.
+Toute invalidation vide tableau et cache exportable ; une panne laisse une erreur
+visible et un état à recharger. Droits revérifiés à la livraison. Le changement
+de configuration invalide aussi le journal Documents. Le journal auth n'affiche
+plus un message de driver brut et son cache n'est plus exportable après erreur.
+Le moteur existant de tâches Qt gérées reste inchangé.
+Tests Qt contrôlés : aucune réponse ancienne ne repeint la table ; requêtes
+regroupées, changement de base, révocation de droits, erreur sans faux secret,
+cache vide après échec et filtre de type conservé.
+
+L33-08 — P2 mesuré — coût de la recherche étendue et cache borné
+Emplacements : src/sme_gend/services/search_text.py:33, _search_blob et _normalized_query.
+Protocole : 6 000 lignes entièrement synthétiques, 7 passages par version,
+requête ASCII commune donnant les 6 000 mêmes résultats, sans SQL ni interface.
+La recherche étendue non cachée avait une médiane de 86.62 ms.
+Après cache, médiane de 6.23 ms sur les passages répétés, soit environ
+13.9 fois moins de temps dans ce scénario corrigé comparable.
+Premier passage mesuré après cache : 97.06 ms.
+L'ancien filtre limité à moins de champs avait une médiane de
+1.96 ms : la nouvelle recherche complète
+n'est donc pas présentée comme plus rapide que cet ancien filtre incomplet.
+Le cache stocke au maximum 8 192 tuples de valeurs et 512 requêtes ; il n'écrit
+aucun fichier. Clé fondée sur les valeurs, pas seulement l'ID : une cellule
+modifiée produit un autre texte, sans devoir attendre une invalidation globale.
+Valeurs non hashables traitées sans cache. Aucun changement des résultats métier.
+Test : nom/date modifiés sur la même ligne, ancienne valeur refusée immédiatement.
+Preuves : before_search_cache.json et after_search_cache.json, empreintes incluses.
+Ce benchmark n'est pas une mesure du temps de chargement de toute l'application.
+
+L33-09 — P3 confirmé — avertissement Qt révélé par le test de filtrage
+Emplacement : ui/views/structure_effectifs_view.py:_refill_table_filtered.
+QTableWidgetItem.setTextAlignment(int(...)) déclenchait une DeprecationWarning
+avec PySide6 installé. Passage direct des AlignmentFlag ; aucun avertissement
+désactivé. Le test vérifie aussi l'identité et l'effectif de la structure affichée.
+
+Validation réellement exécutée
+Reproductions avant : 22 échecs locaux, puis 5 cas supplémentaires des référentiels.
+Trois essais natifs initiaux échouaient. La première fixture graphique n'avait
+pas initialisé le catalogue de types ; après correction de cette fixture, le
+défaut de limite est confirmé séparément par zéro ligne au lieu de l'attestation.
+Les erreurs de commande/fichiers de tests inexistants sont conservées dans les
+logs intermédiaires et ne sont pas présentées comme des bugs de l'application.
+Commandes finales avec -W error :
+- suite locale entière hors intégration : 1397 réussites en 84.14 s ;
+- MySQL natif : 53 réussites en 91.28 s,
+  dont 15 nouveaux cas, les 25 cas du lot 32 et 13 régressions journaux/transactions ;
+  543 autres cas d'intégration explicitement hors filtre.
+Total final : 1450 cas pytest réussis, aucun échec ni test sauté
+dans ces commandes. 48 nouveaux tests locaux, avec Qt hors écran et données fictives.
+Régressions : rôles/comptes, règles avancées, grades/postes, catégories stages,
+import/audit atomique, miroirs après commit, annulation, reprise après interruption,
+routes de quatre journaux et échec de clôture quand le journal est indisponible.
+Commandes exactes et codes de retour : validation_summary.json et logs associés.
+
+Environnement isolé : MySQL 8.0.40 loopback:64062, datadir vérifié sous build,
+bases uniques jetables et profils temporaires. Les lanceurs bloquent les autres
+connexions et écritures hors des profils de test. Pas de base de production,
+pas de recette sur vrais PC ni SMB. Instance arrêtée en fin de lot après contrôle
+de l'absence de schémas de test restants.
+
+Contrôle du changement
+30 fichiers source existants modifiés, un helper de recherche ajouté, trois
+fichiers de tests ajoutés et ce rapport. 1075 fonctions inchangées
+dans les fichiers examinés. Aucune méthode existante supprimée ; le helper local
+work du chargement auth est remplacé par une lambda de même responsabilité.
+Méthodes d'écriture métier, transactions/pool, authentification, gardes de mois,
+sauvegarde/restauration, import et moteurs de miroirs/reprise préservés.
+Le module Audit sensible du lot 32 reste inchangé et ses tests sont rejoués.
+AST des sources, empreintes figées, Git et patch inverse contrôlés en lecture seule.
+baseline/ conserve les originaux ; changes_manifest.json et corrections_only.patch
+isolent ce lot. Aucun reset, commit ou build EXE. Aucune migration nécessaire.
+
+Limites et recette restante
+1. Valider sur copie de travail les recherches et exports dans chaque module,
+   avec les mots accentués, dates visibles, décision et filtre structure combinés.
+   Vérifier les compteurs de nature et le retour aux vues déjà filtrées.
+2. Recette sur les vrais postes et SMB indisponible. Simuler réponse lente,
+   changement de base, coupure MySQL et droits révoqués sur un compte de test.
+   Les scénarios locaux contrôlés ne remplacent pas la recette réseau réelle.
+3. Les journaux affichent les valeurs enregistrées au moment des actions. Les
+   vieux contenus incohérents ou incomplets ne sont pas réécrits ni inventés.
+   Les traces produites hors ligne restent dans leurs miroirs ; elles ne sont
+   pas automatiquement assimilées au journal d'une nouvelle base. Une vue locale
+   explicite ou une reprise centrale dédiée nécessiterait un lot séparé.
+4. Sélections cochées inter-filtres et indicateurs mensuels globaux conservés
+   selon leur fonctionnement existant. Les règles ET des filtres avancés et le
+   mode de recherche globale/priorités d'Avancement ne sont pas redéfinis.
+5. Le cache et les mesures concernent les recherches en mémoire, pas les gros
+   journaux SQL. La recherche JSON peut encore nécessiter un balayage ; mesurer
+   sur une copie représentative avant d'ajouter des index ou une migration.
+6. La politique d'authentification locale existante est conservée (mode local
+   autorisé sans contexte auth). Protection OS/MySQL à maintenir. Toute la suite
+   MySQL, tous les rendus Office/PDF et chaque scénario d'interface n'ont pas été
+   rejoués : l'application entière n'est pas déclarée exempte de bugs.
+
+Retour arrière
+Le patch limité peut être examiné et inversé sur une copie en préservant les autres
+travaux. Aucun reset global. Pas de migration ou retour arrière de données requis
+pour ce lot ; les données réelles n'ont pas été modifiées.

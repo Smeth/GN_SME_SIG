@@ -1,0 +1,318 @@
+IMPRESSION — LOT 10 : RESTAURATION COMPLÈTE PRÉPARÉE ET RÉCUPÉRATION
+Sources modifiées ; aucun exécutable ni portable régénéré.
+
+DÉCISION ET PÉRIMÈTRE
+
+La décision antérieure de conserver temporairement DROP/CREATE est remplacée
+pour ce lot par la demande de sécuriser la restauration complète. La fenêtre de
+maintenance a été explicitement acceptée : autres postes fermés, saisies et
+tâches d'écriture suspendues jusqu'à validation du résultat.
+
+Le mécanisme utilise MySQL 8/9 et des tables InnoDB. Les essais natifs ont utilisé
+MySQL 8.0.40. Une restauration est préparée dans une autre base, contrôlée, puis
+publiée par un seul RENAME TABLE portant sur toutes les tables. Les anciennes
+tables sont conservées dans une base auxiliaire. Le mécanisme n'exécute jamais
+DROP DATABASE pour nettoyer les copies de récupération.
+
+Les modifications présentes avant ce lot sont conservées. La branche existante
+feature/mysql-migration n'a été ni réinitialisée ni commitée. Les fichiers avant
+édition et leurs empreintes figurent dans build/corrections_20261030_lot10/.
+Aucun fichier sous sources/ du miroir de projet n'a été modifié.
+
+Aucune base ni donnée réelle n'a été modifiée. Les tests réseau ont été limités
+au serveur jetable 127.0.0.1:64062, après vérification de @@datadir sous build/.
+Chaque fixture crée ses bases impression_test_<UUID> et nettoie exclusivement
+les noms qu'elle possède. Les accès réseau, ODBC et écritures hors du profil
+jetable sont bloqués par scripts/run_isolated_tests.py.
+
+L10-01 / A02 — P0 CONFIRMÉ : PERTE PARTIELLE APRÈS ÉCHEC DU DUMP
+
+Emplacements :
+src/sme_gend/services/backup_restore_service.py:819 (restore_backup)
+src/sme_gend/services/mysql_restore_staging.py:98 (prepare)
+src/sme_gend/services/mysql_restore_staging.py:200 (publish)
+
+Cause : l'ancien exécuteur appliquait DROP/CREATE sur la base utilisée par les
+postes. Le rollback DML ne pouvait annuler ces instructions de schéma.
+Reproduction avant correction : table contenant (7, ORIGINAL), DROP/CREATE puis
+INSERT avec doublon ; l'exception est levée, mais la table d'origine est vide.
+Le test de conservation de cette ligne échouait effectivement.
+
+Correction : sauvegarde préalable obligatoire ; copie de toutes les tables
+existantes dans la base préparée ; application du dump uniquement dans cette
+copie. Les tables non sélectionnées et les tables actuelles absentes d'une
+ancienne archive conservent leurs données dans la préparation. Les tables
+préparées et les tables actuelles sont échangées par une unique instruction DDL
+atomique InnoDB. Aucun DROP/CREATE du dump n'est appliqué à la base active.
+Le graphe de clés étrangères est contrôlé après la bascule également.
+
+Vérification : le test rouge passe ; restauration native du schéma complet de
+l'application (plus de 30 tables), conservation de tables hors sélection et de
+leurs valeurs par défaut déjà enregistrées ; clés étrangères rattachées à la
+base active après succès. Les colonnes DEFAULT_GENERATED sont copiées, seules
+les vraies colonnes virtuelles/stockées calculées sont omises lors de la copie.
+
+L10-02 — P1 CONFIRMÉ : RÉACTIVER LES FK NE VÉRIFIE PAS LES ORPHELINS
+
+Emplacement :
+src/sme_gend/services/mysql_restore_staging.py:168 (validate)
+
+Cause : la restauration désactivait FOREIGN_KEY_CHECKS puis le réactivait sans
+vérifier les lignes déjà insérées. Une ligne enfant pointant vers 999 sans parent
+était acceptée dans l'essai avant correction ; le test attendait un refus et
+échouait.
+
+Correction : contrôle explicite de chaque clé étrangère de la base préparée,
+y compris les clés composées et la sémantique des NULL, avant toute publication.
+Les références entrantes/sortantes vers une autre base sont refusées avant
+préparation, ainsi que les références externes introduites par une archive.
+Vérification : l'archive orpheline est refusée ; le parent et l'enfant d'origine
+restent présents avec leur relation initiale.
+
+L10-03 — P1 : COMPTES ET FICHIERS TRAITÉS APRÈS LE REMPLACEMENT SQL
+
+Emplacements :
+src/sme_gend/services/mysql_restore_staging.py:155 (apply_config)
+src/sme_gend/services/restore_files.py:41 (add)
+src/sme_gend/services/restore_files.py:62 (publish)
+src/sme_gend/services/restore_files.py:72 (rollback)
+
+Cause vérifiée dans l'ancien flux : comptes locaux réécrits après le SQL,
+configuration partagée et fichiers publiés ensuite, sans compensation globale.
+Une erreur de photo pouvait donc laisser les nouvelles tables et certains
+fichiers seulement restaurés.
+
+Correction : comptes à conserver et configuration partagée appliqués dans la
+base préparée avant bascule. Les fichiers sont préparés et leurs originaux copiés
+dans un dossier privé avant toute mutation de MySQL. Les destinations sont
+testées pour leur accessibilité ; les empreintes détectent une modification
+survenue pendant la préparation. Le fichier final est publié atomiquement.
+En cas d'erreur, le service tente le retour de tous les fichiers et la bascule
+SQL inverse, même si une compensation échoue.
+
+Un fichier modifié par un tiers après sa publication n'est pas écrasé par le
+retour automatique. Une copie de sécurité altérée n'est pas restaurée en silence.
+L'état recovery_required et les originaux sont conservés pour intervention.
+
+Vérification native : archive contenant d'autres comptes, données différentes,
+deux photos ; succès avec comptes actuels conservés. Échec injecté sur la deuxième
+photo : première photo et base remises à l'état initial, nouvelle photo absente,
+configuration métier nouvelle absente et FK toujours correctes. Les conflits
+de fichiers et copies de récupération altérées sont également testés.
+
+L10-04 — P1 : CONCURRENCE ET ACCUSÉ DE RÉCEPTION DE LA BASCULE
+
+Emplacements :
+src/sme_gend/services/mysql_restore_staging.py:27 (maintenance_lock_name)
+src/sme_gend/services/mysql_restore_staging.py:222 (rollback)
+
+Un GET_LOCK MySQL empêche deux nouvelles restaurations de préparer/remplacer la
+même base simultanément. Son identité dépend de la base : différents noms réseau
+ou ports utilisés pour joindre le même serveur ne créent pas deux verrous.
+Le verrou est libéré en fermant la connexion dédiée.
+
+Un refus SQL de RENAME ne signifie pas la même chose qu'une réponse perdue après
+exécution. En cas de transport interrompu, le service inspecte les tables de
+préparation et se reconnecte si nécessaire, après réacquisition du verrou, pour
+déterminer si la bascule a eu lieu. L'état ambigu ne provoque jamais la suppression
+de l'une des copies. Le délai d'attente des verrous de métadonnées est borné à 15 s.
+
+Vérification : seconde restauration refusée pendant la première ; refus de la
+commande de bascule sans modification de la table active ; bascule réellement
+exécutée puis connexion réellement fermée avec simulation d'accusé perdu :
+reconnexion et retour de la table d'origine réussis.
+
+Ce verrou concerne les nouvelles restaurations, pas toutes les écritures SQL
+possibles. Il ne dispense pas de fermer les autres postes, les anciennes
+versions et les autres outils d'administration pendant la maintenance.
+
+L10-05 — P1/P2 : VALIDATION ET PRÉSERVATION DE LA SOURCE
+
+Emplacements :
+src/sme_gend/services/mysql_restore_staging.py:54 (validate_staged_statement)
+src/sme_gend/services/backup_restore_service.py:819 (restore_backup)
+
+L'archive est copiée dans le dossier privé, puis son CRC, son manifeste, ses
+chemins et ses contenus structurés sont vérifiés sur cette copie stable. Un
+remplacement du ZIP d'origine pendant la restauration n'en change pas le contenu.
+L'inventaire des CREATE doit correspondre aux tables du manifeste et à la
+sélection ; chaque table remplacée doit être recréée une seule fois. Les nombres
+de lignes restaurés sont comparés au manifeste avant les ajustements de comptes.
+Les JSON sélectionnés doivent être lisibles avant toute publication.
+
+Les CREATE sont limités aux options InnoDB prises en charge. ENGINE distant,
+DATA DIRECTORY, TABLESPACE, CREATE ... SELECT et références qualifiées à une
+autre base sont refusés. Les identifiants SQL sont quotés ; les valeurs de
+configuration sont paramétrées. Les erreurs SQL restent chaînées, sans recopier
+leur contenu potentiellement confidentiel dans le message utilisateur.
+
+Les vues, routines, événements, déclencheurs, tables non InnoDB et serveurs non
+compatibles avec la bascule testée sont refusés avant modification de la base
+active. Ils nécessitent une procédure DBA spécialisée ; aucun retour vers le
+remplacement partiel ancien n'est tenté pour contourner le refus.
+
+L10-06 — P1 : DROITS ET CONFIRMATION EN INTERFACE
+
+Emplacements :
+src/sme_gend/ui/views/backup_restore_view.py:492 (_on_restore_full)
+src/sme_gend/ui/views/backup_restore_view.py:549 (_on_restore_partial)
+
+Les deux points d'entrée revérifient la permission existante system.backup avant
+de proposer un fichier ou de lancer le traitement. La confirmation demande
+explicitement la fermeture des autres postes et la suspension des saisies.
+Le service public refuse un payload SQL si maintenance_confirmed est faux.
+Les APIs historiques conservent leurs options ; le nouveau paramètre est faux
+par défaut afin qu'un appel non adapté ne remplace pas les données en silence.
+Les sélections de comptes, d'audit, de configuration et de médias sont conservées.
+
+Vérification : refus avant ouverture d'un dialogue si la permission manque ;
+refus de SQL sans confirmation de maintenance, sans connexion à la base.
+Les tests d'archives malveillantes, de paramètres conservés et de comptes restent
+actifs : aucun test n'a été désactivé.
+
+L10-07 — P1/P2 : SAUVEGARDE PRÉALABLE ET JOURNAL DE RÉCUPÉRATION
+
+Emplacements :
+src/sme_gend/services/backup_restore_service.py:501 (_export_mysql_sql)
+src/sme_gend/services/backup_restore_service.py:605 (create_backup)
+src/sme_gend/services/mysql_backup_service.py:57 (_python_sql_dump)
+src/sme_gend/services/restore_files.py:11 (write_recovery)
+
+La partie SQL des sauvegardes ZIP réutilise maintenant le dump cohérent InnoDB
+du lot 9 : un cliché explicite, octets et UTF-8 sérialisés sans conversion fragile,
+Id zéro préservés, contrôle des objets non représentables, compteurs des lignes.
+La sélection de tables reste prise en charge. Les temporaires contenant les
+données sont privés et nettoyés après lecture.
+
+Chaque sauvegarde ZIP possède son propre temporaire ; une erreur ou une sélection
+vide conserve l'archive finale précédente. Les noms proposés par défaut ajoutent
+microsecondes et suffixe aléatoire. La sauvegarde avant restauration est recopiée
+en safety.zip dans le dossier de récupération, hors de la purge des ZIP récents.
+
+Le dossier restore_sessions/<UUID>/ reçoit une ACL privée avant toute copie
+de contenu (propriétaire, SYSTEM, administrateurs sous Windows). Les journaux
+sont publiés avec flush + fsync avant les étapes décrites. Il contient :
+- source.zip : copie stable de l'archive demandée ;
+- safety.zip et safety_backup.txt : état préalable et son chemin ;
+- mysql_recovery.json : cible, noms des bases auxiliaires et phase ;
+- rollback_mysql.sql : instruction de bascule inverse, sans mot de passe ;
+- files_recovery.json et files/*.old / *.new : empreintes, états et copies.
+
+Aucune copie de récupération n'est automatiquement supprimée par la restauration.
+Une tentative précoce refusée peut ne pas avoir créé tous ces éléments : examiner
+les phases avant de conclure qu'une bascule a eu lieu.
+
+TESTS ET CONTRÔLES EXÉCUTÉS
+
+Avant correction : deux nouveaux tests MySQL en échec ont confirmé la perte après
+DDL et l'acceptation d'une ligne orpheline. Après correction, ces tests passent.
+Les nouveaux tests couvrent les comptes, fichiers, FK, noms de serveur, verrou,
+refus de bascule, coupure de connexion, droits, maintenance et archive précédente.
+
+Passe finale sur les sources finales :
+- Tests hors MySQL : 841 réussis, 8 avertissements de dépréciation existants,
+  51.3 s ; 102 cas MySQL différés à la passe native.
+- Tests MySQL isolés : 102 réussis, aucun ignoré,
+  485.61 s.
+- Total pytest : 943 cas validés, soit 24 nouveaux par rapport au lot 9.
+
+Commandes, depuis sme_python :
+..\.venv\Scripts\python.exe -B scripts/run_isolated_tests.py tests -q --tb=short --disable-warnings
+..\.venv\Scripts\python.exe -B scripts/run_isolated_tests.py --mysql-test-instance build/corrections_20261029/mysql_test_instance.json tests/integration/test_restore_mysql.py -q --tb=short --disable-warnings
+
+Les scénarios focalisés remplacent le prérequis de backup par un fichier
+synthétique pour isoler leur panne. Un autre scénario crée et restaure réellement
+un ZIP du schéma applicatif entier ; la fidélité du dump et son cliché cohérent
+restent couverts par les tests natifs du lot 9. Aucun scénario n'utilise MySQL
+de production. Les bases et comptes de test sont nettoyés, l'instance jetable
+est arrêtée en fin de validation ; les profils sous build/ restent disponibles.
+
+Performance : aucun gain chiffré n'est revendiqué. La préparation copie la base
+et les fichiers pour assurer le retour arrière ; elle augmente volontairement
+le besoin en espace et le coût de cette opération exceptionnelle. Prévoir les
+bases actuelle/préparée/ancienne, les archives et les copies de fichiers. Les
+durées de tests ne constituent pas un benchmark sur des données de production.
+
+VALIDATION AVANT DÉPLOIEMENT ET PROCÉDURE DE RÉCUPÉRATION
+
+1. En préproduction, fermer les autres postes et suspendre les jobs/imports/DDL.
+   Utiliser une base MySQL 8 InnoDB initialisée et un compte opérateur ayant les
+   droits nécessaires sur la cible et les bases auxiliaires (création, lecture,
+   insertion et renommage). Aucun privilège n'est accordé automatiquement.
+2. Faire une sauvegarde indépendante, vérifier sa restauration sur une autre
+   base jetable, puis lancer la restauration depuis les sources corrigées.
+3. Après succès, vérifier mysql_recovery.json et files_recovery.json : completed.
+   Contrôler dossiers, comptes, photos, période, exports et journal, puis seulement
+   rouvrir les postes. Tester aussi une restauration partielle avec audit conservé.
+4. Après échec, laisser tous les postes fermés. Si les deux journaux indiquent
+   rolled_back, vérifier que l'état initial est revenu. Ne pas relancer une
+   mutation à l'aveugle si l'état est switching, switched ou recovery_required.
+5. Pour un retour complet, utiliser safety.zip dans le dossier de récupération
+   avec la même fenêtre de maintenance, après contrôle de sa lisibilité. Si la
+   connexion ne revient pas ou si les fichiers partagés restent indisponibles,
+   conserver les copies et faire intervenir l'administrateur.
+6. Le DBA peut utiliser rollback_mysql.sql en urgence uniquement après avoir
+   vérifié que la bascule a eu lieu, que la base préparée est vide et que la base
+   précédente contient toutes les tables originales décrites par le journal.
+   Ce script seul ne restaure pas les fichiers. Ne pas l'exécuter si le retour
+   arrière a déjà eu lieu ; préserver les originaux de fichiers et safety.zip.
+7. Un arrêt brutal peut survenir entre MySQL et les publications de fichiers.
+   La bascule SQL est atomique, l'ensemble MySQL + disques/SMB ne l'est pas.
+   L'exécution interrompue laisse les copies et phases pour récupération ; ce lot
+   ne fournit pas un démon de reprise automatique au redémarrage des postes.
+8. Après validation métier et délai de rétention décidé, le DBA pourra retirer
+   les bases auxiliaires et l'opérateur les dossiers privés. Aucun nettoyage
+   automatique des copies contenant l'ancien état n'est lancé par ce code.
+
+CONTRÔLE DES MODIFICATIONS ET RETOUR SUR LES SOURCES
+
+Le lot touche cinq fichiers source, trois fichiers de tests et ce rapport :
+services/backup_restore_service.py, mysql_backup_service.py,
+mysql_restore_staging.py (nouveau), restore_files.py (nouveau),
+ui/views/backup_restore_view.py ; tests/test_restore_safety.py,
+tests/test_prepared_restore.py (nouveau), tests/integration/test_restore_mysql.py.
+
+build/corrections_20261030_lot10/changes_manifest.json détaille les empreintes et
+lignes ajoutées/retirées ; corrections_only.patch isole ce lot de l'état de
+travail préexistant ; baseline/ contient les originaux. Le contrôle inversé du
+patch est effectué avec git apply --check --reverse, sans l'appliquer.
+validation_summary.json contient les résultats, les contrôles de syntaxe et les
+empreintes des anciens EXE/ZIP. Aucun commit, reset ou nettoyage des autres travaux.
+
+Il n'y a pas de migration à lancer sur la base réelle pour intégrer ces sources.
+Lors d'une restauration future, les nouvelles bases auxiliaires sont créées et
+les tables renommées comme décrit ci-dessus. Le retour sur les sources demande
+une comparaison du patch avant inversion, pour conserver tout travail ultérieur.
+Ne pas rouvrir l'ancien exécutable pendant une récupération : il utilise encore
+le mécanisme précédent. L'EXE et le ZIP existants n'ont pas été reconstruits.
+
+LIMITES ET PRIORITÉS RESTANTES
+
+- Fenêtre de maintenance obligatoire : pas de blocage global de clients SQL
+  arbitraires ni de garantie contre une DDL concurrente lancée par un autre outil.
+- Récupération de coupure système/SMB complète à valider sur le déploiement réel ;
+  les échecs ciblés utilisent des connexions distinctes et des fichiers synthétiques.
+- Valider les archives historiques entre versions et les options de schéma hors
+  du dialecte autorisé ; les objets SQL avancés demandent un lot DBA spécialisé.
+- La restauration de configuration seule, sans payload SQL, conserve son import
+  transactionnel existant ; elle n'utilise pas la bascule complète de base. La
+  coordination de ce cas particulier avec tous les fichiers reste un lot distinct.
+- Les étapes de statut/session de clôture restent plusieurs transactions après
+  le backup obligatoire. Leur regroupement et la reprise des miroirs après commit
+  restent à traiter sans modifier arbitrairement les règles de mois.
+- À vérifier sur deux postes : partage UNC, permissions Windows, photos et
+  actualisation distante. Les tests de ce lot ne sont pas une validation SMB réelle.
+- TLS avec CA/nom serveur et l'encodage de certains mots de passe MySQL non ASCII
+  restent ouverts. Aucun certificat ni nouveau contrat d'authentification n'a été
+  imposé ici. Les avertissements Qt/Pandas restent aussi à traiter.
+- Les copies de récupération contiennent des données métier et comptes
+  applicatifs sauvegardés ; elles sont privées, sans chiffrement supplémentaire.
+  Leur rétention et leur nettoyage doivent être administrés.
+- Aucun exécutable généré : les corrections ne sont disponibles que dans les
+  sources tant qu'une construction ultérieure n'est pas explicitement demandée.
+
+Références primaires :
+https://dev.mysql.com/doc/refman/8.0/en/atomic-ddl.html
+(atomicité DDL uniquement lorsque toutes les tables utilisent un moteur compatible).
+https://dev.mysql.com/doc/refman/8.0/en/rename-table.html
+(renommage multiple, dépendances FK, limites inter-bases des vues/déclencheurs et droits).

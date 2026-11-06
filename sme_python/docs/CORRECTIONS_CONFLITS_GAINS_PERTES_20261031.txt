@@ -1,0 +1,162 @@
+IMPRESSION — CONFLITS CONCURRENTS GAINS/PERTES — LOT 21 — 31/10/2026
+
+Protection et périmètre
+Racine : C:\Users\MONSTER\Desktop\GN\Impression\sme_python.
+Branche feature/mysql-migration conservée, 494 entrées Git préexistantes au début
+du lot. Copies baseline/, empreintes et état Git initial conservés. Aucun reset,
+commit, déploiement ni génération d'exécutable. EXE et ZIP existants inchangés.
+Aucune donnée réelle, fichier utilisateur, base de production ou partage SMB
+modifié. Tests synthétiques sur MySQL 8.0.40 jetable, datadir vérifié sous build,
+port 64062, réseau externe et ODBC bloqués par le runner isolé. Aucun changement
+de schéma de production, migration ou dépendance nouvelle.
+
+L21-01 — P1 confirmé — écrasement d'une modification concurrente
+Emplacements : src/sme_gend/repositories/mysql_bundle_repositories.py:423,
+src/sme_gend/repositories/gain_perte_write_guard.py:22, check_movement_target.
+Cause racine : l'UPDATE vérifiait la clé primaire mais pas l'état chargé par
+l'utilisateur. Deux lecteurs ouvraient la même ligne ; après le premier commit,
+la sauvegarde du second remplaçait ses champs sans avertissement. La notification
+atomique du lot 20 ne détectait pas ce conflit métier. Même un champ masqué par
+le COALESCE d'affichage, tel que motif lorsque observ était renseigné, était ignoré.
+Trois tests natifs avant correction échouaient faute d'erreur attendue : édition
+concurrente, motif brut changé, ligne supprimée entre lecture et sauvegarde.
+Le dernier cas retournait un faux succès avec zéro ligne affectée.
+
+Correction : chaque ligne chargée reçoit un jeton (id, empreinte SHA-256) calculé
+par MySQL sur les valeurs brutes : identifiants mouvement/agent/période, snapshots
+grade/nom, type/catégorie/motif, code Cdsme, observation, date, lot d'import et
+identités liées affichées (identifiant Access et mois SME). NULL, vide, casse et
+espaces restent distingués ; les valeurs d'affichage normalisées ne servent pas
+de version. Le même calcul est réutilisé à la sauvegarde.
+La vérification se fait dans la transaction métier du lot 20 par une lecture
+courante sous FOR UPDATE OF m ; les parents reçoivent FOR SHARE OF a,p. Ces
+verrous restent détenus jusqu'au commit ou rollback réel. La comparaison n'est
+donc pas une lecture préalable indépendante qui laisserait une fenêtre avant DML.
+Un état différent ou une ligne absente lève GainPerteConflictError, sans UPDATE
+ni publication de révision. Les vrais changements et leurs signaux restent
+atomiques ; la gestion existante des transactions externes/SAVEPOINT est préservée.
+Références primaires sur les lectures verrouillantes et leur portée OF :
+https://docs.oracle.com/cd/E17952_01/mysql-8.0-en/innodb-locking-reads.html
+https://docs.oracle.com/cd/E17952_01/mysql-8.0-en/select.html
+
+Validation : 13 variantes de champs bruts, identités liées, changement d'une
+autre ligne sans faux conflit, relecture permettant ensuite une édition valide.
+Deux modifications simultanées : un seul succès, un conflit et une révision.
+Le contrôle utilise l'état actuel même dans une transaction REPEATABLE READ
+dont une lecture ordinaire voit encore l'ancien instantané ; test natif explicite.
+Une panne du signal annule les données, permettant de réutiliser le cliché
+inchangé après rollback confirmé. Pas de nouvelle tentative automatique.
+
+L21-02 — P1 confirmé par le code — suppression d'un mouvement devenu périmé
+Emplacements : src/sme_gend/repositories/mysql_bundle_repositories.py:492,
+src/sme_gend/repositories/gain_perte_repository.py:83,
+src/sme_gend/ui/views/gain_perte_view.py:1361.
+L'ancien DELETE ne comparait que l'id ; une confirmation ouverte avant la
+modification d'un autre utilisateur pouvait donc supprimer ses nouvelles données.
+La suppression reçoit maintenant le cliché de la ligne sélectionnée via expected,
+vérifié sous les mêmes verrous. Modification ou suppression depuis le chargement :
+conflit explicite, aucune suppression et aucune nouvelle révision.
+Validation après correction : édition/suppression concurrentes et deux suppressions
+simultanées donnent un seul succès ; les lignes des autres mouvements restent
+inchangées. Un clic annulé ne lance aucune écriture. Une relecture après conflit
+permet une nouvelle opération volontaire sur la version désormais présentée.
+
+L21-03 — P2 — parcours de conflit sans écrasement ni perte silencieuse du brouillon
+Emplacements : src/sme_gend/ui/views/gain_perte_view.py:479,
+src/sme_gend/ui/views/gain_perte_view.py:1305, _on_delete ; src/sme_gend/models/gain_perte.py.
+Le dialogue transmet le jeton original même si l'agent ou le mois est modifié.
+En cas de conflit d'édition, message explicite puis réaffichage de la même modale,
+avec les mêmes valeurs et le même jeton, pour consulter ou copier la saisie.
+Il faut annuler cette saisie pour recharger et reprendre sur la version actuelle.
+Aucune fusion automatique, aucun bouton de forçage ni changement implicite de
+version après rafraîchissement. La liste est rechargée après cette annulation.
+En cas de conflit de suppression, avertissement et actualisation sans faux succès.
+Les permissions, restrictions des mois fermés, confirmations et créations depuis
+les lignes calculées « Non signalé » restent en place.
+
+Contrats et compatibilité
+- GainPerteRow reçoit write_token en fin de dataclass avec défaut None, exclu
+  de repr et de l'égalité métier. Les DTO historiques et les lectures/exports
+  restent lisibles ; les colonnes exportées sont toujours choisies explicitement.
+- update_row conserve sa signature et exige le jeton de la ligne chargée. La
+  création d'une proposition se fait par conservation de ce jeton (modale ou
+  dataclasses.replace d'une ligne fraîche). Pas de relecture qui inventerait
+  un jeton actuel après réception d'une proposition déjà périmée.
+- delete_row conserve les paramètres existants et ajoute expected, attendu
+  comme la ligne chargée. Sans jeton valide ou avec une autre clé, refus explicite
+  avant accès SQL. Les anciens appels de modification/suppression fabriquant
+  un DTO sans version doivent charger le mouvement d'abord ; pas de voie de
+  contournement silencieuse. Les insertions ne demandent pas de jeton.
+- Les appels applicatifs ont été raccordés ; recherche des appelants exécutée.
+  La fixture MySQL synthétique reflète maintenant import_lot_id déjà présent
+  dans le schéma applicatif. Les anciennes assertions métier et SQL des tests
+  sont conservées et utilisent désormais un cliché chargé pour les écritures.
+- Comparaison AST : huit méthodes gains/pertes conservent leur corps métier hors
+  validation de version, comparaison et nouvel argument expected ; sept autres
+  classes de dépôts inchangées et projection d'affichage préservée.
+
+Vérification exécutée
+- Avant correction : 3 échecs natifs, 310 non sélectionnés, 3,92 s. Ces cas
+  observaient les opérations réelles, sans panne de publication injectée.
+- Nouveau périmètre MySQL : 31 réussis, 310 non sélectionnés, 36,00 s.
+- UI/services ciblés : 54 réussis en 1,39 s, dont 27 nouveaux cas unitaires.
+- Passe finale unitaire complète : 1025 réussis, 8 avertissements,
+  39.51 s. Aucun test désactivé pour obtenir ce résultat.
+- Passe finale MySQL ciblée : 87 réussis, 254 non sélectionnés,
+  88.49 s. Filtre : gain_lot21 or business_lot20 or sync_lot12.
+  Inclut les 31 nouveaux cas, les 51 cas d'écriture/notification du lot 20 et
+  les contrôles de synchronisation du lot 12. Pas une nouvelle passe complète
+  des 341 cas natifs désormais disponibles.
+- Total pytest final : 1112 réussis ; 58 nouveaux cas ajoutés.
+- Deux scénarios supplémentaires avec deux processus Python indépendants :
+  l'un charge avant le commit du premier puis tente modification ou suppression.
+  Le conflit est signalé, les données du premier et sa révision restent identiques.
+  Les empreintes des quatre sources centrales sont conservées dans la preuve.
+- Contrôle syntaxique global, patch isolé vérifié sans application, empreintes
+  EXE/ZIP et conservation de l'état Git antérieur vérifiés. L'arrêt de l'instance
+  jetable et l'absence de bases synthétiques résiduelles sont consignés après
+  finalisation dans validation_summary.json.
+Commandes, profils et durées exactes : final_unit.json, final_mysql.json et logs
+correspondants sous build/corrections_20261030_lot21. Résultats interprocessus :
+movement_conflict_*/validation.json. Scripts de validation conservés dans ce dossier.
+
+Performances et coût
+Aucun gain de latence globale revendiqué : pas de benchmark volumétrique avant/
+après comparable. L'empreinte est calculée dans le SELECT de liste existant,
+sans requête distincte par mouvement. Chaque modification/suppression ajoute une
+lecture ciblée de comparaison sous verrou. Les verrous exclusifs ne portent
+pas sur tous les mouvements du mois : un test NOWAIT acquiert simultanément
+celui d'un autre mouvement partageant les mêmes parents. Cela ne supprime pas
+les attentes normales sur la révision globale ou les interblocages possibles.
+Les transactions restent courtes, aucun verrou conservé pendant la saisie,
+les avertissements ou la confirmation utilisateur. Aucun rejeu automatique métier.
+
+Limites et risques résiduels
+- Essais sur un seul PC, avec MySQL réel et clients distincts ; ni partage SMB
+  réel ni deux PC de travail disponibles pour cette validation. L'actualisation
+  distante conserve le polling existant et ses règles de report en cas de saisie.
+- Les anciens exécutables et outils SQL directs ne passent pas par ces contrôles.
+  Lors du futur déploiement, utiliser une version homogène sur les postes ; aucun
+  exécutable n'est construit dans ce lot.
+- L'empreinte compare l'état, pas un compteur historique monotone : un changement
+  puis retour exactement aux mêmes valeurs avant sauvegarde n'est pas détecté
+  comme une nouvelle version. Un compteur persistant nécessiterait un lot de
+  schéma distinct avec sauvegarde et procédure de retour arrière.
+- Vérifié avec InnoDB et MySQL 8.0.40 ; pas de garantie ajoutée pour un autre moteur
+  ou une version ancienne. Aucun changement de moteur en production.
+- Une perte d'acquittement du commit ne prouve pas l'annulation : vérifier les
+  données avant de relancer. Les conflits d'autres modules, SMB réel, TLS,
+  mots de passe non ASCII et profilage volumétrique restent des périmètres séparés.
+
+Validation en préproduction et retour arrière
+Ouvrir la même ligne dans deux clients ; enregistrer dans le premier, puis tenter
+de sauvegarder et de supprimer depuis l'ancien cliché du second. Attendre un
+conflit, données du premier préservées et pas de seconde notification. Vérifier
+le brouillon réaffiché, annuler, recharger puis modifier volontairement la version
+actuelle. Refaire sur deux lignes différentes et sur une ligne calculée à créer.
+Tester les droits, le mois fermé, l'annulation et une panne réseau sur une base
+synthétique ; ne pas utiliser de données de production pour ces essais.
+changes_manifest.json et corrections_only.patch isolent ce lot du dépôt déjà
+modifié, baseline/ conserve les originaux. Tout retour de sources doit préserver
+les changements ultérieurs et être vérifié sur copie, sans reset global.
+Pas de migration ou de restauration de données à annuler. Aucun exécutable généré.

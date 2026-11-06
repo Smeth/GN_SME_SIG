@@ -1,0 +1,113 @@
+ARCHIVES ET CLOTURE — CORRECTIONS APRES AUDIT
+1er novembre 2026
+
+MISE A JOUR : le transfert d'un mois depuis un SQL global est désormais ajouté.
+Voir TRANSFERT_UN_MOIS_2026-11-01.txt pour le périmètre, l'utilisation et la recette.
+Les limites ci-dessous décrivent l'état antérieur à cet ajout.
+
+CORRECTIONS
+1. Les contrôles des effectifs et des sorties sont cadrés sur le mois à clôturer.
+   Le lancement depuis Cycle mensuel utilise le mois de travail central, même si
+   une autre période est consultée.
+2. Une lecture impossible de la liste, des mouvements ou de leur cohérence crée
+   un point bloquant explicite. Elle ne vaut plus contrôle réussi.
+3. La validation des périodes est commune au contrôle préalable et à l'exécution :
+   calendrier invalide, mois identique ou antérieur et absence de mois suivant
+   sont refusés avant la lecture des effectifs.
+4. Les détails, la priorité et le rôle des tâches déjà ouvertes sont actualisés.
+   Les constats disparus deviennent « À revalider » seulement après un contrôle
+   complet. Ils ne sont jamais considérés automatiquement comme traités.
+5. Les avertissements du catalogue persistent lors des recherches et filtres.
+   Les actions sur les fichiers périmés sont désactivées après erreur de lecture.
+6. Les anciennes périodes sont retirées lors d'un changement de configuration
+   et d'un échec de rechargement. Leur consultation ne reste plus active.
+7. « Vider un mois » exige le rôle administrateur et la permission d'import,
+   conformément à la boîte de dialogue et au parcours existants.
+
+COMPLEMENTS DU MODULE
+- Filtre des tâches à traiter, traitées, à revalider ou de tous états.
+- Affichage de l'auteur et de la date de traitement ; commentaire facultatif
+  conservé dans le journal de la tâche et consultable depuis un bouton dédié.
+- Réactivation avec motif obligatoire, contrôle de version et journalisation.
+- Rapport préalable exportable en CSV, avec neutralisation des formules.
+  Navigation depuis un constat vers les effectifs, mouvements, sauvegardes ou
+  paramètres. Les contrôles ne permettent pas d'identifier chaque agent dans
+  tous les cas : le lien ouvre alors l'écran de correction concerné.
+- Conservation explicite des contrôles depuis leur aperçu. Rapport et tâches
+  sont enregistrés dans la même transaction de synchronisation existante.
+- Dossier de clôture par période depuis le journal central : auteur, date,
+  période suivante, fichiers associés et contrôles conservés. Export texte.
+  Les nouvelles clôtures enregistrent leur rapport dans la trace de validation.
+  Les clôtures anciennes ne peuvent pas retrouver un rapport jamais conservé.
+- Vérification explicite des fichiers : empreinte SHA-256, validité JSON et,
+  pour les ZIP, inspection du manifeste et contrôle CRC déjà utilisés par la
+  restauration. La certification métier n'est pas déduite d'une extension.
+  Le mois affiché dans le catalogue est clairement déduit du nom, non certifié.
+- Passage d'un ZIP au parcours existant de restauration avec le fichier exact
+  présélectionné, sans démarrer la restauration.
+- Restauration d'une période Access : fichier sélectionné conservé, choix du
+  mois, aperçu du contenu, signalement du nombre d'agents existant dans la cible,
+  confirmation du remplacement et réutilisation de l'import sécurisé existant.
+  Ce parcours ne clôture pas la période et n'active aucun mois suivant.
+
+FICHIERS ADAPTES DANS CETTE INTERVENTION
+Services :
+- src/sme_gend/services/pre_closure_service.py
+- src/sme_gend/services/workflow_task_service.py
+- src/sme_gend/services/archive_catalog.py
+- src/sme_gend/services/sme_month_closure.py
+Journal :
+- src/sme_gend/repositories/app_config_repository.py
+Interface :
+- src/sme_gend/ui/views/archives_view.py
+- src/sme_gend/ui/views/month_pilotage_view.py
+- src/sme_gend/ui/views/sme_workflow_panel.py
+- src/sme_gend/ui/views/workflow_status_panel.py
+- src/sme_gend/ui/views/backup_restore_view.py
+- src/sme_gend/ui/pre_closure_report_dialog.py
+- src/sme_gend/ui/closure_record_dialog.py (nouveau)
+- src/sme_gend/ui/import_liste_generale_wizard.py
+Tests :
+- tests/test_archive_workflow_corrections.py (nouveau)
+- tests/test_archive_cycle_ui.py
+- tests/test_business_workflow_safety.py
+Recette locale : build/audit_20261101/visual_archives.py et journaux associés.
+Les modifications préexistantes du dépôt sont conservées.
+
+VERIFICATIONS
+172 tests ciblés réussis : contrôles, interface, recherches/filtres, restauration
+Access simulée et annulation, versions des tâches, réactivation, journal,
+authentification, préférences et synchronisation.
+Commande : .venv/Scripts/python.exe build/audit_20261101/run_unit_audit.py
+avec tests/test_archive_workflow_corrections.py, test_archive_cycle_ui.py,
+test_business_workflow_safety.py, test_workspace_preferences.py, test_pre_closure.py,
+test_auth_audit_regressions.py, test_import_options_checkboxes.py,
+test_shared_sync_regressions.py et test_sensitive_audit_search.py
+(commande lancée depuis la racine du dépôt, préfixe sme_python/ pour le script
+et chacun des chemins tests/). Résultats : archive-corrections-results.txt.
+Huit rendus du cycle, des tâches et du catalogue en thèmes clair et sombre.
+Les tests interdisent les connexions MySQL/Access réelles et isolent les écritures.
+
+LIMITES DE VALIDATION ET FONCTIONNELLES
+- Vérification étendue de restauration : 132 réussites / 22 échecs sur les
+  opérations de protection de dossiers Windows dans le bac à sable.
+  Journal : build/audit_20261101/archive-extended-results.txt.
+- Vérification élargie incluant la sauvegarde native : 180 réussites / 2 échecs
+  liés au client natif sécurisé et au nettoyage des dossiers temporaires privés.
+  Journal : build/audit_20261101/archive-backup-native-results.txt.
+- Une première vérification du miroir de journal avait également rencontré un
+  échec de protection ACL d'un dossier de récupération ; ses protections restent
+  intactes. Aucun contournement des permissions Windows n'est introduit.
+- Pas de recette réelle de clôture, de restauration SQL, d'Access/ODBC ni de
+  validation des transactions contre un serveur de test MySQL dans cette passe.
+- Un SQL global ne permet toujours pas de restaurer directement un mois isolé.
+  La restauration par période proposée ici utilise une archive Access compatible.
+  Elle remplace un mois après confirmation ; elle ne fusionne pas deux contenus.
+  L'import existant peut aussi actualiser des identités et référentiels partagés ;
+  ce périmètre est indiqué avant confirmation.
+- SHA-256 donne une empreinte actuelle. Sans empreinte originale de référence,
+  elle ne prouve pas l'absence de modification depuis la création du fichier.
+- Les journaux affichent au maximum 2 000 traces par recherche, avec indication
+  de la limite lorsqu'elle est atteinte. Les traces manquantes ne sont pas inventées.
+Aucune donnée réelle modifiée, aucune clôture ni restauration réelle exécutée,
+aucun exécutable applicatif construit.

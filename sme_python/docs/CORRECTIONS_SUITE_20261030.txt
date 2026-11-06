@@ -1,0 +1,224 @@
+IMPRESSION — SUITE DES CORRECTIONS, LOT 7
+30 octobre 2026
+
+Racine : C:\Users\MONSTER\Desktop\GN\Impression\sme_python
+Les chemins suivants sont relatifs à cette racine.
+Ce rapport complète CORRECTIONS_TECHNIQUES_20261030.txt : les points décrits
+ici ont été repris après les 753 tests du précédent lot. Le statut exact du
+nouveau portable et de ses contrôles est enregistré dans :
+  build/corrections_20261030_lot7/validation_summary.json
+
+PROTECTION DU TRAVAIL EXISTANT
+
+Branche feature/mysql-migration conservée, sans commit ni reset. Les empreintes
+de départ et les copies initiales des fichiers concernés sont conservées dans
+build/corrections_20261030_lot7/. Aucune modification des fichiers synchronisés
+sources/ du projet NE SHOP. L'accès au dépôt Impression, situé hors du nouveau
+dossier actif, a été effectué par les commandes explicitement autorisées.
+Les tests utilisent des données synthétiques et une instance MySQL jetable sur
+loopback. Les connexions ODBC et aux bases réelles sont bloquées par le lanceur.
+Aucune nouvelle migration ni modification d'un schéma de production.
+
+L7-01 [P1 CONFIRMÉ] — POSITION ET FICHE COMPLÉMENTAIRE
+
+Fichiers :
+  src/sme_gend/ui/views/edition_sme_view.py
+  src/sme_gend/services/padmin_satellite_apply.py
+  src/sme_gend/ui/views/malade_punis_view.py
+  src/sme_gend/services/personnel_service.py
+
+Avant : Édition SME enregistrait la position puis ouvrait la modale. Une
+annulation ou un échec déclenchait une seconde modification pour revenir à
+l'ancienne position. Une panne pendant ce retour pouvait laisser une position
+sans sa fiche. Les modifications groupées et Malades/Punis avaient des chemins
+présentant le même problème ; certains remplacements contournaient la modale.
+
+Après : les informations sont recueillies avant la première modification de
+l'agent. Position, fiche, synchronisation et journal MySQL partagent ensuite une
+transaction courte. Aucun verrou transactionnel n'est conservé pendant la saisie.
+Annuler ne crée ni modification d'agent ni entrée d'annulation en session.
+Les signaux de succès sont émis après la validation de la transaction.
+Les traitements groupés conservent les réussites par agent et annulent toutes
+les écritures de l'agent en échec, sans écriture compensatoire supplémentaire.
+Le formulaire satellite partagé est recueilli une seule fois avant le groupe.
+
+Positions couvertes : CongéAdmin, CongéExp, Détaché, Déserteur, Inst Mise Route,
+Punis, Prison MA, Malade, Mission et les trois types de stages existants.
+Les fonctions de modale existantes gardent leur comportement direct par défaut ;
+le nouveau mode prepare_only renvoie une écriture différée aux écrans corrigés.
+Les annulations volontaires ultérieures de session conservent leur fonctionnement.
+
+Vérification : annulation, échec de fiche, succès, modification groupée,
+remplacements, écran Malades/Punis et formulaires différés testés. Le test natif
+injecte un échec après un vrai INSERT : position et registre sont annulés ensemble.
+Un autre test applique une mission à deux agents, échoue sur le second après
+son INSERT et vérifie que le premier reste enregistré et le second inchangé.
+
+L7-02 [P1 CONFIRMÉ] — ÉCRITURES DIRECTES DU DOSSIER
+
+Fichiers :
+  src/sme_gend/services/dossier_write.py (nouveau)
+  src/sme_gend/services/agent_dossier_service.py
+  src/sme_gend/services/agent_dossier_events_service.py
+  src/sme_gend/services/personnel_service.py
+
+Les créations, modifications et suppressions passant par ces deux services
+partagent une transaction avec leur projection et leur journal existants.
+Une révision partagée est publiée dans la transaction pour les autres postes.
+Les appels imbriqués réutilisent la transaction et la publication de l'appelant.
+Un échec de projection, de journal ou de publication annule les écritures métier.
+sync_fiche=False continue à conserver la projection sans modification, tout en
+signalant aux autres postes que l'historique a changé.
+
+Les mises à jour et suppressions de diplômes, grades, affectations et distinctions
+refusent un identifiant absent du dossier affiché. Auparavant, l'absence dans la
+liste de cet agent n'empêchait pas l'écriture par identifiant dans le dépôt.
+Les trois écritures de maladie du service dossier contrôlent aussi la politique
+de modification d'historique, comme les autres événements de ce service.
+
+Tests : huit combinaisons famille/opération pour l'appartenance au dossier,
+trois contrôles de permission maladie, annulation native sur échec de projection,
+journal et publication, conservation d'un événement appartenant à un autre agent.
+
+L7-03 [P1 CONFIRMÉ] — INITIALISATION RÉCURSIVE ET ATTENTE
+
+Fichiers :
+  src/sme_gend/repositories/mysql_common.py
+  src/sme_gend/repositories/mysql_connection.py
+  src/sme_gend/services/mysql_import_period.py
+
+Cause : la migration des distinctions construisait un dépôt qui relançait
+l'initialisation alors qu'elle était en cours. Une nouvelle session demandait
+le verrou détenu par la première et attendait environ 30 secondes ; l'erreur
+était ensuite ignorée. Le référentiel pouvait rester vide malgré un succès annoncé.
+
+Correction : une initialisation en cours dans le même thread n'est pas relancée.
+Un verrou imbriqué sur la même identité de base garde la session propriétaire
+jusqu'à la sortie du contexte externe. Les autres bases gardent leurs verrous
+distincts. Une erreur nettoie l'état local et permet un nouvel essai.
+Le délai de lecture de la connexion dédiée au verrou est de 65 secondes pour
+couvrir l'attente GET_LOCK de 60 secondes annoncée. Les connexions métier ne
+changent pas de délai. Un échec d'alimentation des distinctions est explicite.
+Les routines existantes d'initialisation sont conservées, y compris le remplissage
+des référentiels vides ; aucune table existante renseignée n'est vidée par ce lot.
+
+Mesure sur exactement le même lot de 81 tests et des bases jetables neuves :
+  avant la correction d'initialisation : 237,34 s
+  après : 27,95 s
+Ce résultat caractérise ce lot de tests et ses initialisations, pas toutes les
+opérations de l'application. Il inclut la disparition des attentes fautives.
+Tests natifs : référentiels réellement renseignés et verrou encore indisponible
+pour une autre session après la sortie du contexte imbriqué, jusqu'à la sortie externe.
+Référence MySQL : https://dev.mysql.com/doc/refman/8.0/en/locking-functions.html
+
+L7-04 [P1 CONFIRMÉ] — MOIS DU JOURNAL HISTORIQUE
+
+Fichier : src/sme_gend/services/sensitive_audit_log.py
+Un événement saisi dans septembre pouvait être journalisé sous octobre, mois
+actif global. Le journal utilise désormais le mois explicite, puis celui des
+settings de la transaction, avant le mois actif global en dernier recours.
+Le test natif reproduisait 2026-10 au lieu de 2026-09 et vérifie la correction.
+
+L7-05 [P1 CONFIRMÉ] — DLL ICU ET CONTRÔLE DU PORTABLE
+
+Fichiers : build/sme_gendarmerie_portable.spec ; scripts/package_verified_portable.py ;
+tests/test_portable_template_safety.py.
+Le premier binaire compilé échouait au chargement de QtCore. L’analyse PE et
+le manifeste PyInstaller ont identifié une icuuc.dll provenant de Poppler,
+présente dans le PATH des outils. Ses exports suffixés _78 ne fournissaient pas
+les symboles de l’API ICU Windows attendus par Qt6Core. L’analyse des imports de
+l’ensemble des binaires a confirmé que Qt6Core était le seul consommateur de
+ce nom de DLL. Son retrait du nouveau build a rétabli l’autotest.
+La recette exclut désormais ces noms d’API ICU natives du bundle Windows pour
+laisser le chargeur utiliser l’implémentation du système. Aucune fonctionnalité
+ni dépendance utile à une autre fonction n’a été retirée.
+Référence : https://learn.microsoft.com/en-us/windows/win32/intl/international-components-for-unicode--icu-
+Le packaging lance obligatoirement --self-test-report avec profil temporaire
+et Qt hors écran avant de publier une archive. Il refuse un échec de processus,
+un rapport négatif, un rapport non frozen ou des contrôles incomplets. Les cinq
+cas d’acceptation/refus sont testés. SELF_TEST.json et BUILD_INFO.json conservent
+le résultat dans le portable.
+
+L7-06 [P2 CONFIRMÉ] — GÉNÉRATION ACCESS DEPUIS PYTHON
+
+Fichiers : scripts/package_verified_portable.py ; scripts/New-EmptyAccessTemplate.ps1 ;
+tests/test_portable_template_safety.py.
+L’héritage de PSModulePath depuis PowerShell 7 empêchait Windows PowerShell de
+charger Get-FileHash lorsqu’il était lancé depuis Python. Ce chemin de modules
+est retiré de l’environnement enfant sans dépendre de la casse des noms Windows.
+Les erreurs PowerShell sont maintenant remontées explicitement par le packager.
+Le remplacement d’un gabarit déjà existant échouait aussi : le paramètre $null
+était converti en chaîne vide par Windows PowerShell pour File.Replace. Le
+paramètre [NullString]::Value préserve l’opération atomique sans chemin de sauvegarde.
+Le défaut puis la correction ont été reproduits sur des fichiers texte jetables
+et sur des copies du gabarit. Le remplacement d’un gabarit déjà présent a ensuite
+réussi dans le packaging complet ; l’original Access n’a pas été modifié.
+
+VALIDATIONS EXÉCUTÉES
+
+  ..\.venv\Scripts\python.exe -B scripts/run_isolated_tests.py --mysql-test-instance build/corrections_20261029/mysql_test_instance.json tests -q --tb=short
+Résultat final : 804 tests réussis, 8 avertissements, 72,23 s.
+Les 19 tests natifs MySQL sont inclus, sans test d'intégration sauté.
+51 cas de test étaient ajoutés lors du passage complet de 804 tests.
+Après le dernier ajustement du générateur PowerShell, les 10 tests ciblés
+d’empaquetage ont réussi en 0,34 s, dont un cas supplémentaire (52 cas ajoutés
+au total). Les sources métier et les 19 tests MySQL restent inchangés depuis
+le passage complet ; aucune nouvelle exécution sur une base réelle.
+559 fichiers Python ont passé l'analyse syntaxique.
+Les avertissements Qt invalidateFilter et Pandas/xlrd restent visibles.
+
+Les fixtures des tests unitaires à dépôts simulés ont été adaptées pour garder
+leur isolation. Les garanties de transaction sont vérifiées séparément avec
+un vrai MySQL jetable. Les tests d'écriture compensatoire ont été remplacés par
+des assertions d'annulation transactionnelle et d'absence de seconde écriture.
+Aucun test n'a été désactivé pour obtenir ce résultat.
+
+L'autotest source existant --self-test-report a aussi été exécuté avec réseau et
+bases bloqués, profil temporaire et Qt hors écran. Résultat : imports, ressources,
+interface utilisateurs et boucle de connexion réussis. Le contrôle du binaire
+reconstruit et la vérification du ZIP sont consignés dans validation_summary.json.
+
+CONSTRUCTION ET DÉPLOIEMENT
+
+La construction cible un nouveau dossier et conserve le portable précédent :
+  dist/corrections_20261030/SME_Gendarmerie/SME_Gendarmerie.exe
+  dist/corrections_20261030/SME_Gendarmerie_portable.zip
+Copier le dossier portable complet, avec _internal/, modeles/ et les autres
+ressources ; l'exécutable seul ne constitue pas la distribution.
+Le packaging vérifie le gabarit Access vide et refuse les MDB/ACCDB non vérifiés,
+y compris dans les ressources internes. Le fichier source est conservé intact.
+Les médias et modèles de documents restent livrés selon la politique existante.
+
+LIMITES ET SUITE
+
+- A02 : le remplacement complet DROP/CREATE reste non atomique, conformément
+  au choix utilisateur. Une sauvegarde obligatoire ne supprime pas le risque
+  de panne à mi-restauration. La bascule préparée reste un lot distinct.
+- L’atomicité décrite concerne MySQL. Les miroirs JSON locaux et les autres
+  effets de fichiers ne constituent pas une transaction commune avec la base ;
+  ils ne doivent pas être utilisés pour conclure au succès d’une écriture annulée.
+- Les transactions ajoutées couvrent les services et écrans cités. Les appels
+  directs aux dépôts depuis d'autres modules ne reçoivent pas automatiquement
+  les mêmes garanties. Les éditions concurrentes d'un même événement historique
+  n'ont pas encore toutes une comparaison avec le cliché présenté dans la modale.
+- Les essais de partage UNC et d'actualisation sur deux vrais postes restent
+  nécessaires. Les tests natifs de ce lot utilisent un seul serveur jetable.
+- TLS n'est pas déployé : CA et nom serveur restent à configurer.
+- Le test binaire hors connexion ne valide pas une session métier connectée à
+  MySQL. Valider en préproduction : changement de position, annulation, droits,
+  export Access complet, import puis actualisation sur l'autre poste.
+- Les avertissements de dépréciation et la maintenance des grandes fonctions
+  restent ouverts. Aucun gain général de performances n'est revendiqué.
+
+CONTRÔLE GIT ET RETOUR ARRIÈRE
+
+Le manifeste et le patch sont limités à ce lot, sans inclure les changements
+des corrections précédentes ni les modifications préexistantes de l'utilisateur :
+  build/corrections_20261030_lot7/changes_manifest.json
+  build/corrections_20261030_lot7/corrections_only.patch
+Les copies initiales sont dans le sous-dossier baseline/. Avant tout retour de
+sources, vérifier l'applicabilité du patch inversé ; ne pas écraser du travail
+ultérieur avec ces copies. Pour le portable, conserver l'ancien dossier et
+une sauvegarde récente de la base et des médias avant le déploiement.
+L'instance MySQL jetable est arrêtée après les contrôles ; ses fichiers sous
+build sont conservés. Aucun serveur ou fichier de production n'est supprimé.

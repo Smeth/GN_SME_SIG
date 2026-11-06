@@ -1,0 +1,178 @@
+IMPRESSION — PRÉFÉRENCES PARTAGÉES DU WORKSPACE SME — LOT 25
+31/10/2026
+
+Protection et périmètre
+Racine : C:\Users\MONSTER\Desktop\GN\Impression\sme_python.
+Branche feature/mysql-migration conservée ; 520 entrées Git déjà présentes au
+début du lot. Originaux sous baseline/, empreintes et état Git initial conservés.
+Aucun reset, commit, déploiement, paquet ou exécutable généré. EXE et ZIP existants
+vérifiés inchangés. Aucun fichier du sources/ du miroir modifié.
+Aucune donnée réelle, base de production, archive ou photo utilisateur modifiée.
+MySQL 8.0.40 jetable sur 127.0.0.1:64062 avec datadir sous build vérifié ; tests
+limités à leurs profils et schémas synthétiques. Réseau externe et ODBC interdits.
+Aucune dépendance ajoutée ni migration de schéma réelle nécessaire.
+
+L25-01 — P1 confirmé — écrasement des préférences partagées
+Emplacements : src/sme_gend/services/sme_workspace_service.py:99,
+103 ; src/sme_gend/config/sme_context.py:283.
+Scénario : deux postes lisent les mêmes préférences ; A enregistre son signataire,
+B réécrit son ancien dictionnaire ou son ancien SmeContext et remplace A.
+Avant correction, une reproduction acceptait cette seconde sauvegarde.
+Correction : WorkspacePreferences reste compatible dict pour les lecteurs,
+conserve la version chargée, la clé et la base, et utilise le moteur transactionnel
+du lot 24. Un dictionnaire sans version est refusé. Les quatre préférences sont
+validées : signataire texte, jour absent ou 1..31, booléen de démarrage, mode de
+présence reconnu. La normalisation de lecture historique de SmeContext reste
+inchangée. Les champs inconnus restent stockés ; les anciens mois ne sont pas
+réexposés par l'API de préférences et ne redeviennent pas des mois actifs.
+Le conflit concerne tout le document workspace : deux champs distincts peuvent
+aussi imposer un rechargement, par prudence. Pas de fusion métier automatique.
+Tests : les quatre préférences, deux sauvegardes simultanées, clé initialement
+absente et présente, version/base correcte, champs inconnus et types invalides.
+
+L25-02 — P1 confirmé — confusion entre préférences locales et partagées
+Emplacements : src/sme_gend/config/sme_context.py:283,
+load_local_sme_context ; ui/shell_window.py (_apply_theme),
+ui/views/personnel_list_view.py (colonnes), sous src/sme_gend/.
+Cause : changer le thème ou les colonnes sauvegardait aussi les quatre anciennes
+préférences partagées. Réciproquement, enregistrer le signataire réécrivait les
+anciens paramètres locaux restés dans l'écran, même sans modification locale.
+Deux reproductions distinctes confirmaient ces réécritures.
+Correction : état initial local et partagé conservé séparément. Un état inchangé
+n'est pas réécrit. Les chemins thème/colonnes demandent explicitement une sauvegarde
+locale seule et ne chargent pas les réglages SQL pour cette sauvegarde.
+Les listes de colonnes sont copiées dans l'instantané pour détecter les changements
+en place sans partager une liste mutable avec le brouillon.
+Tests : sauvegarde locale sans accès à get_settings/MySQL, contexte local sans
+réinterprétation d'un ancien mois, aucune réécriture locale lors d'un changement
+partagé seul, aucune réécriture partagée lors d'un changement local seul.
+
+L25-03 — P1 confirmé — réactivation involontaire d'un ancien mois
+Emplacement : src/sme_gend/config/sme_context.py:283.
+Scénario reproduit : un contexte de septembre reste affiché ; un autre poste
+active octobre ; le premier enregistre uniquement le signataire. Le code précédent
+repromouvait septembre car il comparait le contexte au mois courant de MySQL.
+Correction : seul un mois explicitement changé par rapport au contexte chargé
+déclenche la transition. La sauvegarde du signataire interdit cette promotion.
+set_active_mois, ses règles d'ouverture/réouverture, son audit et sa notification
+sont conservés sans modification ; les tests de clôture existants sont rejoués.
+Cela ne constitue pas un nouveau contrôle de conflit sur deux changements explicites
+concurrents du mois actif : cette opération métier reste un mécanisme distinct.
+
+L25-04 — P1 confirmé — erreurs silencieuses et faux succès UI
+Emplacements : src/sme_gend/config/sme_context.py:283,
+src/sme_gend/ui/views/sme_workflow_panel.py (refresh_workflow, sauvegarde signataire),
+src/sme_gend/ui/sme_session_dialog.py, src/sme_gend/ui/shell_window.py.
+Cause : les erreurs centrales étaient journalisées puis absorbées ; l'écran pouvait
+annoncer un succès. Le signataire et le dialogue de démarrage rechargeaient le
+contexte juste avant d'y recopier leurs anciens champs, masquant ainsi les conflits.
+Correction : erreurs de sauvegarde propagées et affichées ; écrans liés au contexte
+affiché, brouillon conservé après conflit. Actualisation automatique d'un signataire
+propre, conservation d'un champ modifié en cours. Recharger demande confirmation
+et ne remplace les champs qu'après chargement réussi. Au démarrage, une validation
+échouée laisse la boîte ouverte avec son mois et sa case cochée/décochée.
+Annuler/fermer conserve la tentative historique de sauvegarder la seule case de
+démarrage ; si elle échoue, le message est explicite et l'utilisateur peut sortir.
+Les appels de changement de mois du shell affichent aussi leurs erreurs.
+Une panne de chargement peut encore rendre un contexte local pour l'affichage,
+mais celui-ci ne porte aucun jeton de workspace et ne peut écrire de faux défauts.
+
+L25-05 — P1 confirmé — ancien signataire local prioritaire sur MySQL
+Emplacement : src/sme_gend/config/sme_context.py:154.
+Cause : l'ancien sme_context.json local était consulté avant le workspace central.
+Cela pouvait produire des signataires différents entre postes, même après effacement
+explicite du signataire partagé. Deux reproductions unitaires l'ont confirmé.
+Correction : le workspace central, y compris sa valeur vide, est prioritaire.
+Le profil legacy ne reste qu'un repli d'audit en cas d'absence/indisponibilité
+centrale. La priorité de la session authentifiée dans resolve_audit_actor est
+préservée. Il s'agit d'un signataire par défaut, pas d'une modification des comptes.
+Test interprocessus : le second client relit également le signataire central récent.
+
+L25-06 — P1 confirmé par inspection — initialisation et contrats de maintenance
+Emplacements : src/sme_gend/config/sme_context.py:180,
+src/sme_gend/services/wipe_operational_data.py (_restore_post_wipe_config).
+L'import legacy utilise maintenant la version de la clé absente et abandonne
+si un autre client a gagné, sans réappliquer son ancien mois. La remise à zéro
+autorisée de maintenance charge un instantané puis remet les préférences connues
+à leur valeur par défaut ; son test utilise uniquement des simulacres et n'exécute
+aucune suppression. Les autres fonctions de wipe et restauration restent inchangées.
+
+Transactions et synchronisation
+Préférences et shared_data_revision sont validées dans la même transaction.
+Le moteur commun conserve le verrou anticipé, les savepoints et les transactions
+externes. Les versions publiques et instantanés avancent au commit réel seulement.
+Les versions en attente permettent deux sauvegardes dans la même transaction ;
+une annulation ne prête pas sa version à une transaction ultérieure. Échec du
+signal : données annulées, ancienne version utilisable pour une reprise explicite.
+Une sauvegarde sans changement n'émet aucun signal ; un contexte inchangé peut
+être sauvegardé sans SQL même s'il est désormais périmé, puisqu'il n'écrit pas.
+Le polling existant des postes reste inchangé, à intervalle de 10 secondes ; il
+reporte ses rafraîchissements pendant les saisies/modalités protégées. Il ne s'agit
+pas d'une garantie de mise à jour instantanée d'un champ en cours de modification.
+
+Preuves et tests exécutés
+- Avant correction : 5 échecs natifs, logs before_mysql.log (7,41 secondes).
+- Signataire legacy : 2 échecs, 1 cas de repli réussi, log before_actor.log.
+- Réécriture locale inchangée : 1 échec reproduit, log before_local.log.
+- Suite unitaire finale complète : 1173 réussites, 8 avertissements signalés,
+  32.29 secondes, log final_unit_confirmed.log.
+- MySQL ciblé : 85 réussites, 420 autres cas non sélectionnés,
+  150.17 secondes, log final_mysql.log. Comprend les 24 nouveaux
+  scénarios workspace, les configurations du lot 24, les transitions/clôtures,
+  journaux et synchronisations retenus par la commande exacte conservée.
+- 32 nouveaux cas unitaires + 24 nouveaux cas MySQL = 56 nouveaux cas.
+  Un ancien cas classant workspace hors du garde générique a été remplacé par
+  le contrôle correspondant de sauvegarde sans version désormais protégé.
+- Deux scénarios additionnels avec processus Python distincts : API workspace et
+  SmeContext. Instantané chargé avant le premier commit, conflit explicite,
+  premier résultat et révision préservés ; nouvelle lecture des quatre préférences
+  et du signataire d'audit confirmée. Preuve finale : workspace_conflict_i9572k_b\validation.json.
+- Revue structurelle : 40 méthodes préservées, noyau du garde commun et dépôts SQL
+  inchangés ; transitions de mois, clôture, auth et restauration inchangées.
+La première passe unitaire (1 172 réussites) est conservée ; la dernière protection
+locale a ensuite été ajoutée et la suite complète rejouée sur les sources finales.
+Les empreintes et dates garantissent que ces sources correspondent aux tests finaux.
+Le détail Git, les empreintes EXE/ZIP et le contrôle syntaxique sont consignés dans
+validation_summary.json ; changements précis dans changes_manifest.json et
+corrections_only.patch. Aucun module non testé n'est déclaré exempt de bugs.
+
+Performance
+Les tests constatent zéro appel SQL pour une sauvegarde explicitement locale et
+pour un contexte partagé inchangé. Cela supprime des écritures et notifications
+inutiles. Aucun gain de latence global chiffré : aucun benchmark représentatif
+avant/après. Le rendu du thème peut toujours rafraîchir le tableau de bord.
+Le verrou partagé peut attendre une autre transaction de référentiel/configuration ;
+ne pas retirer cette protection pour masquer une contention. Préférer ensuite un
+profilage des transactions longues et volumes réels, sur une base de test.
+
+Limites et suite
+1. Pas de PC de travail ni partage SMB réel disponible. Ces preuves concernent
+   MySQL local et des clients indépendants ; les lettres réseau, UNC, ACL et
+   interruptions SMB restent à valider sur site, sans redemander leurs chemins ici.
+2. Les vieux exécutables et outils SQL directs peuvent contourner les contrôles.
+   Prévoir une version homogène lors d'un futur packaging explicitement autorisé.
+3. Thème/colonnes, préférences partagées et transition métier du mois ne forment
+   pas une transaction distribuée unique. Une opération combinée peut enregistrer
+   les préférences avant l'échec d'un changement de mois ; vérifier l'état réel
+   puis recharger avant de recommencer. Les méthodes métier de mois restent à
+   auditer séparément pour les changements explicites simultanés, sans déclarer
+   cette correction suffisante pour toutes les transitions possibles.
+4. Le document workspace est versionné en bloc ; pas de fusion champ par champ.
+   Les empreintes comparent l'état ; un aller-retour exactement aux valeurs initiales
+   n'est pas distingué. Un compteur historique nécessiterait un lot de schéma dédié.
+5. En panne centrale, l'affichage local et le repli d'identité legacy restent
+   possibles ; ils ne permettent pas de sauvegarder un workspace sans version.
+6. Interblocage ou acquittement perdu du commit : vérifier l'état avant toute
+   nouvelle tentative. Aucun rejeu automatique des opérations métier ajouté.
+
+Validation et retour arrière
+Sur deux clients avec données synthétiques, modifier le même signataire : A réussit,
+B garde son texte et signale le conflit ; Recharger annulé conserve B, puis une
+recharge réussie affiche A. Refaire pour les autres préférences via leur API, et
+pour la case du dialogue de démarrage. Vérifier qu'un changement de thème/colonnes
+ne réécrit pas le workspace et qu'un signataire ne réactive pas un ancien mois.
+Observer la révision uniquement après commit et l'absence d'effet après rollback.
+Répéter sur deux PC du site avec les mêmes sources avant une diffusion autorisée.
+Pour un retour de sources, utiliser baseline/ et le patch sur une copie contrôlée,
+en conservant toute modification ultérieure. Aucun reset global, aucune migration
+réelle ni restauration de production nécessaire. Aucun exécutable généré.

@@ -1,0 +1,268 @@
+IMPRESSION — RELEVÉ DES CORRECTIONS ET VALIDATIONS
+30 octobre 2026
+
+PÉRIMÈTRE ET PROTECTION
+
+Racine : C:\Users\MONSTER\Desktop\GN\Impression\sme_python
+Les chemins ci-dessous sont relatifs à cette racine.
+Branche conservée : feature/mysql-migration. Aucun commit ni reset effectué.
+Le dépôt contenait déjà de nombreuses modifications et suppressions. Elles
+ne sont pas attribuées à ce lot. Les originaux des fichiers modifiés ont été
+conservés dans build/corrections_20261029/baseline/. Les empreintes initiales
+des sources, scripts, tests et documents permettent de contrôler le périmètre.
+Les fichiers de données utilisateur et la base de production n'ont pas servi
+aux tests de correction. Aucun schéma de production n'a été modifié.
+
+LOT 1 — RESTAURATION, CHEMINS ET INTÉGRITÉ [P0/P1]
+
+Fichiers principaux :
+  src/sme_gend/services/backup_restore_service.py
+  src/sme_gend/services/backup_sql.py (nouveau)
+  src/sme_gend/services/safe_paths.py (nouveau)
+  src/sme_gend/services/personnel_media.py
+  src/sme_gend/repositories/app_config_repository.py
+
+Causes confirmées : chemins d'archive insuffisamment contrôlés, filtrage SQL
+par recherche de texte pouvant confondre table et contenu d'une valeur,
+découpage des instructions incompatible avec des chaînes multilignes,
+erreurs de configuration ignorées et remplacement de fichiers non atomique.
+
+Corrections :
+- Vérification préalable de tous les noms ZIP : traversées, chemins absolus,
+  UNC, lecteurs Windows, noms réservés, doublons et liens interdits.
+- Validation des destinations et écritures de fichiers par remplacement
+  atomique. Une copie de photo interrompue conserve le fichier précédent.
+- Analyse du dialecte SQL produit par l'application, y compris échappements,
+  commentaires et chaînes multilignes. Le filtre examine la table cible.
+  Les instructions étrangères au dialecte sont refusées. Ce mécanisme ne
+  constitue pas un bac à sable pour exécuter du SQL externe non fiable.
+- Connexion dédiée à la restauration SQL, sauvegarde obligatoire avant le
+  remplacement, erreurs explicites, nettoyage de session et fermeture.
+- Validation de toutes les clés et contenus JSON avant les premières
+  écritures ; refus des clés dupliquées et des imports incomplets.
+- Import des clés de configuration dans une transaction unique. Un échec sur
+  la deuxième clé annule aussi la première. Les comptes à préserver sont
+  filtrés sans dépendre de la casse de la clé.
+- Les erreurs des journaux MySQL interrompent une écriture métier en cours
+  au lieu d'annoncer silencieusement un succès non tracé.
+
+Vérifications : tests/test_restore_safety.py ; tests/integration/test_restore_mysql.py.
+Les premières reproductions échouaient avant correction, notamment les cinq
+cas de configuration invalide/incomplète et le filtrage des comptes en majuscules.
+Les tests natifs MySQL vérifient Unicode, sauts de ligne, données binaires,
+échec DML, annulation de la configuration et absence d'écriture partielle.
+
+Limite A02 maintenue conformément à la décision utilisateur : DROP/CREATE des
+tables lors d'une restauration complète reste non atomique, car MySQL valide
+implicitement le DDL. La sauvegarde et le diagnostic réduisent le risque mais
+ne garantissent pas une restauration complète en cas de panne à mi-parcours.
+Prévoir l'arrêt coordonné des postes pour une restauration. La bascule vers
+des tables préparées et validées sera un lot séparé.
+
+LOT 2 — CONCURRENCE, CACHE ET EXPORTS EXCEL [P1/P2]
+
+Fichiers : repositories/mysql_pool.py ; services/liste_generale_cache.py ;
+repositories/mysql_numerique_repository.py ; repositories/numerique_satellite_repository.py ;
+services/export_workbook_tables.py, sous src/sme_gend/.
+
+- Les générations du cache empêchent qu'une lecture ancienne en cours
+  réintroduise des données après une invalidation. Accès protégés par verrou.
+- Le pool tient compte d'une empreinte du mot de passe, retire les anciens
+  pools et ferme les connexions rendues à un pool retiré. L'attente d'une
+  connexion saturée est bornée à 30 secondes.
+- Les exports sélectionnent le congé du type correspondant à la position
+  administrative, plutôt que simplement le dernier congé de tout type.
+- Les textes commençant par « = » restent du texte dans les tables exportées.
+- Les styles Excel sont réutilisés ; le type des colonnes est calculé une fois.
+
+Tests : tests/test_cache_pool_export_safety.py ; test MySQL de congés typés.
+
+Mesure reproductible sur 5 700 lignes et 8 colonnes, construction puis
+sauvegarde XLSX en mémoire, trois essais par version :
+  avant : 8,267 / 7,913 / 7,102 s ; médiane 7,913 s
+  après : 2,206 / 2,691 / 2,226 s ; médiane 2,226 s
+  rapport des médianes : 3,55 fois plus rapide sur cette table synthétique.
+Les valeurs, polices, bordures, alignements, fonds, formats numériques et
+hauteurs de lignes ont été comparés entre les deux versions.
+Ce résultat ne mesure ni les requêtes réseau ni l'ensemble de l'application.
+Une première mesure distincte donnait 5,799 → 1,867 s (3,11 fois).
+Reproduction :
+  ..\.venv\Scripts\python.exe -B scripts/benchmark_export_table.py
+Le script utilise la copie initiale du module dans build/corrections_20261029/baseline/.
+Résultats : build/corrections_20261029/export_benchmark_reproducible.json.
+
+LOT 3 — ÉCRITURES PERSONNEL ET HISTORIQUE [P0/P1]
+
+Fichiers : services/personnel_service.py ; repositories/mysql_agent_repository.py ;
+repositories/liste_generale_repository.py ; repositories/mysql_connection.py ;
+repositories/mysql_agent_dossier_repository.py ; services/agent_dossier_sync.py ;
+services/app_config_store.py ; services/audit_log.py ; services/sensitive_audit_log.py ;
+ui/views/edition_sme_view.py, sous src/sme_gend/.
+
+- Création, modification, suppression et restauration via PersonnelService
+  partagent une transaction pour la fiche, l'historique et le journal MySQL.
+- Une modification compare le cliché lu avec les données verrouillées : le
+  deuxième rédacteur reçoit un conflit au lieu d'écraser le premier.
+- Les synchronisations utilisent le mois consulté. Grades, diplômes et
+  affectations futurs ne doivent plus contaminer une période historique.
+  Si seuls des événements futurs existent, le cliché historique est conservé.
+- L'initialisation DDL n'est pas déclenchée à l'intérieur de cette transaction.
+
+Tests : tests/test_personnel_write_safety.py ; tests MySQL d'échec d'historique,
+de deux rédacteurs concurrents et de projection des grades sur plusieurs mois.
+L'échec de l'historique conservait auparavant une fiche déjà modifiée ; le test
+vérifie maintenant son annulation. Un seul des deux rédacteurs gagne le conflit.
+
+Limite A06 : toutes les écritures directes des registres et toutes les étapes
+d'une modale de position ne sont pas encore regroupées dans la même transaction.
+Les appelants historiques sans paramètre expected restent compatibles et ne
+bénéficient pas automatiquement du contrôle de cliché. Ne pas extrapoler les
+garanties de PersonnelService à tous les dépôts de l'application.
+
+CORRECTION COMPLÉMENTAIRE — BASE CIBLE [P0]
+
+Fichiers : repositories/mysql_common.py ; data/schema/mysql_smegend_unified.sql.
+Le schéma comportait un USE smegend qui pouvait détourner une initialisation
+vers une autre base que celle configurée. Il est retiré. L'application vérifie
+la base réellement sélectionnée et respecte la sensibilité à la casse annoncée
+par le serveur. Test unitaire dédié et essai sur une base jetable portant un
+autre nom ; aucune base smegend n'est créée par cet essai.
+Aucune nouvelle migration destructive ou modification de schéma de production.
+
+LOT 4 — INTERFACE, DÉPENDANCES ET TESTS [P1/P2/P3]
+
+Fichiers : ui/views/gain_perte_view.py ; ui/views/personnel_list_view.py ;
+services/sot_status_service.py ; ui/shell_window.py ; __main__.py, sous src/sme_gend/ ;
+pyproject.toml ; requirements.txt ; constraints-tested-win-py313.txt.
+
+- Une erreur de chargement des gains/pertes conserve les anciennes lignes,
+  signale l'échec et rétablit l'état de l'interface au lieu d'afficher du vide.
+- Les indicateurs de qualité des dossiers sont chargés en arrière-plan.
+  Une réponse devenue ancienne n'écrase pas le résultat du nouveau contexte.
+- La fermeture attend la fin du contrôle partagé sans bloquer le thread Qt.
+- Deux hooks d'erreurs de threads identiques ont été supprimés après comparaison.
+- Dépendances d'import Excel déclarées ; dépendances d'installation harmonisées.
+  Pillow 13 installé sur Python 3.13 ; contraintes des versions testées fournies.
+- Des tests obsolètes ont été ajustés : absence de réattribution implicite d'un
+  droit retiré, intitulé de fonction qualifié, initialisation Qt complète et
+  simulation du tableau de bord pour éviter une connexion lors du constructeur.
+  Aucun test désactivé et aucune fonctionnalité supprimée pour faire passer la suite.
+
+Limites : pas de preuve de couverture exhaustive des workers Qt ; fonctions
+longues et duplication restantes (A25) à traiter progressivement. Les contraintes
+fournies ciblent Windows/Python 3.13 ; les autres versions compatibles déclarées,
+notamment Python 3.10, n'ont pas reçu cette validation de sécurité et d'installation.
+Pandas/xlrd et invalidateFilter() émettent encore des avertissements de dépréciation.
+
+LOT 5 — PHOTOS, DOCUMENTS ET SAUVEGARDES [P1/P2]
+
+Fichiers : services/parcours_pdf_export.py ; services/limite_age_service.py ;
+config/user_paths.py ; ui/paths_config_form.py ; services/backup_restore_service.py,
+sous src/sme_gend/.
+
+- Une grande photo est redimensionnée pour le PDF, en conservant la transparence
+  si présente. Le fichier original n'est pas modifié.
+- Fichiers DOCX/PDF intermédiaires créés de façon sûre et nettoyés ; copie finale
+  atomique ; journalisation du PDF final plutôt que du seul document intermédiaire.
+- Le choix d'un dossier local ne remplace le partage que pour ce poste, selon
+  la décision utilisateur. La racine partagée reste disponible aux autres postes.
+- Les nouvelles sauvegardes excluent mysql_password du fichier paths.json
+  archivé ; la configuration source reste intacte. Les anciennes archives restent
+  lisibles. Les comptes applicatifs et leurs empreintes restent sauvegardés.
+
+Tests : tests/test_documents_and_media_safety.py ; tests/test_shared_media_and_sync.py.
+La conversion LibreOffice est simulée dans le test. Son exécution native et un
+essai réel SMB avec deux postes et des lettres différentes restent à effectuer.
+Les anciennes sauvegardes contenant un mot de passe ne sont pas réécrites.
+
+LOT 6 — GABARIT ACCESS VIDE ET DISTRIBUTION [P1, A20]
+
+Fichiers : scripts/New-EmptyAccessTemplate.ps1 (nouveau) ;
+scripts/package_verified_portable.py ; scripts/build_portable.cmd ;
+build/sme_gendarmerie_portable.spec ; scripts/PORTABLE_LISEZMOI.txt.
+
+Cause confirmée : la distribution copiait directement la base Access présente
+dans les modèles, y compris dans _internal/. Sa taille était de 50 294 784 octets.
+
+Correction conforme à la décision utilisateur : garder un gabarit compatible
+mais vide. Le générateur copie la source dans un dossier de travail unique,
+refuse les tables liées et requêtes externes, vide les tables utilisateur sans
+supprimer leurs relations, puis compacte la copie. La structure des champs,
+index et relations est comparée et chaque table utilisateur doit compter zéro
+ligne. La source est contrôlée par SHA-256 avant/après et n'est pas ouverte en écriture.
+Les sources MDB/ACCDB sont exclues des ressources PyInstaller brutes. Le ZIP est
+refusé si un fichier Access non vérifié subsiste. Sa publication est atomique.
+
+Essai natif réalisé avec DAO sur une copie :
+  26 tables utilisateur vérifiées vides ; structure comparée sans divergence ;
+  source inchangée ; gabarit final de 700 416 octets.
+  build/corrections_20261029/empty_template/smegend.mdb
+  build/corrections_20261029/access_template_validation.json
+Tests de distribution : tests/test_portable_template_safety.py, dont un ZIP
+complet synthétique, refus d'une base interne non vérifiée et contrôle d'empreinte.
+DAO/Access Database Engine est nécessaire sur le poste de construction.
+La règle PowerShell RemoteSigned est limitée au processus du générateur, sans
+modification permanente de la politique de la machine.
+Les médias personnalisés sont conservés dans le portable ; la politique du
+gabarit vide concerne Access et ne rend pas les photos distribuées anonymes.
+
+VALIDATION FINALE
+
+Commande exécutée depuis la racine sme_python :
+  ..\.venv\Scripts\python.exe -B scripts/run_isolated_tests.py --mysql-test-instance build/corrections_20261029/mysql_test_instance.json tests -q --tb=short
+
+Le lanceur crée un profil temporaire isolé, bloque les écritures Python hors de
+ce profil, les connexions ODBC et les réseaux externes. Seul le port loopback de
+l'instance MySQL jetable déclarée est autorisé. Les tests natifs vérifient aussi
+@@datadir avant de créer une base impression_test_<identifiant> et ne suppriment
+que cette base. Aucun lancement de l'application sur ses paramètres réels.
+Le serveur de test est arrêté après validation ; son datadir sous build est
+conservé. Il faut le relancer explicitement pour reproduire les tests natifs.
+Sans --mysql-test-instance, ces tests sont signalés comme non configurés.
+
+Le résultat exact du dernier passage est conservé dans :
+  build/corrections_20261029/validation_summary.json
+Contrôles complémentaires : pip check ; analyse syntaxique des fichiers Python ;
+revue des différences avec les copies initiales et contrôle des espaces Git.
+
+RISQUES OUVERTS ET SUITE ORDONNÉE
+
+1. A02 : concevoir et tester une restauration préparée avec bascule coordonnée,
+   contrôle des tables, arrêt des postes, sauvegarde et retour arrière éprouvé.
+2. A06 : étendre l'atomicité et la détection des conflits aux registres directs
+   et aux étapes des modales, sans transaction ouverte pendant la saisie utilisateur.
+3. Valider sur deux postes réels l'import, l'actualisation, les permissions du
+   partage UNC et le choix local d'un seul poste. Tester aussi le serveur indisponible.
+4. A14 : déployer TLS avec CA et nom serveur correspondants. Un certificat
+   commercial n'est pas obligatoire ; une CA interne est possible. Le chiffrement
+   authentifie le serveur et protège les échanges. Aucune option TLS n'a été
+   imposée sans certificat, afin de conserver la connexion existante.
+   Documentation : https://dev.mysql.com/doc/refman/8.0/en/using-encrypted-connections.html
+5. Activer et valider l'authentification du déploiement réseau et changer le
+   mot de passe initial. Le mode d'authentification désactivable existant est conservé.
+6. Reconstituer le portable avec ces sources, vérifier son démarrage sur un poste
+   de test et la génération d'un vrai export Access. Aucun nouvel exécutable
+   embarquant ces lots n'a été reconstruit pendant cette phase de correction.
+7. Réduire les avertissements Qt/Pandas, poursuivre les tests des workers,
+   mesurer les requêtes sur des données synthétiques représentatives et traiter
+   A25 progressivement. Aucun gain SQL ou réseau non mesuré n'est revendiqué.
+
+RETOUR ARRIÈRE ET CONTRÔLE DES MODIFICATIONS
+
+Pas de migration de données à annuler pour ces lots. Avant déploiement, conserver
+le portable précédent et sauvegarder MySQL/configurations/médias. Revenir à ce
+portable si la validation de préproduction échoue ; ne pas restaurer une ancienne
+base sans sauvegarder d'abord les écritures effectuées depuis le déploiement.
+
+Le manifeste et le patch décrivent uniquement les différences depuis le début
+des corrections, et non l'ensemble des changements déjà présents dans Git :
+  build/corrections_20261029/changes_manifest.json
+  build/corrections_20261029/corrections_only.patch
+La notice portable figure dans le manifeste ; son diff est omis du patch pour
+ne pas recopier une ancienne valeur d'amorçage. Les originaux restent locaux.
+Ne pas appliquer une copie initiale par-dessus du travail ultérieur. Pour un
+retour arrière de sources, examiner les différences et vérifier l'applicabilité
+du patch inversé avant toute écriture. Aucun reset global du dépôt n'est requis.
+
+Les validations disponibles ne démontrent pas l'absence de bugs. Les modules
+non couverts et les limites ci-dessus restent explicitement ouverts.

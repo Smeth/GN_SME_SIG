@@ -1,0 +1,58 @@
+Corrections du module Attestations — 1 novembre 2026
+
+Périmètre demandé : points 2 à 7 de l'audit. Point 1 laissé de côté.
+
+2. Sélections Soit transmis : un rechargement complet remplace les objets
+sélectionnés par les données fraîches et retire les personnes disparues.
+Les sélections masquées par un filtre sont conservées. Une nouvelle sélection
+externe remplace correctement la précédente.
+
+3. Chargement : un échec conserve un état explicitement non actualisé et
+désactive la génération. Le rechargement reste à réessayer. Les résultats
+obsolètes d'un ancien contexte ne sont pas réinjectés dans le nouvel écran.
+
+4. Dates : naissance et entrée en service doivent être renseignées, valides,
+non futures et chronologiquement cohérentes. Les limites hors plage et les
+règles manquantes bloquent aussi la production. Le motif est affiché et les
+actions individuelles ou groupées concernées sont désactivées.
+
+5. Grades : correspondance exacte après normalisation ou alias connu.
+Suppression de la recherche partielle qui pouvait confondre Major et
+Colonel-major. Une configuration ambiguë est refusée.
+
+6. Configuration : aucune sauvegarde automatique lors de la lecture.
+Les valeurs imposées par la table existante du logiciel restent appliquées
+en mémoire et sont verrouillées dans l'interface. Une sauvegarde contradictoire
+est refusée. Cette correction ne constitue pas une révision juridique des règles.
+
+7. Word : remplacement des positions fixes par des repères de champs.
+Les modèles avec paragraphes déplacés ou blancs supplémentaires sont testés.
+Un repère manquant, ambigu ou incompatible provoque un refus explicite avant
+publication, en préservant le fichier de destination existant.
+
+Fichiers concernés :
+- src/sme_gend/services/statutory_limits.py
+- src/sme_gend/services/limite_age_service.py
+- src/sme_gend/ui/views/soit_transmis_view.py
+- src/sme_gend/ui/views/limite_age_view.py
+- tests/test_attestations_priority_fixes.py
+- tests/test_limite_age_print_filtered.py
+
+Validation : 142 tests réussis en 5,54 secondes avec run_unit_audit.py,
+sur les corrections ciblées et les régressions configuration, exports,
+filtres, avancement et instantanés métier. Vérification diff --check réussie.
+Les tests utilisent des personnes fictives, des modèles copiés et un
+environnement isolé interdisant les connexions réelles et processus externes.
+
+Limites restantes :
+- Point 1 volontairement inchangé : les options titre, ville, références
+  et validité ne sont toujours pas toutes répercutées dans le document Word.
+- Les autres constats de priorité moyenne de l'audit restent hors de cette
+  correction : notamment filtre Soit transmis « 1–2 ans », largeur de l'écran,
+  génération groupée synchrone et enrichissement de l'historique affiché.
+- Pas de validation de pagination ou d'impression dans Word/LibreOffice réel.
+- Pas de validation de bout en bout sur la base réelle, conformément à la
+  contrainte de ne pas toucher aux données réelles.
+
+Aucune donnée réelle modifiée. Aucun exécutable généré. Modifications
+préexistantes conservées.

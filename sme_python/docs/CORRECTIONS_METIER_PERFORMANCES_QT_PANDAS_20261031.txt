@@ -1,0 +1,219 @@
+IMPRESSION — MÉTIER, SYNCHRONISATION, PERFORMANCES ET MAINTENANCE — LOT 27
+31/10/2026
+
+Résultat et périmètre
+Corrections de chemins métier confirmés : versions des historiques obligatoires,
+formulaire congés, traitement workflow et application d'un plan sexe/matricule.
+Correction de la notification lorsque des écritures personnel rejoignent une
+transaction existante. Premier lot P2/P3 mesuré : contexte du tableau de bord,
+cycle de vie des workers, avertissements Qt et lecteur XLS Pandas.
+Ce lot ne clôt pas l'ensemble des appels métier de l'application : les zones
+encore ouvertes sont énumérées ci-dessous, sans garantie globale d'absence de bugs.
+
+Protection
+Dépôt C:\Users\MONSTER\Desktop\GN\Impression ; Python sous sme_python.
+Branche feature/mysql-migration conservée ; 527 entrées Git préexistantes.
+Originaux et empreintes enregistrés avant édition ; patch limité au lot fourni.
+Aucun reset, commit, migration, exécutable ou modification de données réelles.
+sources/ du miroir est resté en lecture seule. EXE et ZIP existants contrôlés par
+SHA-256. Les tests utilisent leurs profils temporaires et schémas synthétiques,
+MySQL 8.0.40 sur 127.0.0.1:64062 avec datadir sous build vérifié. Les accès réseau,
+ODBC et écritures hors profils sont bloqués par le lanceur de tests.
+
+L27-01 — P1 confirmé — préconditions d'historique
+Emplacements : src/sme_gend/services/dossier_write.py:8
+et src/sme_gend/ui/views/conges_view.py:652.
+Cause : le service acceptait update/delete sans la ligne affichée, et la fiche
+congés omettait effectivement cette ligne. Une ancienne saisie pouvait remplacer
+un historique mis à jour sur un autre poste. Le décorateur commun refuse désormais
+une version absente avant transaction pour les neuf familles. Les permissions
+restent contrôlées avant cette précondition. La fiche congés transmet son événement
+affiché et conserve les données saisies si l'enregistrement est refusé.
+Le verrou parent, la vérification du propriétaire et la comparaison actuelle sont
+préservés. Les API d'ajout restent des intentions explicites ; les imports continuent
+d'utiliser leurs chemins dédiés. Aucun algorithme de projection métier n'est changé.
+Vérifications : reproduction native avant/après, contrats des 18 update/delete,
+formulaire congés succès/conflit, régressions concurrentes des historiques.
+
+L27-02 — P1 confirmé — écriture personnel dans une transaction englobante
+Emplacement : src/sme_gend/services/personnel_service.py:21.
+Cause : la branche « transaction déjà présente » sortait avant la publication
+de synchronisation. Une écriture pouvait être validée sans signal aux autres postes.
+Le service rejoint désormais shared_data_write : sauvegarde locale par savepoint,
+notification dans la même transaction, invalidation partagée au commit réel.
+Un échec pris en charge par l'appelant ne doit pas laisser son insertion partielle
+dans la transaction englobante. Une erreur imbriquée dans un lot partagé le fait
+échouer entièrement selon le contrat existant. Les lectures locales intermédiaires
+sont invalidées également en cas d'annulation. Le noyau transactionnel n'a pas
+été réécrit. Les tests natifs vérifient notification et rollback/savepoint.
+
+L27-03 — P1 confirmé — contenu workflow modifié après affichage
+Emplacements : src/sme_gend/services/workflow_task_service.py:182
+et src/sme_gend/ui/views/workflow_status_panel.py.
+Cause : WHERE status='open' empêchait une seconde résolution, sans vérifier le
+titre, détail, priorité ou attribution que l'utilisateur avait réellement vus.
+La lecture fournit une empreinte SQL des champs persistés, liée à la base et à
+l'identifiant. La résolution exige cette version, verrouille et compare avant
+UPDATE. Une tâche déjà résolue/supprimée reste un résultat False sans nouveau signal.
+Un contenu différent produit un conflit explicite et préserve la sélection à
+l'écran. Aucune relecture silencieuse n'est transformée en approbation utilisateur.
+Tests : contenu périmé, version absente/étrangère, résolution concurrente, échec
+de stockage et notification, commit/rollback, interface, deux processus indépendants.
+
+L27-04 — P1 confirmé — plan sexe/matricule ancien et absence de notification
+Emplacement : src/sme_gend/services/personnel_sexe_reference_sync.py:291.
+Cause : application d'UPDATE d'après un rapprochement antérieur, commit direct,
+sans comparaison des identités et sans publication de changement.
+Les propositions portent maintenant l'empreinte relue et la base d'origine.
+Tous les agents sont verrouillés en ordre croissant, par groupes de 250, puis
+toutes les versions sont validées AVANT le premier UPDATE. Un agent changé,
+supprimé, une version manquante/étrangère ou une proposition dupliquée refuse le
+lot complet. Les règles de rapprochement et de saut des conflits sont préservées.
+La transaction commune porte données et notification ; un UPDATE réellement sans
+effet ne publie rien. Tests natifs de conflit sur la seconde ligne, version étrangère,
+agent supprimé, doublons, no-op, transaction externe commit/rollback et second processus.
+Ce contrôle concerne le service et ses appelants, pas tous les anciens scripts
+ponctuels qui exécutent directement du SQL depuis un CSV.
+
+L27-05 — P1 confirmé — fermeture prématurée et destruction des threads
+Emplacements : src/sme_gend/ui/bg_task.py ; ui/views/personnel_list_view.py
+et ui/views/liste_present_view.py, sous src/sme_gend/.
+Deux reproductions avant correction montrent qu'une fermeture de progression
+pouvait rendre None pendant que l'opération continuait. La progression ne se
+ferme désormais qu'à la fin réelle du QThread ; la dernière étape n'est pas
+assimilée à la fin du travail. Le bouton de fermeture/Escape n'annule pas une
+écriture engagée. Les callbacks passent par des QObject avec @Slot et connexion
+en file sur le thread GUI, avec durée de vie indépendante de la vue.
+Les threads restent retenus jusqu'à finished ; fermer une vue supprime les
+callbacks devenus caducs. Les workers de lecture spécialisés sont également
+retenus, avec interruption coopérative. Le scan carrière ne supprime plus un
+QThread encore actif après l'expiration d'un wait(3000), et la navigation ne
+l'attend plus. Un ancien aperçu ne réinitialise plus l'état du rafraîchissement courant.
+Une erreur de scan n'est plus convertie en analyse réussie sans alerte : elle
+est signalée dans l'interface et le journal sans détail privé.
+À la sortie de l'application, les traitements lancés sont attendus, jamais
+terminés de force pendant une transaction. Une requête bloquée peut donc prolonger
+la fermeture jusqu'à sa fin ou son délai réseau ; aucun gain de ce délai n'est annoncé.
+Tests hors écran : progression, succès/erreur sur thread GUI, propriétaire détruit,
+callbacks en erreur, libération, arrêt, deux types de workers et résultat périmé.
+
+L27-06 — P2 mesuré — relectures du contexte SME
+Emplacements : src/sme_gend/services/dashboard_service.py et
+src/sme_gend/config/liste_generale_scope.py.
+Cause : un même snapshot rechargeait le contexte pour le mois, les données
+d'export et les préférences de présence. Il est maintenant chargé une seule fois
+et transmis aux fonctions auxiliaires. Les signatures existantes restent valables
+grâce à un argument optionnel. Ce contexte n'est pas conservé indéfiniment : un
+nouvel appel vérifie toujours le mois actif pour préserver la synchronisation.
+
+Banc : 5 000 agents synthétiques déjà en cache, référentiels simulés, contexte
+MySQL natif local, une chauffe puis six calculs sans cache du snapshot ; médiane.
+Mois actif : 62.07 → 33.83 ms
+(45.5 % de temps en moins sur CE banc), contexte 5→1,
+requêtes de contexte 25→5.
+Archive : 51.42 → 33.49 ms
+(34.9 %), contexte 3→1, requêtes 15→5.
+Les SHA-256 de tous les champs des résultats restent identiques avant/après.
+Les six mesures brutes et profils cProfile sont archivés avec leurs limites.
+Ces résultats ne mesurent ni le chargement initial complet des agents, ni les
+exports, ni les alertes différées, ni le serveur réel/LAN/SMB. Aucun gain global
+de 45 % sur l'application ou sur les postes de travail n'est revendiqué.
+
+L27-07 — P3 confirmé — avertissements Qt et Pandas
+Emplacements : src/sme_gend/ui/filter_change.py ; ui/personnel_filter_proxy.py ;
+ui/views/edition_sme_view.py ; services/personnel_sexe_reference_sync.py ; pyproject.toml.
+Avant : 8 avertissements dans la suite locale (7 filtres Qt, 1 lecteur XLS).
+Les filtres déclarent maintenant beginFilterChange avant modification, puis
+endFilterChange(Rows). Le repli invalidateFilter reste uniquement pour les anciennes
+versions Qt admises par le projet, qui ne disposent pas des deux méthodes.
+Le lecteur Pandas choisit Calamine explicitement. Le moteur xlrd antérieur est
+utilisé seulement comme oracle de comparaison dans un test en lecture seule,
+avec capture locale de sa dépréciation ; aucun filtre global de warnings ajouté.
+Les lignes et l'ordre du XLS de référence sont égaux entre les deux lecteurs ;
+un classeur XLSX synthétique vérifie valeurs manquantes, accents et identifiants.
+python-calamine est déclaré dans les extras dev/tools (>=0.4,<1) et installé
+dans le venv de validation (0.9.0). xlrd reste déclaré pour
+les autres anciens outils. Une installation qui utilise cet outil doit installer
+les extras, par exemple : python -m pip install -e ".[tools]".
+pip check exécuté : No broken requirements found.
+Versions de validation : {"PySide6": "6.11.2", "pandas": "3.1.0", "xlrd": "2.0.2", "python-calamine": "0.9.0", "PyMySQL": "1.2.3", "pytest": "9.1.1"}.
+Les anciennes versions de Qt/Python admises n'ont pas toutes été installées ; le
+chemin de repli est testé par simulation, les filtres réels sous le Qt installé.
+
+Vérification finale
+Suite locale : 1230 réussites, 54.70 s.
+MySQL ciblé : 143 réussites, 496.85 s,
+413 cas hors du filtre et non revendiqués ici.
+Ces deux commandes ont été exécutées avec -W error, sans masquer les avertissements,
+sans échec et sans saut. Les fichiers source/test/pyproject sont figés par empreinte
+avant/après chaque commande. Les anciens tests ont été adaptés pour fournir leur
+instantané ; aucun test n'est désactivé pour faire passer la suite.
+Avant correction : 5 reproductions MySQL en échec (12.45 s), 2 reproductions
+progression en échec (0.80 s). Leurs journaux sont conservés.
+Essai supplémentaire de deux processus indépendants : données non validées cachées,
+données + révision visibles ensemble après commit, deux écritures périmées refusées,
+données et révision inchangées après les refus. Ce sont deux clients locaux, pas
+deux PC de travail ni une validation SMB réelle.
+Revue AST : 249 méthodes préservées dans les modules
+comparés, 23 appels UI historiques/workflow transmettant une version.
+Le noyau transactionnel, les règles de projection des dossiers, la sauvegarde,
+la clôture et l'authentification n'ont pas été modifiés dans ce lot.
+
+Reste à traiter, par ordre
+P1 — Continuer les préconditions et notifications pour l'Avancement (règles,
+campagnes, quotas, lignes/nomination), la hiérarchie U→D→T et sa propagation,
+puis les fusions structure/SubArme. La revue statique confirme des écritures
+directes sans version dans mysql_avancement_repository.py,
+mysql_subdiv_hierarchy_repository.py et mysql_coherence_repository.py ; leurs
+services et modales doivent être traités ensemble. Les fusions présentent aussi
+plusieurs commits et des exceptions ignorées lors des reprises du layout.
+Ils n'ont pas été corrigés ou validés nativement par ce lot ; ne pas les présenter
+comme protégés par les préconditions des historiques. Prévoir une reproduction
+par opération, un aperçu versionné, données/projection/layout/signal atomiques,
+et tests de conflit, panne intermédiaire et annulation avant de modifier ces modules.
+P1 — Recenser/migrer les scripts ponctuels SQL et empêcher qu'un ancien client
+contourne les contrôles. Au futur déploiement, utiliser une version homogène sur
+tous les postes. Aucun nouvel exécutable n'a été produit sur demande de l'utilisateur.
+P1 — Recette sur le vrai partage SMB et deux postes : lettres différentes vers
+le même UNC, droits, cache photos, renommages concurrents, interruption réseau,
+bascule de dossier et reprise des journaux. PC/UNC indisponibles dans cette session.
+P1/P2 — Configurer et tester TLS MySQL avec CA/nom correspondant en préproduction,
+avec l'administrateur du site. Ne transmettre aucun mot de passe dans le chat.
+P2 — Mesurer chargement à froid, alertes de carrière, imports/exports Excel/PDF/DOCX
+et réactivité UI sur volumétrie représentative et réseau réel. Le banc du contexte
+ne mesure pas ces traitements. Ne remplacer aucune règle métier par une approximation.
+P2 — Recette Access native anonymisée (nouveaux agents, réimport, options, identités),
+contrôle visuel des gabarits SME complet/DPF/CS-DPF et fiches individuelles ; essais
+de sauvegarde/restauration/configuration seule/clôture et journaux après interruption,
+y compris connexion avec mot de passe non ASCII dans l'environnement cible.
+P3 — Autres avertissements hors chemins exécutés, complexité et duplication des
+grandes vues, automatisation des tests et reproductibilité des dépendances.
+
+Limites et retour arrière
+Une empreinte d'état détecte les valeurs différentes ; elle ne représente pas
+tout l'historique d'un aller-retour revenu exactement aux mêmes valeurs (ABA).
+Les imports/restaurations et outils bas niveau ont leurs propres contrats.
+Un timeout/interblocage/acquittement perdu exige une relecture avant nouvelle
+saisie ; pas de rejeu automatique des écritures. Les erreurs métier de synchronisation
+doivent rester visibles. Les anciens EXE n'intègrent aucune correction de ce lot.
+Aucune migration de schéma nécessaire. Le retour arrière doit être examiné sur
+copie, à partir de corrections_only.patch et baseline/, en conservant les travaux
+précédents et ultérieurs. Ne pas employer de reset Git global. Calamine est un
+ajout au venv/extras ; ne pas le retirer tant que le lecteur migré est utilisé.
+
+Preuves et reproduction
+build/corrections_20261031_lot27/ : final_unit.log, final_mysql.log, leurs métadonnées,
+before_mysql.log, background_before.log, performance_comparison.json,
+dashboard_benchmark_before/after_*.json, structural_review.json,
+business_conflict_*/validation.json, changes_manifest.json,
+corrections_only.patch, tested_source_hashes.json, validation_summary.json.
+Le lanceur final et les scripts de contrôle sont copiés dans ce dossier.
+Après l'arrêt du MySQL jetable, validation_summary.json confirme l'absence de
+schémas synthétiques restants et l'arrêt de cette seule instance.
+
+Références techniques primaires utilisées
+Qt — filtres : https://doc.qt.io/qt-6/qsortfilterproxymodel.html
+Qt — slots et thread de réception :
+https://doc.qt.io/qtforpython-6.10/tutorials/basictutorial/signals_and_slots.html
+Pandas — moteurs Excel et Calamine : https://pandas.pydata.org/docs/user_guide/io.html
+Pandas — dépendances facultatives : https://pandas.pydata.org/docs/getting_started/install.html

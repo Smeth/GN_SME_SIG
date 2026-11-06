@@ -1,0 +1,202 @@
+IMPRESSION — COHÉRENCE DES EXPORTS EXCEL ET PDF — LOT 34
+31/10/2026
+
+Protection et périmètre
+Poursuite du lot 33 (filtres). Branche feature/mysql-migration. Aucun reset, commit,
+build EXE, changement de schéma ou ajout de dépendance. Les travaux antérieurs
+sont préservés ; sources/ du miroir reste en lecture seule. Aucune base réelle,
+photo, document utilisateur ou gabarit opérationnel modifié par les essais.
+
+Examen des chemins de sortie : listes Personnel/Édition SME, missions, désertions,
+congés, malades/punis, trois catégories de stages, gains/pertes, structures,
+détachés, liste des présents et services de distinctions. Les exports complets
+SME/DPF et les autres générateurs sont couverts par leurs tests existants dans la
+suite locale ; ils n'ont pas tous fait l'objet d'un rendu visuel dans ce lot.
+Les actions explicitement complètes, par sélection, par structure ou par mois
+conservent leur périmètre annoncé. Une recherche de catalogue de médailles ne
+remplace pas arbitrairement le choix de structure d'un export d'attributions.
+
+L34-01 — P1 confirmé — lignes et ordre d'export différents du tableau
+Emplacements : src/sme_gend/ui/export_snapshot.py:6,
+src/sme_gend/ui/views/missions_view.py:744,
+src/sme_gend/ui/views/structure_hub_view.py:272.
+Cause : export des listes en cache avant tri Qt, ou de toutes les structures,
+plutôt que des seules lignes effectivement visibles. Personnel/Édition SME
+réappliquaient un tri métier après celui demandé dans le tableau.
+Correction : capture des identités UserRole dans l'ordre visible, exclusion des
+lignes masquées, copie des valeurs avant dialogue. Identité inconnue : erreur
+explicite demandant d'actualiser, plutôt que choix silencieux d'une autre fiche.
+Gains/pertes : indice de mouvement conservé, pour ne pas confondre deux mouvements
+d'un même agent. Aucune modification des tris et filtres métier de l'interface.
+Appliqué aussi aux congés, désertions, malades/punis et stages. Personnel et
+Édition SME reprennent directement l'ordre du proxy filtré ; Excel par position
+conserve son regroupement annoncé. Structures : un filtre sans résultat n'exporte
+plus le catalogue complet ; compteurs capturés pour les seules structures visibles.
+Tests : Qt réellement trié, lignes masquées, valeurs copiées, identité inconnue,
+structure filtrée et filtre vide. Les contrôles de chaque parcours UI ne remplacent
+pas encore une recette interactive exhaustive de toutes les combinaisons.
+
+L34-02 — P1 confirmé — aperçu périmé ou relu lors de l'export
+Emplacements : src/sme_gend/services/liste_present_service.py:147,
+src/sme_gend/ui/views/liste_present_view.py:1127,
+src/sme_gend/services/detaches_preview_service.py:82,
+src/sme_gend/ui/views/detaches_view.py:755.
+Cause : les présents relisaient la population, la mise en page et les grades lors
+de l'Excel. Les détachés exportaient de nouveau toute la population et perdaient
+les filtres texte/sigle/structure/Padmin de l'aperçu. Le HTML des présents restait
+exportable après une recherche modifiée, un ancien résultat ou une erreur.
+Correction : instantané des données et configuration ayant servi à l'aperçu ;
+Excel des présents sans nouvelle lecture de population/layout/grades. Détachés :
+les deux feuilles de l'export complet utilisent la même population filtrée et la
+configuration capturée. L'action Sans note peut encore réduire explicitement ce
+périmètre. L'ancien appel de service sans instantané reste compatible.
+Les exports sont refusés si l'aperçu n'est pas prêt ou ses filtres ne correspondent
+plus. Les réponses anciennes des présents sont rejetées par génération. Une
+frappe rapide conserve la demande d'actualisation différée ; une panne n'est
+plus conservée comme document exportable. HTML PDF capturé avant le dialogue.
+Tests : modification distante simulée de la même ligne après aperçu, source et
+layout interdits de relecture, nouvelle requête refusée, réponse ancienne et
+page d'erreur non exportables, frappes successives, détachés sans population relue.
+Les instantanés ne constituent pas une transaction globale des lectures SQL
+initiales ; le changement externe du contenu d'un gabarit entre aperçu et export
+n'est pas verrouillé. Grades des détachés encore lus pour leur format officiel.
+
+L34-03 — P1/P2 confirmé — colonnes cachées réapparues dans Excel
+Emplacements : src/sme_gend/services/personnel_excel_export.py:53,
+src/sme_gend/services/personnel_excel_export.py:138.
+Cause : hidden_keys ignoré par l'export officiel. La cellule combinée Naissance
+pouvait aussi réintroduire le lieu ou la date que l'utilisateur avait masqués.
+Correction : visibilité appliquée aux exports standard et par position ; masquage
+sur une copie pour les composantes combinées. Les choix de colonnes explicitement
+faits dans le dialogue restent autorisés et prioritaires. Pas de données effacées.
+Tests : colonnes absentes, lieu caché absent des valeurs, récapitulatif correct et
+sélection explicite conservée. Police, titre, ordre officiel des colonnes et règle
+existante de PDF sans ligne de période restent inchangés.
+
+L34-04 — P1/P2 confirmé — formule Excel interprétée comme donnée
+Emplacement : src/sme_gend/services/excel_style_helpers.py:86.
+Cause : openpyxl interprète une chaîne commençant par = comme une formule. Un nom,
+une observation ou un libellé importé pouvait alors afficher un calcul ou une erreur.
+Correction : écriture explicite des chaînes en texte dans les exporteurs de données
+examinés, y compris détachés, distinctions et référentiels. Les formules voulues des
+gabarits gardent l'ancien write_cell_value et leur type formule ; aucune conversion
+globale des cellules d'un modèle. Identifiants 0007 et 0 conservés comme texte.
+Tests : cinq exporteurs avec nom =1+1, fallback présents, formule SUM du modèle
+préservée, matricules avec zéros. Vérification directe des XLSX synthétiques :
+ID gains 0007, Cdsme 092026 et matricule présents 0007 restent de type texte.
+Le moteur de prévisualisation peut rendre un texte numérique comme un nombre ;
+le type et la valeur du fichier XLSX ont donc été contrôlés séparément avec openpyxl.
+
+L34-05 — P1/P2 confirmé — détail satellite absent ou grade différent
+Emplacements : src/sme_gend/services/malade_punis_export.py:31,
+src/sme_gend/ui/views/stages_view.py:1784,
+src/sme_gend/services/detaches_excel_export.py:154.
+Cause : malades exportait uniquement la clé satellite, alors que le tableau accepte
+aussi l'identifiant carrière ; certains chemins n'envoyaient pas les grades au
+formateur. Correction : même repli de clé que l'affichage, détails copiés avant
+dialogue et référentiel de grades transmis pour stages/Édition SME/SME_Detaches.
+Test : pathologie conservée avec détail indexé seulement par ID carrière ; tests
+existants de format de grade et de listes rejoués. Données manquantes réellement
+en base non inventées et règles de rattachement inchangées.
+
+L34-06 — P2 confirmé — textes coupés et mise en page d'impression
+Emplacements : src/sme_gend/services/excel_style_helpers.py:95,
+src/sme_gend/services/excel_template_exporter.py:188,
+src/sme_gend/ui/views/liste_present_view.py:1388.
+Cause : hauteurs fixes, absence de retour à la ligne dans le fallback Présents,
+paramètres d'impression absents dans plusieurs petits tableaux. Le PDF Présents
+ne synchronisait pas son document au format de page utilisé par la liste générale.
+Correction : hauteur estimée selon largeur et mots, retour à la ligne sans réduction
+de police, alignements et styles du gabarit préservés ; hauteur d'en-tête du modèle
+copiée. Petits tableaux/fallback : zone d'impression bornée, A4 paysage, ajustement
+sur une page en largeur et hauteur libre, en-têtes répétés. Modèle officiel du
+personnel conserve son contrat d'en-têtes non répétés. PDF Présents : synchronisation
+avec la page A4 paysage et contenu HTML effectivement validé dans l'aperçu.
+Tests : noms très longs avec et sans modèle, police/centrage/largeur/en-tête du
+modèle préservés, anciennes recettes de mise en page et publication atomique.
+Rendu : huit XLSX synthétiques importés et inspectés sans réenregistrement, dont
+un avant/après Personnel ; noms longs, accents et observations contrôlés visuellement.
+Deux PDF natifs Qt générés, rendus et inspectés ; contenu synthétique, orientation
+paysage et absence de texte hors page vérifiés par pdfplumber. Pour le mode Qt hors
+écran, les polices Windows installées ont été chargées uniquement dans le script QA.
+Aucune police ou dépendance de l'application n'a été remplacée.
+Ces estimations ne garantissent pas la pagination de tous les gabarits Office et
+textes extrêmes. Les 18 colonnes des présents restent denses ; leur choix métier
+n'est pas redéfini dans ce lot.
+
+L34-07 — P1/P2 confirmé — mois changé pendant le dialogue de fichier
+Emplacements : src/sme_gend/ui/views/personnel_list_view.py:1530,
+src/sme_gend/ui/views/edition_sme_view.py:2592.
+Cause : mois résolu après le choix du fichier ou dans le worker, mais lignes
+capturées avant. Démonstration : lignes de septembre, passage simulé à octobre
+pendant QFileDialog, log/titre Excel associés à octobre.
+Correction : contexte de période capturé avant le dialogue dans les quatre routes
+Personnel/Édition SME (liste et par position), avec les données et référentiels.
+Édition SME capture aussi sa visibilité à cet instant. Pour les détachés, le mois
+source reste distinct des mois du comparatif. Aucune activation/clôture effectuée.
+Tests : quatre parcours UI refusent le décalage de septembre vers octobre ; mois
+source septembre 2026 indépendant d'une comparaison portant sur 2020.
+
+L34-08 — P1 confirmé par inspection — gardes d'export manquantes
+Emplacements : ui/views/structure_hub_view.py:_export_referentiel_excel et
+ui/views/detaches_view.py:_update_official_full/_update_official_sme_only.
+Correction : effectifs.export contrôlé avant accès au chemin pour ces actions.
+Les confirmations de remplacement et les gardes existantes restent en place.
+Tests : les deux mises à jour officielles ne consultent aucun chemin quand le
+droit est refusé. Aucune régénération d'un fichier officiel réel exécutée en QA.
+
+Validation exécutée, limites de preuve
+34 nouveaux cas locaux dans tests/test_export_view_coherence.py.
+Avant : replay en mémoire de quatre modules originaux, sans écrasement du code,
+10 échecs / 2 réussites avec fixtures corrigées (before_original_valid.log).
+Ce résultat confirme notamment les défauts de données/colonnes/hauteurs/formules et
+l'état périmé des présents ; les deux routes déjà corrigées à ce moment ne sont
+pas présentées comme des échecs d'origine. Les premiers essais avaient aussi des
+erreurs de fixture, corrigées séparément. Ensuite : deux échecs réels de lignes
+longues Présents, puis quatre échecs de période, avant leurs corrections respectives.
+Une commande intermédiaire visait deux fichiers de tests inexistants ; aucune
+réussite n'en est déduite. Tous ces logs intermédiaires sont conservés.
+Commandes finales isolées avec -W error :
+- toute la suite locale hors intégration : 1431 réussites en 80.05 s ;
+- sept régressions MySQL ciblées en 23.02 s : changements de mois/import,
+  réimport Access, notifications de référentiels et renommage de configuration ;
+  549 autres cas d'intégration hors sélection.
+Total final : 1438 cas réussis, sans échec, saut ou avertissement
+sur ces deux commandes. Commandes exactes/codes de retour dans validation_summary.json.
+MySQL 8.0.40 isolé sur loopback:64062, datadir sous build, schémas uniques jetables,
+profils temporaires. Connexions extérieures interdites par le lanceur. Arrêt de
+cette seule instance après vérification qu'aucun schéma de test ne reste.
+
+Aucun benchmark global ni gain de vitesse annoncé. L'absence de relecture pour
+l'Excel Présents est prouvée par le test ; ce n'est pas une mesure de temps réseau.
+Aucune recette Office/Excel natif, imprimante physique ou vraie base métier.
+Pas d'accès aux PC de travail/SMB. La suite MySQL complète n'est pas exécutée.
+La liste des présents conserve sa synthèse d'aperçu au-delà de 10 000 lignes :
+le PDF reproduit cette synthèse, l'Excel conserve la population filtrée complète.
+Les régénérations officielles DETACHE restent volontairement complètes, comme leur
+confirmation l'annonce. Les exports mensuels SME/DPF gardent leur mois explicitement
+choisi ; un filtre d'une autre liste ne leur est pas appliqué implicitement.
+Les exports sélectionnés et les regroupements officiels conservent leurs règles.
+L'ensemble des modules et gabarits réels n'est pas déclaré exempt de bugs.
+
+Contrôle Git et retour arrière
+24 sources existantes modifiées, un helper et un fichier de tests ajoutés, plus ce
+rapport. 822 fonctions/classes inchangées dans les fichiers examinés ; aucune
+méthode existante supprimée. Moteurs d'écriture métier, transactions, import,
+sauvegarde/restauration, authentification, Qt bg_task et contrats print inchangés.
+AST des sources, empreintes testées et patch inverse vérifiés en lecture seule.
+changes_manifest.json isole exactement les fichiers/lignes de ce lot ; baseline/
+conserve les originaux. corrections_only.patch peut être revu/inversé sur une copie,
+en tenant compte des modifications ultérieures. Aucun reset global. Pas de migration
+ni retour arrière de données requis. Anciens EXE/ZIP contrôlés inchangés.
+
+Recette restante sur copie de travail
+1. Comparer tableau et Excel après recherche + structure + tri inversé, filtre vide,
+   nom long, matricule 0007 et détails satellites, dans chaque liste concernée.
+2. Présents/détachés : modifier le filtre, actualiser, exporter ; simuler une mise
+   à jour depuis un autre poste pendant le dialogue et contrôler le périmètre.
+3. Tester les vrais gabarits Office, PDF multi-pages et imprimante avec accents,
+   observations multilignes et lignes extrêmes. Conserver les règles des documents
+   officiels avant toute modification de densité ou de pagination.
+4. Recette SMB et concurrence sur vrais postes quand ils seront disponibles ;
+   essais locaux contrôlés et MySQL isolé ne la remplacent pas.

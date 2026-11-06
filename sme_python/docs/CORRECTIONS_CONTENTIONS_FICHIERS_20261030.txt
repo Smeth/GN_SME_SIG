@@ -1,0 +1,98 @@
+CORRECTIONS DES CONTENTIONS DE RENOMMAGE — LOT 16 — 30/10/2026
+
+Périmètre et protection
+Application : Impression/sme_python, branche feature/mysql-migration.
+Modifications préexistantes conservées ; comparaison au début de ce lot et patch séparé.
+Aucune base réelle ni fichier utilisateur modifié ; données synthétiques et MySQL jetable
+sur 127.0.0.1:64062, datadir contrôlé sous build. Aucune migration de schéma applicative,
+aucune dépendance ajoutée, aucun exécutable ni portable régénéré.
+
+Constats confirmés et corrections
+F16-01 — P1 — safe_paths.py:47, file_contention.py:27.
+La publication atomique ne tentait qu'une fois le renommage. Un lecteur Windows
+sans FILE_SHARE_DELETE provoquait réellement WinError 5, même si le lecteur se fermait
+peu après. Reprises des seuls appels de remplacement/renommage/suppression pour
+les codes Windows 5, 32 et 33 ; budget de reprise 1 s, pauses de 25 ms, au plus
+41 tentatives. Même temporaire réutilisé ; aucune recopie métier ni transaction
+SQL relancée. Aucun repli vers une écriture en place ni un autre dossier.
+Les erreurs réseau/déconnexion (53, 64, 67, 1231), disque plein (112), collisions
+et erreurs sans code Windows ne sont pas reprises. Code 5 peut être un refus ACL :
+l'erreur originale reste levée à expiration ; dossier ou cible en lecture seule
+échoue immédiatement. Aucun droit de la destination utilisateur n'est modifié.
+
+F16-02 — P1 — personnel_media.py:215, restore_files.py:67.
+Une attente augmente la durée pendant laquelle la coordination peut être perdue.
+Avant chaque tentative photo, revérification du verrou MySQL existant ; même contrôle
+pendant le nettoyage des anciennes extensions. Avant publication et compensation
+de restauration, revérification de l'empreinte attendue à chaque tentative.
+Une modification externe détectée pendant l'attente interrompt le remplacement.
+Une ancienne extension momentanément ouverte peut maintenant être supprimée après
+libération. En cas de refus durable, MediaWriteCommittedError précise que la nouvelle
+image est déjà copiée ; les fichiers et leurs permissions sont conservés.
+
+F16-03 — P2 — safe_paths.py:73, file_contention.py:62.
+Un échec de nettoyage du temporaire pouvait masquer l'erreur initiale. Il pouvait
+aussi faire échouer une opération déjà publiée à cause d'une suppression inutile
+après renommage Windows. Aucun nettoyage supplémentaire après consommation du
+temporaire par renommage ; si la préparation échoue, nettoyage borné du seul
+temporaire unique créé par l'appel. Un attribut lecture seule hérité de copy2 est
+retiré uniquement de ce temporaire non publié, jamais de la source ou destination.
+Si le nettoyage reste impossible, l'erreur initiale et une indication explicite
+du temporaire restant sont conservées, avec journal sans contenu ni chemin sensible.
+
+F16-04 — P2 — access_odbc.py:168.
+Le staging Access utilisait sa propre séquence copie/renommage et pouvait laisser
+une copie partielle après un échec. Il emploie maintenant la publication atomique
+exclusive commune. Les données source restent inchangées et le mtime de staging
+reste récent, pour éviter une purge prématurée d'un import d'un ancien fichier.
+
+Vérifications exécutées
+- 4 tests de reproduction échouaient avant correction ; ils passent après correction.
+- 939 tests unitaires réussis en 66,18 s ; 8 avertissements également présents dans
+  le lot précédent. 26 nouveaux cas unitaires dans tests/test_file_contention.py.
+- 60 tests MySQL ciblés réussis en 105.62 s ; 97 cas natifs non sélectionnés.
+  Restauration complète/configuration, conservation des chemins, photos, bascule,
+  synchronisation, clôture, journaux et livraisons. Deux nouveaux cas MySQL vérifient
+  la publication et notification après contention, puis l'arrêt sans publication
+  ni notification après perte réelle de la connexion de coordination.
+- 5 essais avec lecteur Windows dans un processus indépendant : remplacement photo,
+  fichier de configuration, suppression d'une ancienne extension, publication
+  exclusive et blocage durable. Erreurs natives 5/32 observées ; collision 183
+  conservée. Aucun fichier partiel ni temporaire de publication restant dans ces essais.
+- Restauration : arrêt réel avant et après COMMIT puis reprise dans un nouveau
+  processus ; résultat cohérent, chemins actuels conservés, aucun journal en attente.
+- Bascule : interruption réelle avant validation SQL, puis bascule et écriture
+  simultanées dans deux processus ; écrivain redirigé vers le dossier actif,
+  images complètes, ancienne source préservée, verrou libéré.
+Les preuves JSON et scripts de processus sont conservés dans
+build/corrections_20261030_lot16. Commandes et empreintes dans validation_summary.json,
+changes_manifest.json et corrections_only.patch ; syntaxe et patch vérifiés séparément.
+
+Mesures et limites
+Il s'agit d'une correction de fiabilité ; aucun gain de vitesse globale revendiqué.
+Dans cet essai local, les contentions temporaires ont abouti en environ 0,13 à
+0,20 s et le blocage durable a été signalé après environ 1,02 s. Ces durées ne sont
+pas une mesure de performances du réseau ni une comparaison avant/après à charge égale.
+Le budget limite les reprises ; il ne peut borner un appel système SMB ou un contrôle
+MySQL lui-même bloqué. Plusieurs fichiers bloqués peuvent cumuler les attentes.
+Les contrôles d'empreinte détectent les changements entre tentatives ; ils ne constituent
+pas un verrou système contre un logiciel externe écrivant entre contrôle et renommage.
+La coordination forte reste celle des écrivains applicatifs utilisant les verrous existants.
+Une déconnexion réseau pendant un renommage peut laisser son résultat incertain :
+aucune répétition automatique pour le code 64 ; vérifier la destination avant relance.
+
+Validation restante sur le terrain
+Le partage SMB et les deux PC de travail ne sont pas accessibles actuellement.
+Les chemins UNC utilisés dans les tests MySQL sont simulés par des dossiers locaux ;
+ils ne prouvent ni droits SMB, ni cache distant, ni reconnexion réelle.
+Réutiliser docs/VALIDATION_SMB_POSTES_20261030.txt et scripts/Test-ImpressionSmb.ps1
+sur les deux postes, uniquement dans leur sous-dossier temporaire dédié. Ajouter
+un essai photo ouverte puis libérée sur l'autre poste, refus durable, et interruption
+réseau contrôlée. Conserver les fichiers existants et vérifier le dossier actif
+avant toute nouvelle tentative après une coupure. La bascule et la restauration
+complète conservent leurs procédures de maintenance/sauvegarde existantes.
+
+Retour arrière du code
+Le patch de ce lot est séparé des modifications préexistantes. Examiner d'abord
+changes_manifest.json et vérifier les empreintes ; ne pas réinitialiser le dépôt.
+Aucune opération Git de retour arrière ni migration n'a été exécutée.

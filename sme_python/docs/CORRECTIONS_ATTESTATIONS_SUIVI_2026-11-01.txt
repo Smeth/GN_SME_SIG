@@ -1,0 +1,79 @@
+Attestations — corrections complémentaires du 1 novembre 2026
+
+Périmètre : points 2, 4, 5, 6 et 8 de la liste de suivi.
+
+2. Filtre Soit transmis « 1–2 ans » : borne basse au premier anniversaire,
+borne haute exclusive au deuxième anniversaire. Les échéances à moins d'un
+an sont exclues. Le filtre « moins d'un an » utilise aussi l'année calendaire,
+y compris les années bissextiles. Les bornes ne se chevauchent pas.
+
+4. Génération groupée : production Soit transmis, ouverture Soit transmis,
+production combinée et attestations cochées passent par le worker existant.
+L'interface continue de traiter ses événements et un dialogue de progression
+indéterminé empêche les actions concurrentes. Les personnes, paramètres,
+grades et contexte sont copiés avant le démarrage. L'identité d'audit est
+transmise par le mécanisme existant. Word est ouvert depuis le fil graphique
+seulement après réussite de la production. Un échec reste explicite.
+
+5. Aperçus Word : répertoire unique par production, y compris l'aperçu
+individuel. Un aperçu précédent n'est plus écrasé. Les fichiers ouverts dans
+Word sont conservés dans le dossier temporaire système : pas de suppression
+automatique pendant que Word pourrait encore les utiliser.
+
+6. Historique : listes nominatives complètes dans les nouveaux journaux
+centraux et leurs miroirs, ainsi que dans les générateurs de lots. Les anciennes
+traces incomplètes sont signalées explicitement. Double-clic ou Entrée ouvre
+un détail lisible avec la liste entière disponible. Navigation précédente /
+suivante par pages de 2 000 traces avec conservation des filtres ; modifier
+la recherche ramène à la première page. Le filtrage et le périmètre de
+permissions sont appliqués dans SQL avant la pagination. Le CSV exporte la
+page affichée. L'ordre est date décroissante puis identifiant décroissant.
+
+8. Permissions : droit effectifs.export vérifié sur les actions Word, PDF,
+aperçus, production groupée, impression des listes et export CSV du journal,
+comme pour le ZIP existant. Les boutons de production tiennent compte de ce
+droit. Un appel direct aux actions vérifie aussi le droit ; les sauvegardes
+Word/PDF le revérifient après le choix du fichier. Les permissions d'accès au
+journal et à ses opérations d'administration restent celles du projet.
+
+Validation : 204 tests réussis en 41,63 secondes. Couverture : bornes et
+années bissextiles, filtre réel, unicité des aperçus, worker réel hors du fil
+graphique et réactivité de la boucle Qt, erreurs de production, absence
+d'ouverture Word après échec, refus de permission et révocation pendant
+le dialogue, listes de plus de 20 personnes dans les vrais générateurs,
+journaux central/mirroir, pagination SQL paramétrée, navigation et filtres,
+régressions des corrections précédentes, configurations et tâches de fond.
+git diff --check : aucune erreur sur les fichiers suivis concernés.
+Exécution isolée avec personnes fictives, copies de documents, connexions
+MySQL/Access réelles et processus externes interdits par le runner d'audit.
+Un test ZIP utilise un dossier de test héritant des ACL du workspace pour
+éviter le refus d'accès propre au tempfile Windows dans cet environnement.
+
+Fichiers applicatifs concernés :
+- src/sme_gend/ui/document_job.py (nouveau)
+- src/sme_gend/ui/views/soit_transmis_view.py
+- src/sme_gend/ui/views/limite_age_view.py
+- src/sme_gend/ui/views/doc_gen_log_view.py
+- src/sme_gend/services/soit_transmis_service.py
+- src/sme_gend/services/limite_age_service.py
+- src/sme_gend/services/doc_gen_log.py
+- src/sme_gend/repositories/app_config_repository.py
+
+Tests ajoutés ou adaptés :
+- tests/test_attestations_followup.py (nouveau)
+- tests/test_attestations_priority_fixes.py
+- tests/test_limite_age_print_filtered.py
+- tests/test_document_history_coherence.py
+
+Limites :
+- Les points 1 (options Word), 3 (largeur d'écran), 7 (homonymes) restent
+  hors de cette demande.
+- Impossible de reconstituer avec certitude les noms tronqués des anciennes
+  traces. Aucune donnée historique réelle n'a été réécrite.
+- Pagination sur journal vivant : de nouvelles écritures entre deux pages
+  peuvent décaler les lignes ; il ne s'agit pas d'un instantané transactionnel.
+- Pas de validation de pagination physique/impression dans Word réel ni
+  de connexion à la base réelle pour une recette de bout en bout.
+
+Modifications préexistantes conservées. Aucune donnée réelle modifiée.
+Aucun exécutable généré.

@@ -1,0 +1,221 @@
+IMPRESSION — HISTORIQUE DES DOCUMENTS, FILTRES ET ENREGISTREMENT — LOT 35
+31/10/2026
+
+Résultat et périmètre
+Vérification du code et correction des défauts confirmés de consultation et
+journalisation des documents. Tests locaux et MySQL jetable. Aucune donnée réelle,
+ancien historique utilisateur ou base de production examiné/modifié pour ces essais.
+Aucun exécutable généré. Aucun reset, commit, ajout de dépendance ou migration DDL.
+Branche feature/mysql-migration et changements préexistants préservés.
+Les fichiers synchronisés sources/ du miroir restent en lecture seule.
+
+Cartographie
+- doc_gen_log.py : générations, miroir optionnel, recherches et fusion CSV.
+- app_config_repository.py : audit_journal, filtres SQL, périodes et app_config.
+- doc_gen_log_view.py : droits, filtres combinés, résultat asynchrone, import/export CSV.
+- Générateurs Personnel/Édition SME, numérique/DPF, présents, détachés, structures,
+  missions, désertions, stages, malades/punis, congés, gains/pertes et distinctions.
+- PDF de listes et attestations ; Word individuels/groupés et soit transmis ; ZIP.
+- Transactions, miroirs persistants et reprise après interruption existants.
+Le journal des documents retrace des générations de fichiers. Il ne remplace pas
+les journaux des modifications de personnel, des connexions et des données sensibles.
+Les imports d'historique possèdent une trace d'opérateur distincte dans audit_journal,
+module document_history, action document_history_import ; ce n'est pas une génération.
+
+L35-01 — P1 confirmé — journalisation perdue sans retour explicite
+Emplacement : src/sme_gend/services/doc_gen_log.py:140.
+Avant : une panne MySQL/table absente renvoyait False ; le miroir est désactivé par
+défaut, et le code pouvait continuer comme si l'action était enregistrée.
+Correction : erreur DocumentJournalError explicite quand l'enregistrement central
+ne peut pas être confirmé. Le message précise que le fichier a été généré et doit
+être conservé avant toute nouvelle génération. Le fichier n'est pas supprimé pour
+masquer l'échec du journal. Pas de relance automatique de génération ou faux succès.
+L'horodatage et l'auteur sont capturés dans l'entrée ; le même horodatage alimente
+la base et le miroir. La source MySQL de l'export peut être passée explicitement.
+Les appels des générateurs examinés la transmettent lorsqu'ils la connaissent.
+L'auteur conserve la politique existante : session, éditeur SME configuré, puis
+non identifié. Aucun nom n'est inventé lorsque l'ancienne trace n'en contient pas.
+Tests : panne sans miroir, table absente, source explicite, auteur/count/mois,
+échec de notification annulant aussi l'événement et confirmation après commit.
+
+L35-02 — P1 confirmé — consultation restée périmée après une génération
+Emplacements : src/sme_gend/services/doc_gen_log.py:62,
+src/sme_gend/ui/views/doc_gen_log_view.py:334.
+Correction : événement et marqueur document_history_revision validés dans la même
+transaction. Ligne de coordination app_config pour sérialiser les écritures du
+journal et ses imports, sans migration. Aucun rafraîchissement global des données
+personnel à chaque export. Le marqueur est indépendant de shared_data_revision.
+La vue visible vérifie sa révision toutes les cinq secondes, une seule demande à
+la fois. Changement : relecture avec les filtres courants. Vue cachée : pas de
+polling SQL. Retour sur la page : vérification. Changement de base ou retrait du
+droit : réponse ancienne refusée. Panne : cache invalidé, erreur générique visible
+et reprise au prochain contrôle. Paramètres privés du driver non affichés.
+Tests : publication native atomique, réponse d'une ancienne base, filtre conservé,
+cache non exportable après échec. La vraie latence entre PC n'est pas mesurée.
+
+L35-03 — P1/P2 confirmé — sorties sans trace et ZIP mal représenté
+Emplacements principaux : services/missions_desertion_export.py, stages_export.py,
+malade_punis_export.py, gain_perte_export.py, distinction_excel_export.py et
+src/sme_gend/ui/views/limite_age_view.py:152.
+Avant : absence d'appel au journal pour plusieurs tableaux et les PDF Personnel /
+Présents. ZIP : traces des DOCX temporaires ensuite supprimés, aucune trace du ZIP.
+Correction : une trace après sauvegarde réussie pour missions, désertions, stages
+locaux/extérieurs/internes, malades, punis/détention, gains/pertes, distinctions,
+modèle d'import des distinctions, congés et PDF des listes. Les types sont ajoutés
+au filtre de la vue ; Référentiel des structures devient également sélectionnable.
+Le wrapper Stage interne produit une seule trace, pas une trace supplémentaire.
+L'historique conserve le périmètre choisi, l'effectif et le fichier effectivement
+produit. Le format enregistré est le format réel, même si l'extension est omise.
+ZIP : génération interne sans journal DOCX, publication atomique de l'archive puis
+une trace ZIP avec effectif, nombre demandé et échecs. Le comportement de résultat
+partiel reste disponible et est explicite. Noms internes nettoyés et numérotés pour
+éviter collisions de noms identiques et erreurs de caractères de chemins Windows.
+Tests : huit routes Excel, succès/échec de sauvegarde (16 cas) ; ZIP à deux noms
+identiques, aucun DOCX temporaire journalisé ; absence d'extension et effectif zéro.
+
+L35-04 — P1 confirmé — échec PDF potentiellement présenté comme succès
+Emplacement : src/sme_gend/services/document_pdf_output.py:4.
+Correction : helper commun de publication atomique pour PDF Personnel, Présents
+et repli Qt des attestations. Contrôle de l'état d'erreur QPrinter et de la sortie
+non vide ; aucune trace de succès avant publication. Échec : ancien PDF préservé.
+Count/source/mois capturés depuis les données ou l'instantané déjà affichés.
+Les marges et orientations existantes sont transmises au helper, pas redessinées.
+Le dossier agent PDF et la conversion LibreOffice conservent leurs mécanismes
+existants ; leur source de journalisation est désormais explicitement passée.
+Tests : panne d'imprimante simulée sans trace et sans remplacement, succès avec
+une seule trace, création réelle d'un PDF natif Qt avec contrôle de son en-tête.
+Le simple aperçu d'impression n'est pas compté comme génération de fichier.
+Pas de preuve de tirage papier : l'application ne dispose pas de l'accusé matériel.
+
+L35-05 — P2 confirmé — recherche différente du texte affiché
+Emplacements : src/sme_gend/repositories/app_config_repository.py:56,
+src/sme_gend/repositories/app_config_repository.py:39,
+src/sme_gend/ui/views/doc_gen_log_view.py:512.
+Avant : rechercher la date locale affichée ou Attestation (PDF) ne trouvait pas
+l'entrée ; la recherche dans le JSON brut trouvait des clés techniques invisibles
+comme doc_type. Un tableau sans liste de personnes pouvait montrer un effectif vide.
+Correction : recherche sur valeurs des champs, libellés de type et type (FORMAT).
+Dates complètes jj/mm/aaaa, avec heure HH:MM ou HH:MM:SS : bornes locales converties
+en UTC. Combinaison ET avec type et période SME, avant LIMIT. Accents et caractères
+%, _, =, antislash restent couverts par les tests SQL et les échappements existants.
+Le prédicat en mémoire garde également le texte de date et type affichés.
+Le préfixe d'action doc_gen échappe maintenant son underscore : docXgen d'un autre
+module ne doit pas entrer dans ce journal.
+Affichage : Auteur ajouté, effectif toujours visible même avec persons=[], types
+manquants ajoutés, libellés Année SME/Mois SME pour distinguer période des données
+et date réelle d'action. Les attestations sans période SME ne sont pas affectées
+artificiellement au mois du jour ; leur date reste recherchable.
+Tests : formats de date, type+format, clés techniques exclues, scope d'action,
+auteur, effectif et régressions des droits/type/période/limite des lots précédents.
+
+L35-06 — P1 confirmé — import CSV non atomique et dédoublonnage incomplet
+Emplacements : src/sme_gend/services/doc_gen_log.py:600,
+src/sme_gend/repositories/app_config_repository.py:565.
+Avant : mélange du miroir local (potentiellement une autre base) avec un tail
+central limité à 50 000 ; faux déjà-présent ou doublons plus anciens. Chaque ajout
+était validé séparément. Une panne au second laissait le premier. Si la table était
+absente, import local annoncé comme réussi mais absent de la consultation centrale.
+Correction : droit administrateur vérifié avant ouverture du CSV ; source capturée
+par la vue ; écriture centrale obligatoire. Fusion et ajouts dans une transaction,
+sous coordination du journal. Dédoublonnage sur les fenêtres temporelles candidates,
+par lots de 200 fenêtres, sans limite globale de tail et sans lecture du miroir.
+Réimport concurrent du même fichier : un seul ajout. Erreur : message explicite
+et pas de repli local annoncé comme import réussi. En cas d'acquittement incertain,
+le message invite à vérifier le journal avant de réessayer.
+Les auteurs/horodatages historiques importés sont conservés ; trace séparée de
+l'importateur avec added/already_present/invalid. Pas de perte silencieuse des noms
+au-delà de cinquante lors de l'import. L'export CSV reste réimportable et conserve
+les mêmes lignes que la vue, copiées avant le dialogue de fichier.
+Tests natifs : miroir d'une autre base ignoré, deuxième ligne échouée annulant tout,
+import à deux threads, historique de 50 002 événements, 55 noms préservés, réimport
+idempotent et auteur original distinct de l'opérateur d'import.
+
+L35-07 — P2 confirmé par lecture et régression — précision des horodatages
+Emplacement : services/doc_gen_log.py:_normalize_ts et doc_entry_fingerprint.
+Avant : empreinte ramenée à la seconde. Deux générations différentes à quelques
+millisecondes d'écart pouvaient être fusionnées pendant le réimport du CSV.
+Correction : précision milliseconde cohérente avec DATETIME(3), normalisation UTC
+et écriture déterministe. Pas de changement de schéma ; anciens formats sans
+fraction toujours lus. Recherche des candidats sur la seconde entière, comparaison
+des empreintes avec leurs millisecondes.
+Test : .123 et .456 dans une même seconde, deux ajouts puis deux déjà-présents.
+Une précision plus fine que celle de la base n'est pas revendiquée.
+
+Vérifications réellement exécutées
+Reproductions initiales : 11 échecs et 8 réussites locales ; sept échecs natifs
+MySQL. Les échecs correspondent à la persistance, aux routes absentes, au compteur,
+aux dates/libellés et aux défauts d'import décrits ci-dessus.
+La première suite élargie a révélé huit tests de mise en page dépendant implicitement
+du repli silencieux. Ils isolent maintenant explicitement la persistance MySQL,
+sans supprimer les contrôles de fichiers, et le contrat de fake append renvoie
+True. La vraie persistance est exercée par les tests natifs dédiés.
+Une première fixture de source explicite bloquait aussi la lecture des préférences
+d'identité hors session ; elle a été précisée avec un acteur synthétique pour
+isoler le profil cible, sans changer la politique d'identité de l'application.
+La fixture des 50 001 ajouts a été passée à un véritable INSERT groupé paramétré ;
+la première version exécutait un commit par ligne. Ce n'est pas présenté comme un
+gain de performance de l'application. Tous les logs intermédiaires sont conservés.
+Commandes finales avec avertissements Python/Qt/Pandas traités en erreurs :
+- suite locale entière hors intégration : 1456 réussites, 123.38 s ;
+- MySQL natif : 41 réussites, 70.53 s ;
+  19 nouveaux cas, 15 régressions de filtres et sept de reprise/miroirs ;
+  549 autres cas d'intégration hors sélection.
+Total : 1497 réussites finales, aucun échec ni test sauté dans ces commandes.
+25 nouveaux cas locaux ; aucun test désactivé. Les commandes exactes et codes de
+retour sont dans validation_summary.json. Pas de benchmark global ni gain de
+rapidité annoncé. Le polling se limite à une révision quand la vue est visible.
+
+Isolation et contrôle du lot
+MySQL 8.0.40 jetable, loopback:64062, datadir vérifié sous build. Schémas uniques
+impression_test_*. Le lanceur interdit les autres connexions, ODBC et écritures
+hors profils temporaires. Arrêt de cette seule instance après vérification que
+les schémas de test ont été supprimés. Aucun essai sur une base ou journal réel.
+35 fichiers Python existants modifiés (30 sources, cinq tests), un helper PDF,
+deux fichiers de tests et ce rapport ajoutés. 1223 fonctions/classes préservées
+dans les fichiers examinés ; aucune méthode existante supprimée. AST et empreintes
+contrôlés. Les moteurs de transactions, pool, authentification, reprise des miroirs,
+chemins atomiques, import métier, sauvegarde/restauration et tâches Qt restent
+inchangés. La nouvelle clé app_config utilise le schéma existant ; aucune migration.
+Patch inverse vérifié en lecture seule. baseline/ conserve les originaux ;
+changes_manifest.json et corrections_only.patch isolent ce lot du travail antérieur.
+Anciens EXE et ZIP contrôlés inchangés. Aucun exécutable généré.
+
+Limites et validation restante
+- Les anciennes traces absentes, noms tronqués ou destinations temporaires ne sont
+  pas réparés rétroactivement : aucune preuve ne permet de recréer une génération
+  passée ou d'inventer son auteur. Les anciens journaux n'ont pas été modifiés.
+- Le mois SME décrit la période des données, pas la date de génération. Choisir
+  toutes les périodes pour retrouver les attestations qui n'avaient pas de mois.
+  Les nouveaux libellés et la recherche de date rendent cette distinction explicite.
+- Un fichier généré et son journal SQL ne forment pas une transaction distribuée.
+  Si la confirmation MySQL manque, le fichier est conservé et l'erreur signalée.
+  Un miroir hors ligne éventuel n'est pas assimilé à une entrée centrale confirmée.
+- Les vrais PC/SMB ne sont pas disponibles. Détection locale de conflit, transactions,
+  deux clients SQL et réactions Qt contrôlées ne remplacent pas une recette réseau.
+- Tous les postes devront utiliser les corrections pour émettre les nouvelles
+  notifications. Les anciens clients non modifiés nécessitent Actualiser.
+- Recette Word/LibreOffice/imprimante physique et rendu de tous les gabarits réels
+  non exécutés. Un PDF natif synthétique a été créé ; pas d'affirmation de validation
+  exhaustive de mise en page. Les aperçus Word temporaires explicitement ouverts
+  conservent leurs générations documentaires existantes.
+- Les autres actions métier restent dans leurs journaux dédiés. Les exports CSV
+  utilitaires de chaque écran n'ont pas tous été transformés en types de documents.
+  Pas d'affirmation que l'application entière est sans bugs.
+
+Recette conseillée sur copie de travail
+1. Générer un Excel/PDF puis ouvrir l'historique ; comparer type, auteur, effectif,
+   chemin, date et mois SME. Vérifier tous types puis un type et mois combinés.
+2. Rechercher un nom accentué, Attestation (PDF), une date jj/mm/aaaa et un nom de
+   fichier. Modifier rapidement les filtres et vérifier qu'aucune ancienne réponse
+   ne revient ; l'export CSV doit contenir exactement les résultats affichés.
+3. Importer deux fois le même CSV sur base de test, puis depuis deux postes ;
+   vérifier l'absence de doublons et la trace d'opérateur. Simuler panne sur copie.
+4. Créer un ZIP à homonymes et avec un échec de document ; contrôler l'effectif
+   réellement archivé et la trace du ZIP final. Les échecs ne doivent pas devenir
+   des attestations temporaires présentées comme livrées.
+5. Tester coupure MySQL après création du fichier, retour du serveur et reprise
+   du miroir local ; conserver le fichier signalé et vérifier le journal avant
+   de relancer une génération.
+Retour arrière : examiner/inverser seulement le patch de ce lot sur une copie en
+préservant les travaux ultérieurs. Aucun reset global ni restauration de données
+nécessaire pour ces corrections ; aucune donnée réelle n'a été écrite.

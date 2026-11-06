@@ -1,0 +1,44 @@
+Corrections du cochage et des grades dans les archives Access
+1 novembre 2026
+
+1. Zone de saisie parasite dans Attestations
+La colonne de sélection déclarait ItemIsEditable et le tableau autorisait
+tous les déclencheurs d'édition. Un clic pouvait donc ouvrir un éditeur texte
+au lieu de rester limité à la sélection.
+La colonne conserve ItemIsUserCheckable, sans ItemIsEditable. Les tableaux
+Attestations et Soit transmis désactivent les éditeurs de cellules. Le cochage
+à la souris et avec Espace reste fonctionnel. Les champs de configuration
+prévus pour être modifiables ne sont pas concernés.
+
+2. Grades des personnels dans les archives Access
+La ListeGenerale et les snapshots de TabGainPerte sont maintenant exportés
+avec les codes courts du référentiel ref_grade : par exemple CAPITAINE -> CNE.
+Le référentiel est lu sur la connexion MySQL déjà utilisée par l'export.
+Un code déjà présent est conservé sous sa forme de référence. Les libellés
+sont comparés exactement après normalisation de casse, accents et ponctuation.
+Aucune correspondance partielle ou abréviation inventée n'est utilisée.
+Un grade inconnu ou ambigu interrompt l'export avec une explication. La liste
+du personnel est validée avant sa première écriture. L'archive finale bénéficie
+toujours de la publication atomique existante : un échec ne publie pas une
+nouvelle archive partiellement écrite. Les grades manquants restent vides.
+La table de référence TabGrade conserve naturellement son couple CodeG /
+libellé descriptif ; les valeurs de grade des personnels utilisent CodeG.
+Les sources MySQL ne sont pas réécrites par cette conversion.
+
+Fichiers concernés :
+- src/sme_gend/ui/views/limite_age_view.py
+- src/sme_gend/ui/views/soit_transmis_view.py
+- src/sme_gend/services/mysql_bundle_export_to_access.py
+- tests/test_checkbox_access_grade_fixes.py (nouveau)
+
+Vérification : 190 tests réussis en 6,49 secondes, couvrant le clic réel Qt,
+le clavier, l'absence d'éditeur, la conversion des grades, les codes existants,
+les ambiguïtés et grades inconnus, les gains/pertes et les régressions des
+identités Access, profils, stages, attestations et transferts de mois.
+git diff --check : aucune erreur sur les trois sources modifiées.
+
+Limites : tests Access avec curseurs simulés, sans ouvrir une base réelle.
+Pas de recette native via le pilote Access sur une copie de base complète.
+Les anciennes archives ne sont pas réécrites : il faut les exporter de nouveau
+pour bénéficier du format corrigé. Aucun changement aux données réelles,
+aucun exécutable généré. Modifications préexistantes conservées.

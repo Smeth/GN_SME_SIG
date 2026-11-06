@@ -1,0 +1,183 @@
+IMPRESSION — SCRIPTS DE MAINTENANCE AUTOMATIQUE — LOT 31
+31/10/2026
+
+Périmètre et protection
+Sept points d'entrée : run_referentiel_maintenance, run_coherence_mois,
+run_dossier_maintenance, run_sot_resync, run_purge_phantom_segments,
+run_fix_est_actuelle et run_revert_stale_carry_forward ; services associés et
+dialogue de réconciliation carrière. Aucun exécutable, aucune dépendance ajoutée,
+aucune migration, aucune donnée de production ou fichier utilisateur modifié.
+Branche feature/mysql-migration ; travaux préexistants préservés, sans reset ni
+commit. Les fichiers sources/ du miroir sont restés en lecture seule. Originaux,
+empreintes, états Git et patch limité à ce lot conservés dans le dossier de preuves.
+Les anciens EXE et ZIP sont vérifiés inchangés par SHA-256.
+
+L31-01 — P1 confirmé — validations partielles des traitements automatiques
+Emplacements : src/sme_gend/services/automatic_maintenance.py:134,
+src/sme_gend/services/automatic_jobs.py:47, src/sme_gend/services/automatic_jobs.py:25,
+services/referentiel_maintenance.py, carriere_reconciliation.py et sot_maintenance.py.
+Reproductions avant correction : un échec tardif de layout conservait une partie
+de la maintenance ; un échec au second agent conservait la première projection.
+Cause : sous-opérations et connexions validées avant la fin du traitement global.
+Correction : propriétaire transactionnel commun, réutilisation des transactions
+existantes, contrôles sous verrou, échec interne mémorisé même si un appelant
+l'intercepte. Référentiels, dossiers, carrières, layout et signal partagent le commit.
+Pas de DDL dans le lot métier. Les caches sont invalidés après le commit réel.
+Tests : pannes tardives, transactions externes validées/annulées, erreur interne
+interceptée, ancien snapshot REPEATABLE READ refusé, notification en panne.
+Les moteurs transactionnels existants n'ont pas été modifiés.
+
+L31-02 — P1 confirmé — absence de conflits et notifications partagées
+Emplacements : src/sme_gend/services/automatic_maintenance.py:119, src/sme_gend/services/automatic_maintenance.py:175,
+ui/carriere_reconciliation_dialog.py ; services de maintenance ci-dessus.
+Avant : traitements sur un état devenu ancien et modifications sans signal de
+synchronisation. Deux tests avant correction reproduisent l'absence de publication.
+Correction : empreinte liée à la base, à l'action, aux options effectives et à
+l'état des tables pertinentes ; comparaison sous verrou avant l'écriture.
+Plans d'une autre base/action/options ou devenus anciens refusés sans rejouage.
+Lecture préparatoire cohérente en transaction READ ONLY, sans initialisation DDL.
+L'interface prépare sa version avant la confirmation et la transmet au worker.
+Un seul signal est publié au commit du lot modifiant les données ; zéro pour
+un no-op, un conflit ou un rollback. Les captures excluent les photos et secrets,
+préservent les types binaires et la précision décimale et lisent par lots.
+Les compteurs tables_examined décrivent le périmètre lu : ce n'est pas une
+simulation ligne par ligne des changements métier à venir.
+Tests : versions périmées référentiel/historique/carrière/mois, deux demandes
+concurrentes avec un seul gagnant, données et révision atomiques, précision décimale.
+
+L31-03 — P1 confirmé — dédoublonnage supprimant des informations distinctes
+Emplacement : src/sme_gend/services/automatic_jobs.py:8,
+scripts/run_dossier_maintenance.py.
+Avant : deux diplômes ou grades différents au même agent et à la même date,
+y compris une date NULL, pouvaient être pris pour des doublons et supprimés.
+Un test avant correction reproduit la perte du diplôme distinct.
+Correction : supprimer seulement les doublons strictement identiques sur toutes
+les colonnes sauf l'ID, avec comparaison binaire et NULL-safe ; conserver le plus
+grand ID. Catégories, observations, provenance et différences de casse préservées.
+Tests MySQL : dates identiques/NULL, diplômes/grades différents, casse distincte,
+véritable doublon supprimé et une seule publication.
+
+L31-04 — P1 confirmé — mauvais périmètre temporel des réparations
+Emplacements : src/sme_gend/services/sot_maintenance.py:25,
+src/sme_gend/services/sot_maintenance.py:279, revert_stale_carry_forward,
+trim_effectif_to_import_batch et src/sme_gend/services/automatic_cli.py.
+Avant : scripts avec mois de mai/avril 2026 implicites ; une réparation d'archive
+réactivait cette archive à la place du mois actif ; un segment futur pouvait être
+copié dans le passé ; une perte future empêchait une copie antérieure légitime.
+Les trois derniers cas sont reproduits par trois échecs MySQL avant correction.
+Correction : mois explicite strict YYYY-MM ou unique mois ouvert autoritaire ;
+pas de déduction silencieuse si les périodes sont ambiguës. Revert exige --mois
+et --keep-from. Les indicateurs actuels suivent le mois actif, pas le mois réparé ;
+sans mois ouvert ils sont préservés. La source de report doit précéder la cible
+(ou être non datée), et une perte après la cible ne l'exclut pas.
+Le cache référentiel est rechargé après dédoublonnage pour éviter des IDs supprimés.
+Tests : archives sans activation, sources/pertes futures, paramètres invalides,
+changement de mois pendant la préparation, projection d'un mois explicite.
+
+L31-05 — P0 potentiel réduit — DDL destructif mélangé à la maintenance
+Emplacements : src/sme_gend/services/legacy_cleanup.py:65,
+src/sme_gend/services/legacy_cleanup.py:102, referentiel_maintenance.drop_tab_legacy_tables.
+Risque confirmé dans le code : DROP TABLE effectue un commit implicite MySQL ;
+un rollback métier ne garantit pas la récupération des tables déjà supprimées.
+Décision utilisateur : conserver la suppression dans une étape séparée, avec
+sauvegarde obligatoire et maintenance confirmée, et signaler tout résultat partiel.
+Correction : --drop-legacy est une phase dédiée, interdite dans la transaction
+métier et dans les combinaisons ambiguës. Liste historique de 13 noms autorisés,
+inventaire versionné et vérification des dépendances FK/vues. Pas d'élargissement
+des tables supprimables. Connexion dédiée hors pool, verrou de maintenance commun
+à la restauration, contrôle des autres connexions visibles, fenêtre confirmée.
+Avant DROP : nouveau sous-dossier privé avec ACL native vérifiée, dump exclusif,
+vérification exacte du schéma, des lignes et compteurs, empreinte de sauvegarde,
+journal durable puis nouvelle comparaison sous verrou. Une seule commande DROP.
+Après : publication si confirmée ; journal des tables supprimées/restantes et
+de l'issue connue ou incertaine. Les pannes de publication/connexion/écriture du
+journal ne produisent jamais l'affirmation trompeuse « tout annulé ».
+Tests : sauvegarde réelle puis restauration SQL réelle dans une base jetable,
+Unicode/binaire/ID zéro, plan périmé, sauvegarde/ACL en échec, transaction externe,
+autre client ouvert, FK active, panne après suppression partielle et notification.
+Cette phase reste irréversible par rollback classique. Pas de reprise automatique
+du DROP : maintenir la maintenance, examiner recovery.json et la sauvegarde,
+tester la récupération sur copie avant toute intervention réelle.
+
+L31-06 — P2 robustesse — CLI et diagnostic
+Emplacement : src/sme_gend/services/automatic_cli.py:57 et les sept scripts listés en tête.
+Le lancement simple est désormais un aperçu sans écriture de données MySQL.
+--apply exige --expected-revision issu du même aperçu, avec les mêmes options.
+Une version ancienne donne une erreur explicite ; pas de retry automatique.
+--drop-legacy --apply exige aussi --backup-dir et --maintenance-confirmed.
+La purge affiche les compteurs, pas les noms/identifiants des agents supprimés.
+--help fonctionne sans charger les réglages ni ouvrir la base. Les erreurs
+techniques sont explicites sans imprimer les paramètres secrets des connexions.
+Le helper historique d'initialisation additive reste séparé ; il refuse une
+transaction métier. Aucune migration n'est exécutée par les nouveaux aperçus.
+
+Validation réellement exécutée
+Commandes finales exactes et codes de retour : validation_summary.json.
+- Suite locale hors intégration : 1322 réussites en 1532.66 s.
+- MySQL natif isolé : 49 réussites en 1715.19 s ;
+  30 nouveaux cas automatiques, 12 cas DDL et 7 régressions existantes.
+  549 cas hors filtre ne sont pas exécutés dans cette commande.
+Total : 1371 cas pytest finaux réussis, avec -W error ;
+aucun test désactivé, aucun échec ou test sauté dans ces commandes.
+Ces durées sont celles des tests et ne constituent pas un benchmark applicatif.
+Les dernières exécutions ont été lentes ; aucune cause mesurée ni gain de vitesse
+de l'application n'est établi dans ce lot.
+
+Deux processus Python indépendants et MySQL réel : le second ne voit pas les
+écritures non validées, puis observe ensemble références et révision après commit.
+Son ancien plan de maintenance/purge est refusé ; état et signal sont préservés.
+Exactement une publication. Preuve : automatic_conflict__hhh8od6\validation.json.
+Les fichiers locaux de profil/acteur sont substitués pour protéger les réglages
+réels ; SQL métier, transactions, versions et révisions ne sont pas simulés.
+
+Access ODBC natif + MySQL : 26 contrôles réussis, zéro anomalie, sur 8 agents
+synthétiques. Export puis réimports successifs : identités internes/Access,
+accents, profil, dates, diplômes/grades, stages/missions, absence de doublons,
+autre mois/statuts conservés et contrôles SME/DPF des effectifs/mois/zones imprimées.
+Une copie synthétique sans nouvelle table de profil conserve les profils existants.
+Seul un MDB synthétique est ouvert ; sauvegarde de sécurité et initialisation de
+configuration sont substituées uniquement pour les bases neuves jetables.
+Preuve : access_native_qvrue546\after_12bg43wl\validation.json. Ce n'est pas une recette visuelle
+complète de toutes les mises en page ; aucun gabarit/export n'est modifié ici.
+Sept --help exécutés dans des processus neufs : zéro tentative d'E/S externe.
+
+MySQL 8.0.40 sur loopback:64062, datadir vérifié sous build, bases uniques jetables.
+Les lanceurs bloquent les autres connexions et les fichiers opérationnels.
+L'instance est arrêtée après contrôle d'absence de bases de test restantes.
+Ce sont deux clients locaux, pas deux PC physiques ni un partage SMB réel.
+
+Contrôle de changement et retour arrière
+31 fonctions préservées dans 11 fichiers Python existants src/scripts ;
+aucune fonction existante supprimée. Les moteurs pool/transactions/authentification,
+import/restauration/sauvegarde et garde de mois actif restent inchangés.
+AST de tous les Python src/tests/scripts contrôlé, empreintes du code figées pour
+les essais, comparaison Git et vérification en lecture seule du patch inverse.
+changes_manifest.json et corrections_only.patch isolent ce lot ; baseline/ garde
+les originaux. Aucune migration requise. Pour revenir sur le code, examiner ce
+patch sur une copie en préservant les travaux antérieurs/ultérieurs, sans reset.
+Un retour arrière du code ne restaure pas des données déjà validées ou supprimées.
+
+Limites et suite ordonnée
+1. Avant usage réel, sauvegarde vérifiée et essai sur copie anonymisée : les
+   heuristiques existantes de rapprochement flou, purge et rapports restent
+   inchangées. L'aperçu décrit l'état et les options, pas la liste prédite de toutes
+   les modifications. Aucun traitement automatique réel n'a été lancé ici.
+2. Recette sur les vrais postes et SMB indisponibles : conflits, fermeture des
+   modales, rafraîchissement et coupure réseau ; ACL du dossier de sauvegarde sur
+   le partage à tester. Le test local ne démontre pas leur fonctionnement réel.
+3. Maintenance DDL : fermer les autres postes demeure obligatoire. La visibilité
+   des connexions d'autres comptes dépend des privilèges MySQL ; la vérification
+   locale ne remplace pas cette consigne. Triggers/routines/events et moteurs
+   non pris en charge font refuser la sauvegarde DDL avant suppression.
+   Des objets SQL personnalisés et données hiérarchiques corrompues restent à
+   examiner sur copie ; aucune garantie universelle n'est avancée à leur sujet.
+4. Droits backend vérifiés lorsque le contexte applicatif est authentifié.
+   Le fonctionnement CLI local existant n'ajoute pas de connexion applicative
+   indépendante : protéger les accès OS/MySQL et les fichiers de configuration.
+5. Empreintes larges et verrous peuvent provoquer de la contention sur une grosse
+   base ; mesurer en préproduction avant optimisation. Aucun gain chiffré annoncé.
+   Les empreintes d'état ne distinguent pas un aller-retour identique (ABA).
+   Anciens exécutables et SQL direct peuvent contourner les gardes applicatives.
+6. La suite MySQL complète n'a pas été rejouée. Poursuivre les autres P2/P3 et
+   mesures de tâches de fond avec des données représentatives. L'application
+   entière n'est pas déclarée exempte de bugs.

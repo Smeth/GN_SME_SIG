@@ -1,0 +1,93 @@
+ARCHIVES ET CLOTURE — SUPPRESSION DU SIGNATAIRE ET AUDIT
+1er novembre 2026
+
+MISE A JOUR : ce document conserve les constats de l'audit initial.
+Les corrections et compléments réalisés ensuite sont décrits dans
+ARCHIVES_CLOTURE_CORRECTIONS_2026-11-01.txt, avec les limites restantes.
+
+MODIFICATION REALISEE
+Le champ « Signataire SME », ses boutons Enregistrer / Recharger et leur code
+d'interface sont supprimés. Le compte connecté reste utilisé par la journalisation.
+Les anciennes préférences stockées ne sont pas effacées : aucune donnée réelle
+n'a été modifiée. Les autres constats ci-dessous ne sont pas corrigés dans cette
+intervention, consacrée à la suppression demandée et à l'analyse.
+
+Fichiers fonctionnels modifiés :
+- src/sme_gend/ui/views/sme_workflow_panel.py
+- src/sme_gend/ui/views/month_pilotage_view.py
+Tests adaptés : tests/test_workspace_preferences.py et test_archive_cycle_ui.py.
+
+BUGS REPRODUITS AVEC DONNEES SIMULEES
+1. Priorité haute — Mois incorrect dans les contrôles des effectifs.
+   services/pre_closure_service.py transmet les paramètres de consultation au
+   ListeGeneraleRepository sans les cadrer sur le mois à clôturer. Si septembre
+   est consulté et janvier contrôlé, les effectifs de septembre sont lus.
+   Le rapport peut donc mélanger plusieurs références temporelles.
+
+2. Priorité haute — Contrôles des mouvements indisponibles sans échec visible.
+   Dans pre_closure_service.py, des exceptions de lecture des gains/pertes et
+   de cohérence sont absorbées. Une simulation de lecture impossible laisse un
+   rapport autorisant la poursuite, sans contrôle de mouvements en échec.
+   Une vérification indisponible doit être distinguée d'une vérification réussie.
+   Les protections de sauvegarde et d'exécution restent par ailleurs présentes.
+
+3. Priorité moyenne — Validation contradictoire du mois suivant.
+   Le contrôle préalable accepte janvier 2026 vers décembre 2025, tandis que
+   sme_month_closure refuse ensuite cette chronologie. Le refus final protège
+   les données ; le résultat préalable est toutefois trompeur.
+
+4. Priorité moyenne — Tâches existantes non actualisées.
+   WorkflowTaskService.sync_from_pre_closure ignore une tâche ouverte ayant le
+   même type et titre. Son détail et sa gravité ne sont pas mis à jour lors
+   d'un nouveau constat. Les constats disparus ne disposent pas non plus d'un
+   état explicite « à revalider / devenu obsolète ».
+
+5. Priorité moyenne — Erreur du catalogue masquée par un filtre.
+   archives_view.py conserve les anciens fichiers après un échec de lecture.
+   Une recherche remplace ensuite l'avertissement de données non actualisées
+   par un simple compteur. L'état périmé doit rester visible.
+
+6. Priorité moyenne — Anciennes périodes accessibles après changement de source.
+   Après changement de configuration puis échec de rechargement, la table des
+   périodes conserve les lignes précédentes et permet encore leur consultation.
+   Les actions doivent être neutralisées tant que le nouveau contexte n'est pas
+   chargé. Cela ne prouve pas qu'une clôture incorrecte pourrait être exécutée :
+   le service de clôture possède ses propres vérifications.
+
+AUTRE INCOHERENCE D'INTERFACE CONFIRMEE PAR LE CODE
+« Vider un mois » est activé avec workflow.import_archive, mais la boîte suivante
+exige le rôle administrateur. Un utilisateur autorisé à importer peut donc voir
+une action active puis être refusé. Il ne s'agit pas d'un contournement de droits.
+
+FONCTIONNALITES MANQUANTES
+- Dossier de clôture consultable par mois : auteur, date, résultat, rapport complet
+  des contrôles et fichiers associés réunis dans un écran. Des traces d'audit
+  existent déjà ; elles ne constituent pas cette consultation consolidée.
+- Validation des archives : le catalogue classe selon extension et nom de fichier,
+  sans certification du contenu, manifeste ni contrôle d'intégrité. Un ZIP peut
+  être présenté comme sauvegarde complète sans preuve qu'il soit restaurable.
+  Le mois déduit du nom doit être distingué d'une période vérifiée.
+- Restauration assistée d'une période avec aperçu et contrôle des conflits.
+  Un SQL est une sauvegarde globale : l'interface informe, mais ne restaure pas
+  un mois isolé. Le ZIP renvoie au parcours général de restauration existant.
+- Historique des tâches traitées, consultation de qui/quand, commentaire de
+  traitement et réactivation explicite. Les métadonnées de résolution existent
+  en stockage, mais l'écran ne montre que les tâches ouvertes.
+- Passage direct d'un constat préalable aux dossiers ou écrans de correction.
+  Le rapport actuel est un tableau de consultation ; il manque aussi un export
+  et une conservation consultable de chaque contrôle dans le dossier de clôture.
+
+VERIFICATION ET LIMITES
+80 tests ciblés réussis en 12,56 secondes : interface archives/cycle, sûreté des
+opérations métier, préférences et régressions authentification/journalisation.
+Huit rendus d'interface générés avec données simulées ; le rendu du cycle confirme
+la disparition du champ. Diff --check sans erreur sur les quatre fichiers adaptés.
+Les anomalies de whitespace déjà présentes ailleurs dans le dépôt sont conservées.
+Six reproductions : build/audit_20261101/probe_archive_gaps.py ; résultats dans
+build/audit_20261101/archive-gaps-evidence.json.
+Résultat des tests : build/audit_20261101/archive-field-removal.txt.
+Aucune connexion à la base réelle, aucune clôture ni restauration réelle,
+aucun exécutable généré. La sauvegarde/restauration native Windows et Access/ODBC
+de bout en bout reste à valider dans un environnement de recette dédié.
+Cette analyse établit les constats ci-dessus ; elle ne garantit pas l'absence
+de tout autre défaut dans les parcours non exercés.

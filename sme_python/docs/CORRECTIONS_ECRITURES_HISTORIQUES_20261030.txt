@@ -1,0 +1,282 @@
+IMPRESSION — LOT 8 : ÉCRITURES ET HISTORIQUES CONCURRENTS
+Sources corrigées ; aucun exécutable construit dans ce lot.
+
+PÉRIMÈTRE ET PROTECTION
+
+Branche existante conservée : feature/mysql-migration.
+Les modifications déjà présentes n'ont été ni annulées, ni commitées, ni
+réinitialisées. Les copies précédant ce lot, le manifeste et le patch se trouvent
+dans build/corrections_20261030_lot8/. Le patch compare les sources avec leur
+état de travail initial, et non avec HEAD : il isole donc ce lot des travaux
+préexistants et des lots antérieurs.
+
+Les essais SQL ont utilisé uniquement l'instance jetable sous build/ et des bases
+impression_test_<UUID>. La fixture vérifie le port de test et @@datadir avant
+de créer ou supprimer sa propre base. Les autres connexions MySQL, ODBC et
+accès réseau sont bloqués par le lanceur. Aucun fichier utilisateur, aucune
+base réelle et aucun schéma réel n'ont été modifiés.
+
+L8-01 — P1 CONFIRMÉ : FRONTIÈRES D'ÉCRITURE ET VERROUS
+
+Fichiers : repositories/write_guard.py, mysql_connection.py,
+mysql_agent_repository.py, mysql_agent_dossier_repository.py,
+mysql_numerique_repository.py, mysql_agent_conge_repository.py ;
+services/personnel_service.py, dossier_write.py.
+
+53 méthodes opérationnelles des quatre dépôts partagent maintenant la frontière
+transactionnelle, même lorsqu'elles sont appelées directement. Les appels
+imbriqués réutilisent la transaction propriétaire ; un helper ne peut donc
+plus valider seul la première moitié d'une opération composée. La révision
+commune aux postes est publiée dans la transaction propriétaire.
+
+Les écritures rattachées à un agent verrouillent d'abord son identité, puis les
+événements concernés. L'ordre parent puis carrière/événement limite les courses
+entre mutation d'historique et projection de la fiche. Les lectures qui servent
+au contrôle d'historique sont des lectures courantes verrouillées.
+
+Les transactions courtes de saisie utilisent READ COMMITTED pour voir les
+changements validés avant l'obtention du verrou parent. Le réglage concerne
+une seule transaction, immédiatement démarrée, sans changement de session ni
+de configuration serveur. Un test vérifie que la connexion réutilisée retrouve
+ensuite l'isolation par défaut ; un autre reproduit une lecture antérieure à
+la modification d'un autre poste et vérifie la projection finale.
+
+Une transaction active non déclarée est refusée plutôt que validée à l'insu de
+son propriétaire. Les imports et le DDL conservent leurs frontières dédiées.
+
+L8-02 — P1 CONFIRMÉ : FORMULAIRES PÉRIMÉS
+
+Fichiers : services/dossier_write.py ; ui/personnel_dossier_dialog.py ;
+repositories/monthly_write_guard.py ; models/numerique_satellite.py ;
+repositories/mysql_numerique_repository.py, numerique_satellite_repository.py ;
+services/padmin_satellite_apply.py ; ui/views/missions_view.py,
+malade_punis_view.py, desertion_view.py, stages_view.py.
+
+Les 18 routes de modification/suppression des neuf familles du dossier
+(diplômes, grades, affectations, distinctions, missions, stages, maladies,
+désertions et congés) transmettent l'état réellement présenté à l'utilisateur.
+Après verrouillage, il est comparé à l'état courant de l'événement. Si un autre
+poste l'a modifié ou supprimé, l'opération est refusée avec demande de relecture.
+Le contrôle de l'agent affiché est conservé ; la maladie transmet aussi son
+propriétaire depuis le dossier.
+
+Les fiches mensuelles portent un jeton opaque calculé dans leur requête de
+chargement existante : identité de la ligne, période et empreinte des données
+éditables et des champs qu'un ancien remplacement pouvait perdre. Aucun jeton
+n'est ajouté au schéma MySQL ou aux exports métier. Un réimport qui remplace
+une ligne par une autre de même contenu invalide aussi l'ancien jeton.
+
+Les clichés sont capturés avant les boucles d'événements des modales. Un
+rafraîchissement en arrière-plan pendant la saisie ne remplace pas le cliché
+associé aux champs édités. Les deux formulaires groupés ont également ce contrôle.
+
+Deux rédacteurs du même événement ne peuvent plus tous deux réussir à partir
+du même cliché. Les tests vérifient les neuf familles, les quatre fiches
+mensuelles et les deux formulaires groupés sur un vrai MySQL jetable.
+
+L8-03 — P1 CONFIRMÉ : PORTÉE MENSUELLE ET CHAMPS NON PRÉSENTÉS
+
+Fichier : repositories/mysql_numerique_repository.py.
+
+Le remplacement d'une mission supprimait les lignes portant le même ancien
+identifiant dans tous les mois. Le DELETE est désormais limité à la période
+exacte, y compris le cas NULL. La régression a été rejouée avec l'ancienne
+méthode : la mission d'octobre disparaissait lors de la sauvegarde de septembre.
+
+Quand le formulaire dispose d'un cliché, l'édition met à jour la ligne affichée
+par son identifiant. Elle préserve sa clé, les autres événements et les champs
+absents du petit formulaire, notamment la date de fin d'une mission ou maladie.
+Un repli de stage depuis le mois précédent crée le mois sélectionné sans
+modifier la fiche de l'ancien mois.
+
+Une période demandée inexistante provoque une erreur explicite ; elle n'est
+plus transformée en écriture globale sans période. Les maladies saisies dans
+le dossier restent protégées de la suppression depuis l'écran mensuel.
+
+L8-04 — P1 CONFIRMÉ : POSITION, FICHE COMPLÉMENTAIRE ET FORMULAIRE COMPLET
+
+Fichiers : ui/views/missions_view.py, stages_view.py, edition_sme_view.py,
+personnel_list_view.py ; ui/personnel_edit_dialog.py, personnel_dossier_dialog.py ;
+services/personnel_form_service.py, padmin_satellite_apply.py.
+
+Le départ en mission pouvait valider la position avant le formulaire. La mise
+en stage compensait un échec par une deuxième écriture, sans annuler tous les
+registres déjà modifiés. Les mises et fins de stage et le départ en mission
+utilisent maintenant une transaction courte par agent après validation des
+modales. Une erreur annule la position et les écritures satellites liées.
+Le diplôme facultatif de fin de stage reste une opération distincte, avec son
+message explicite d'échec : cette règle métier préexistante n'a pas été changée.
+
+Le formulaire complet écrivait aussi des liens de catalogue et des fiches
+satellites avant que son propriétaire enregistre le personnel. Il prépare
+désormais les écritures ; ses cinq appelants actifs les enregistrent dans une
+transaction commune. Une panne du catalogue ou de la fiche complémentaire
+annule la fiche principale. Les positions complémentaires utilisent le même
+préparateur que l'édition SME.
+
+La reconstruction du résultat du formulaire perdait access_join_id. Le résultat
+est désormais obtenu par remplacement des champs édités dans le cliché initial,
+ce qui préserve la clé de liaison et les métadonnées non présentées.
+
+Après une sauvegarde réussie, une panne de relecture affiche explicitement que
+l'enregistrement a eu lieu et demande de recharger. Elle n'est plus présentée
+comme une annulation de l'écriture.
+
+L8-05 — P1 CONFIRMÉ : AJOUTS CONCURRENTS DU MÊME CONGÉ
+
+Fichiers : services/agent_dossier_events_service.py ;
+repositories/mysql_agent_conge_repository.py.
+
+L'ajout d'un congé pouvait déclencher l'upsert d'une entrée déjà existante et en
+remplacer silencieusement l'observation. Le service d'ajout demande maintenant
+une insertion seule et vérifie l'absence de cette clé sous verrou parent.
+Le deuxième ajout est refusé ; l'utilisateur doit recharger puis utiliser
+Modifier. Le mode upsert des appelants historiques reste disponible et les
+imports gardent leur mécanisme de remplacement.
+Avant correction, les deux ajouts réussissaient et le second écrasait le premier.
+Les scénarios séquentiel et simultané vérifient maintenant un seul succès.
+
+L8-06 — P1 CONFIRMÉ : JOURNAUX LOCAUX ET ÉCHECS D'AUDIT
+
+Fichiers : repositories/mysql_connection.py ; services/local_audit_mirror.py,
+audit_log.py, sensitive_audit_log.py.
+
+Les miroirs JSONL étaient écrits avant le commit ; une opération annulée pouvait
+donc rester visible comme réussie dans ces fichiers. Ils sont maintenant publiés
+après le commit réel de la transaction propriétaire. Un rollback, y compris
+une erreur du commit lui-même, abandonne les miroirs en attente.
+
+Les append sont protégés entre threads et entre processus par un verrou de
+fichier. Le test Windows avec quatre processus a vérifié 160 entrées JSONL
+longues et Unicode complètes, sans lignes perdues ni entrelacées. La suite
+vérifie aussi 80 écritures longues depuis huit threads.
+Référence du mécanisme Windows : https://docs.python.org/3/library/msvcrt.html#msvcrt.locking
+
+Une panne du miroir après commit signale explicitement que MySQL a enregistré
+les données et qu'il ne faut pas recommencer la modification. Les autres
+miroirs en attente sont tout de même tentés. Cela ne constitue pas une
+transaction distribuée : une panne de processus ou de disque peut encore
+laisser un miroir incomplet ; MySQL reste la source du journal.
+
+L'audit par lots ne se contente plus de journaliser son erreur puis de laisser
+un import actif continuer : si le journal MySQL échoue dans une transaction
+partagée, l'import est annulé. Ce rollback est vérifié nativement.
+
+L8-07 — P1 CONFIRMÉ : CRÉATION ET IDENTITÉ INTERNE AUTORISÉE
+
+Fichiers : models/personnel_identity.py ; repositories/mysql_agent_repository.py ;
+services/personnel_service.py ; ui/personnel_edit_dialog.py.
+
+Choix utilisateur appliqué : autoriser une identité interne distincte et
+conserver les identifiants Access existants.
+
+La création tentait INSERT ... legacy_access_id=NULL alors que le schéma exige
+une valeur. Ce défaut a été reproduit par le service de création réel avant
+correction. Les nouveaux agents reçoivent une clé technique GEN-APP-<UUID>,
+dans l'espace GEN déjà reconnu par l'application. Ce n'est pas un numéro Access
+fabriqué. La colonne de compatibilité existante peut ainsi rester NOT NULL ;
+aucune migration ni réécriture des anciens identifiants n'est nécessaire.
+
+La clé est allouée dès le brouillon de formulaire afin de ne pas interroger le
+dossier d'un autre agent avec l'identifiant temporaire 0. La création directe
+par service dispose aussi de cette allocation. La nouvelle fiche est relue
+avant les écritures de parcours et d'audit, qui utilisent sa clé effective.
+La restauration sans ancienne clé dispose du même repli interne.
+
+Les tests créent deux agents, vérifient leurs clés distinctes, le rattachement
+de la mission au bon agent, le journal de création et la conservation des
+anciens identifiants. Les scénarios de formulaire complet vérifient aussi la
+création annulée quand une écriture complémentaire échoue.
+
+PERFORMANCE MESURÉE, PÉRIMÈTRE LIMITÉ
+
+La préparation d'une opération stage relisait toute la liste pour chaque agent.
+Le lot prépare une seule fois les dictionnaires de correspondance avant la
+modale. Sur 5 705 lignes synthétiques et 50 agents sélectionnés : 50 appels
+fetch_all avant, 1 après ; résultats identiques. Le microbenchmark final a
+mesuré environ 51,4 ms avant et 1,0 ms après (médianes de sept mesures après
+deux échauffements). Il mesure uniquement la recherche Python en mémoire,
+pas le réseau, MySQL, le temps des modales ou la vitesse globale de l'application.
+Résultats : build/corrections_20261030_lot8/stage_preparation_benchmark.json.
+
+VALIDATION FINALE
+
+  ..\.venv\Scripts\python.exe -B scripts/run_isolated_tests.py tests -q --tb=short
+Résultat : 797 réussis, 89 tests MySQL non lancés dans ce passage unitaire,
+8 avertissements de dépréciation, 41,69 s.
+
+  ..\.venv\Scripts\python.exe -B scripts/run_isolated_tests.py --mysql-test-instance build/corrections_20261029/mysql_test_instance.json tests/integration/test_restore_mysql.py -q --tb=short
+Résultat : les 89 tests MySQL réussis, aucun sauté, 426,89 s.
+
+L'état final est donc couvert par 886 cas réussis sur ces deux passages
+complémentaires. Les avertissements Qt invalidateFilter et Pandas/xlrd restent
+visibles. Les précédents passages complets de 872 puis 882 tests ne remplacent
+pas ces validations finales après les derniers ajustements.
+
+Les tests qui simulent des dépôts ont été adaptés aux nouveaux paramètres et
+aux verrous simulés. Ils ne désactivent pas les protections des tests natifs.
+Les régressions de formulaire périmé, de mission intermensuelle, de création
+sans identifiant et de congé écrasé ont été exécutées en échec avant correction.
+Les anciens corps de deux méthodes ont été rejoués seulement dans un processus
+de test isolé ; aucune source de l'application n'a été rétablie temporairement.
+
+LIMITES ET ORDRE DES PROCHAINS LOTS
+
+1. P1 — Export Access et réimport des agents internes : le fichier Access utilise
+   son propre Id numérique. La correspondance complète de l'identité interne,
+   des satellites et des photos sur un export/réimport natif reste à valider et
+   à compléter avant déploiement de cette fonction. Le repli actuel du bundle
+   appelle aussi insert_row sur une autre connexion Access pendant l'export ;
+   sa transaction et le nettoyage d'un export interrompu sont le prochain lot.
+   Fichiers : services/mysql_bundle_export_to_access.py et dépôts Access.
+
+2. P1 — Sauvegarde SQL de clôture : services/mysql_backup_service.py conserve
+   un chemin auxiliaire à revoir séparément (mot de passe dans les arguments
+   mysqldump, sérialiseur de repli, écriture directe du fichier final).
+   Aucun secret réel n'a été lu ou affiché ; aucun dump réel n'a été lancé.
+   Ne pas extrapoler les garanties du service de sauvegarde complet à ce chemin.
+
+3. A02 — Le remplacement complet DROP/CREATE de restauration reste non atomique,
+   conformément au choix utilisateur antérieur. Une sauvegarde obligatoire ne
+   rend pas la bascule atomique. La préparation hors ligne et la bascule restent
+   un lot distinct, avec stratégie de sauvegarde et de retour arrière.
+
+4. Les appelants bas niveau sans cliché expected restent compatibles. Leurs
+   écritures couvertes sont transactionnelles et sérialisées, mais l'absence de
+   cliché ne permet pas de détecter une intention devenue périmée. L'inventaire
+   statique recense aussi les fonctions de schéma, d'import et les autres
+   dépôts : il ne prouve pas que toute l'application a la même couverture.
+
+5. La publication des miroirs JSON suit le commit, mais la récupération d'un
+   miroir manquant après arrêt brutal n'est pas automatisée par une outbox.
+
+6. Les essais sur deux vrais postes, le partage UNC, les permissions réseau et
+   l'export Access natif complet restent à effectuer en préproduction. Les tests
+   SQL parallèles utilisent des connexions distinctes à un seul serveur jetable.
+   TLS nécessite toujours une CA et un nom de serveur correspondant au certificat.
+
+7. Les avertissements de dépréciation et la simplification des grandes fonctions
+   restent ouverts. Aucun résultat de ce lot ne prouve l'absence de tout bug.
+
+VALIDATION AVANT UTILISATION ET RETOUR ARRIÈRE
+
+En préproduction : ouvrir le même événement sur deux postes, sauvegarder le
+premier puis tenter la sauvegarde et la suppression du second ; vérifier le
+refus et la conservation des premières données. Tester aussi une annulation
+de modale, une coupure réseau pendant la sauvegarde, les ajouts identiques de
+congés, le changement de type de stage et la fiche complète.
+
+Créer un agent interne, joindre ses fiches et une photo, recharger depuis un
+autre poste ; vérifier le rattachement sans modification d'un ancien Id Access.
+Ne pas considérer le round-trip Access des nouveaux agents comme validé avant
+le prochain lot de compatibilité et l'essai natif correspondant.
+
+Aucun changement de schéma MySQL : aucune migration à exécuter pour ce lot.
+Le retour arrière concerne les sources : vérifier d'abord l'applicabilité du
+patch inversé ; ne pas rétablir des copies initiales sur du travail ultérieur.
+Les données écrites ensuite ne doivent pas être effacées pour revenir au code
+précédent. Les miroirs locaux restent des copies du journal MySQL.
+
+L'exécutable et le ZIP existants sont conservés et leurs SHA-256 sont vérifiés
+dans le résumé de validation. Ils ne contiennent pas les corrections de ce lot.
+Aucun nouvel exécutable ou portable n'a été généré, selon la demande utilisateur.

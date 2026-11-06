@@ -1,0 +1,248 @@
+IMPRESSION — JOURNAUX MÉTIER, UTILISATEURS ET DATES — LOT 36
+31/10/2026
+
+Résultat et protection
+Vérification et correction des principaux parcours de création/modification/
+suppression : personnel, historiques datés, comptes/rôles, catalogues grades/
+structures/fonctions/positions admin, gains/pertes et tâches workflow.
+Les événements sont contrôlés sur données synthétiques, avec le bon opérateur,
+les dates d'action UTC, les données avant/après disponibles et les échecs simulés.
+Le journal des documents du lot 35 est rejoué en non-régression.
+Branche feature/mysql-migration ; changements antérieurs préservés. Aucun reset,
+commit ou exécutable. Aucune donnée réelle modifiée. Aucune migration ni nouvelle
+table ; seulement le schéma existant audit_journal. sources/ du miroir non modifié.
+
+L36-01 — P1 confirmé — horodatage personnel perdu entre service et MySQL
+Emplacements : src/sme_gend/services/audit_log.py:294,
+src/sme_gend/services/audit_log.py:138.
+Avant : ts_utc était utilisé dans le JSONL mais pas transmis à append_audit.
+Une action forcée au 31/01/2020 était stockée avec la date d'insertion de 2026.
+Correction : un horodatage validé, normalisé UTC et transmis à MySQL et au miroir.
+Valeur invalide refusée avant SQL. Activité et événements système transmettent
+également leur horodatage déjà capturé, plutôt que de le recalculer à l'insertion.
+Le fichier mensuel personnel utilise le mois UTC effectif, pas le mois de l'offset.
+Tests : timestamp rétroactif avec +01:00, date invalide sans SQL, même horodatage
+SQL/miroir et fichier personnel_audit_2020-01.jsonl pour le changement de fuseau.
+
+L36-02 — P1/P2 confirmé — arrondi DATETIME(3) dans le jour/mois suivant
+Emplacements : src/sme_gend/services/audit_log.py:34,
+src/sme_gend/repositories/app_config_repository.py:317, append_audit_batch.
+Reproduction native : 31/01/2020 23:59:59.999900 UTC devenait 01/02/2020 00:00:00.
+Correction : troncature explicite à la milliseconde avant SQL, cohérente avec la
+précision du schéma, sans migration. Les loggers personnel, sensible, activité et
+documents capturent cette même précision. Conversion UTC préservée pour les valeurs
+avec offset ; dates naïves d'audit interprétées en UTC selon le contrat existant.
+Test natif : le jour reste le 31 janvier, horodatage .999000 ; tests des écritures
+sensibles unitaires/groupées et des documents rejoués.
+Les dates métier (début de mission, obtention de diplôme, mois SME) ne sont pas
+remplacées par cette date d'action : elles restent distinctes dans les données.
+
+L36-03 — P1 confirmé — auteur ambigu ou remplacé par une signature de formulaire
+Emplacements : src/sme_gend/services/auth_context.py:47,
+src/sme_gend/services/auth_context.py:32, personnel_service.py.
+Avant : le nom affiché de session servait d'identifiant ; deux comptes homonymes
+étaient indiscernables. edited_by pouvait remplacer le compte réellement connecté.
+Correction : priorité au login unique authentifié ; un edited_by fourni ne remplace
+plus cet opérateur. En mode non authentifié, le fallback explicite/configuré reste
+disponible ; absence d'identité indiquée comme non identifié, sans inventer un compte.
+Les événements auth conservent le login explicitement tenté pour un échec de login
+et le login de l'administrateur pour une création/modification/suppression de compte.
+Tests : deux comptes au même nom affiché, signature différente du compte connecté,
+acteur des actions personnel/référentiels/workflow et compte opérateur en SQL.
+Aucune réécriture des anciens noms d'auteurs archivés.
+
+L36-04 — P1 confirmé — tâche longue attribuée au prochain utilisateur de session
+Emplacements : src/sme_gend/ui/bg_task.py:179,
+_ProgressWorker ; auth_context.py:audit_identity_scope.
+Correction : identité capturée à la création des workers génériques et de
+progression, appliquée uniquement pendant leur fonction puis réinitialisée.
+Seul un identifiant est transmis : aucune permission et aucune transaction ne sont
+copiées dans le nouveau thread. Une expiration/reconnexion n'attribue plus l'action
+du premier opérateur au second. Les actions administratives respectent ce contexte.
+Tests : deux types de worker, changement de session A→B et reset après exécution ;
+activité auth avec utilisateur initiateur A malgré session courante B. Les tests Qt
+de cycle de vie/fermeture de tâches existants sont également conservés.
+
+L36-05 — P1 confirmé — échecs d'audit silencieux
+Emplacements : audit_log.py:_append_audit_mysql/append_personnel_audit_batch,
+sensitive_audit_log.py:_append_entry, app_config_repository.py:append_audit/batch.
+Avant : hors transaction, une table absente ou une erreur SQL pouvait être ignorée.
+Correction : absence de table et erreurs de persistance explicitement signalées.
+Dans les mutations transactionnelles, l'erreur empêche leur validation. Une erreur
+de livraison du miroir après commit reste CommittedMirrorError : elle n'est pas
+présentée comme une annulation de données déjà enregistrées et ne provoque pas
+une nouvelle écriture automatique.
+Les messages techniques ne recopient plus de paramètres privés ou de données
+personnelles du driver dans les logs d'erreur. Les métadonnées supplémentaires
+ne remplacent pas les horodatages officiels d'activité/système.
+Tests : table absente, erreurs visibles/sans détail privé, rollback de données et
+révision après échec d'audit, reprise de quatre routes de miroirs sans doublon.
+
+L36-06 — P1 confirmé — comptes enregistrés avant une trace qui pouvait échouer
+Emplacements : src/sme_gend/services/auth_write.py:9,
+src/sme_gend/services/auth_service.py:747, update_user/remove_user.
+Avant : save_auth_config validait la configuration puis _audit échouait ; le compte
+pouvait être créé/modifié/supprimé malgré l'erreur annoncée.
+Correction : transaction commune pour les mutations administratives comptes,
+rôles, paramètres d'auth, permissions personnalisées et révocations de tous les
+postes d'un utilisateur. Revisions et données chargées restent contrôlées par le
+mécanisme existant. Exception : état Python restauré ; transaction annulée. Dans une
+transaction externe, savepoint pour empêcher un appelant qui intercepte l'erreur
+de conserver une configuration partielle. Échec de miroir post-commit non inversé.
+Ajout des traces auparavant manquantes pour amorçage du premier compte et mise à
+jour des permissions personnalisées, sans données de mots de passe dans l'audit.
+Tests natifs : création, mise à jour et suppression échouées après sauvegarde,
+configuration SQL identique à l'état initial ; erreur interceptée dans transaction
+externe, configuration annulée mais autre écriture externe conservée.
+
+L36-07 — P1 confirmé — connexion active malgré échec de sa trace
+Emplacement : src/sme_gend/services/auth_write.py:36.
+La journalisation rendue obligatoire révélait un cas de session déjà créée avant
+l'échec de l'audit. Correction : aucune nouvelle session locale conservée en cas
+d'erreur de stockage/journalisation. Nettoyage du token de registre si possible,
+erreur de connexion explicite adaptée à l'écran existant. Si MySQL est indisponible
+pour le nettoyage, erreur technique générique, session locale fermée ; aucune
+réactivation d'un ancien utilisateur. Les compteurs de sécurité ne sont pas
+remis à zéro pour masquer une tentative et ne sont pas forcés dans une nouvelle
+transaction globale du registre des connexions.
+Test natif : identifiants valides, audit défaillant, pas de session authentifiée
+restante et token de registre libéré. Le test échouait avant cette correction.
+Les règles de permissions, mots de passe et limites de postes restent inchangées.
+
+L36-08 — P1 confirmé — historiques datés sans trace de création/modification/suppression
+Emplacement : src/sme_gend/services/dossier_write.py:8.
+Avant : missions, stages, maladies, désertions et congés du dossier modifiaient
+les données sous transaction, mais ne créaient aucun événement dans audit_journal.
+Correction : après contrôle de version/propriétaire et mutation réussie, trace
+sensible dans la même transaction. Propriétaire réellement résolu sous verrou,
+action distincte, identifiant d'événement disponible, données avant et paramètres
+après, dates métier préservées. Pas de trace de succès si le contrôle ou la mutation
+échoue. Les champs de versions techniques sont exclus. Les labels des cinq familles
+et des distinctions sont ajoutés au filtre du journal sensible.
+Les diplômes/passations/affectations/distinctions avaient déjà leurs traces ; elles
+restent uniques, sans seconde trace automatique par le décorateur.
+Tests natifs : cinq familles, chacune ajoutée, modifiée et supprimée, trois traces
+avec le même opérateur attendu ; régressions de conflits/projections du dossier.
+
+L36-09 — P1/P2 confirmé — opérations ordinaires non journalisées
+Emplacements : src/sme_gend/repositories/mysql_bundle_repositories.py:94,
+MySQLStructureRepository, MySQLFonctionsRepository, MySQLPadminRepository,
+MySQLGainPerteRepository ; workflow_task_service.py:create_task/resolve_task.
+Correction : audit explicite des insert/update/delete des catalogues examinés et
+des mouvements, création/résolution de tâches, uniquement après écriture effective.
+Les UPSERT de position admin distinguent création et mise à jour. Aucun succès
+ajouté quand le contrôle de conflit échoue ; enregistrement et révision dans la
+transaction existante. Gain/perte identifié par movement_id, pas seulement l'agent.
+Le helper business_audit exige une transaction et exclut les tokens de version.
+Les traces utilisent les modules centraux reference, gain_perte et workflow.
+Elles ne sont pas artificiellement mélangées au seul journal d'authentification
+ou à la liste des documents générés ; tous ces modules n'ont pas une vue dédiée.
+Tests : CRUD grade/structure/fonction, mouvements et tâches, échec d'audit annulant
+données et révision ; 132 tests SQL de mutations/révisions ont été rejoués pendant
+le lot, avant les derniers ajustements des lecteurs et de précision.
+Portée limitée aux entrées instrumentées : pas d'affirmation que chaque écriture
+indirecte d'organigramme, fusion, import brut ou maintenance possède désormais
+une trace CRUD unitaire. Les résumés existants de lots restent en place.
+
+L36-10 — P1 confirmé — renommage de fonction incompatible avec le schéma réel
+Emplacement : mysql_bundle_repositories.py:MySQLFonctionsRepository.update.
+La propagation mettait à jour agent_affectation.fonction ; la colonne livrée et
+utilisée par le dossier est fonction_libelle. Reproduction sur le schéma fourni :
+Unknown column, renommage annulé. Correction de cette requête uniquement, sans DDL.
+Une ancienne fixture reproduisait la même mauvaise colonne et masquait le défaut ;
+elle correspond maintenant au schéma livré. CRUD natif sur schéma complet et
+régressions référentiels vérifiés. Contrats du modèle Python préservés.
+
+L36-11 — P1 confirmé — anciennes données locales mélangées à l'historique courant
+Emplacements : src/sme_gend/services/personnel_dossier_history.py:126,
+src/sme_gend/ui/personnel_dossier_dialog.py:2014.
+Preuve synthétique : zéro événement central, mais une ligne d'une ancienne base
+locale affichée ; before_timeline.json conserve les compteurs de reproduction.
+Correction : lecteur de fiche fondé sur la base explicitement choisie. Erreur SQL
+ou table absente explicite, sans faux historique vide ; la fiche affiche une erreur
+locale au tableau sans rendre tout le dossier indisponible. Source locale toujours
+accessible explicitement pour diagnostic/lecture d'archives, sans mélange automatique.
+Les agents sans ancien identifiant Access utilisent aussi leur identité interne
+pour lire leur trace, au lieu de n'afficher aucun historique. Colonne Utilisateur
+ajoutée dans l'onglet, avec le login enregistré. Les dates affichées passent d'UTC
+à l'heure locale ; tri chronologique réel pour les offsets différents.
+Tests : aucune lecture du profil local par défaut, MySQL indisponible, table absente,
+identité interne/source transmise, auteur visible, erreur du tableau explicite et
+tri des offsets. Valeurs JSON historiques non modifiées sur disque.
+
+L36-12 — P1/P2 confirmé — métadonnées remplacées et tri incohérent
+Emplacements : app_config_repository.py:read_personnel_audit_for/
+list_personnel_delete_audit ; personnel_deleted_service.py:list_deleted_personnel.
+Les champs payload pouvaient remplacer action/date/utilisateur/id lors de la
+lecture. Correction : valeurs SQL officielles prioritaires, horodatage UTC explicite.
+Le tri des fiches supprimées normalise les dates et son fallback dans le même
+fuseau : pas d'exception comparant une date UTC et une date naïve/invalide.
+Tests : payload synthétique falsifié, metadata officielle conservée dans les deux
+lecteurs ; tri avec date invalide et date UTC, restauration existante rejouée.
+
+Validation et limites de preuve
+16 nouveaux cas locaux et 25 nouveaux cas MySQL. Reproductions : sept échecs locaux
+initiaux ; horodatage, cinq historiques sans trace, catalogues sans trace et colonne
+fonction défaillante sur MySQL. La première fixture auth cherchait une autre clé de
+configuration et donnait trois fausses réussites ; corrigée, les trois défauts
+atomiques auth sont reproduits avant correction. Les noms/empreintes de comptes
+utilisés dans les tests sont entièrement synthétiques.
+Autres défauts reproduits séparément avant correction : précision franchissant
+minuit, ancien profil local, absence de table interprétée comme vide, session laissée
+active après échec de l'audit de connexion.
+Les neuf échecs de première suite élargie dépendaient de fakes sans persistance
+alors que le journal est devenu obligatoire ; ils sont explicitement isolés pour
+continuer à tester projection/délégation. Aucune suppression de test ni option
+permettant à la production d'ignorer l'audit. La persistance est testée en natif.
+Une assertion comparait un tuple vide à une liste vide ; corrigée sans changement
+fonctionnel. Un test a aussi révélé un chemin par défaut non normalisé en précision,
+corrigé puis rejoué. Tous les logs intermédiaires restent disponibles.
+Commandes finales, sources figées et avertissements Python/Qt/Pandas en erreurs :
+- suite locale hors intégration : 1472 réussites, 80.77 s ;
+- MySQL final : 70 réussites, 120.55 s,
+  incluant 25 nouveaux cas, 19 documents, 15 filtres, quatre contrôles sensibles
+  et sept de reprise/miroirs ; 570 autres cas hors sélection.
+Total final : 1542 cas réussis ; aucun échec ou test sauté dans ces commandes.
+Les 132 et 142 contrôles élargis intermédiaires ne sont pas additionnés à ce total.
+Ils sont conservés avec leurs versions/empreintes dans les logs et fichiers command.
+Aucun gain de vitesse annoncé : les temps de tests ne mesurent pas la performance
+interactive de l'application ni celle des PC de travail.
+
+Contrôle des changements et environnement
+25 fichiers Python existants modifiés : 14 sources, onze tests. Deux helpers et
+deux fichiers de tests ajoutés, plus ce rapport. 943 fonctions/classes préservées,
+aucune méthode existante supprimée. Moteurs de transactions/pool, reprises de
+miroirs, sauvegarde/restauration, import métier et gardes de permission inchangés.
+Workers Qt : ajout d'un contexte d'identité seulement ; rétention et arrêt conservés.
+AST, empreintes testées, Git et patch inverse contrôlés en lecture seule. Manifest
+et corrections_only.patch isolent le lot ; originaux dans baseline/. Anciens EXE
+et ZIP contrôlés inchangés. Aucun exécutable généré et aucune migration requise.
+MySQL 8.0.40 jetable, port loopback 64062, datadir vérifié sous build, schémas uniques
+impression_test_*. Le lanceur bloque les autres connexions et écritures hors profils
+temporaires. Seule cette instance est arrêtée après vérification qu'aucun schéma de
+test ne reste. Aucune opération destructive sur une base réelle.
+
+Recette et travaux restant séparés
+1. Sur copie de travail, créer/modifier/supprimer une fiche, un événement de chaque
+   famille et un compte ; comparer utilisateur, date d'action, mois SME et données.
+   Distinguer date d'action et date métier, puis changer de compte pendant une tâche.
+2. Vérifier les filtres du journal sensible avec les nouveaux types ; l'historique
+   Profil doit montrer Utilisateur, accepter les agents créés sans Access et afficher
+   une erreur si le journal central manque. Référentiels/mouvements/workflow : leurs
+   nouveaux événements sont dans les modules SQL centraux correspondants.
+3. Sur une base jetable, provoquer une indisponibilité du journal puis vérifier
+   rollback, absence de faux succès, fermeture de connexion non journalisée et
+   reprise du miroir sans doublon. Ne pas relancer aveuglément après commit confirmé.
+4. Les vrais PC/SMB et leurs horloges n'ont pas pu être testés ; la validation locale
+   ne prouve pas la synchronisation des heures et la latence du réseau de travail.
+5. Les anciennes traces absentes, erronées ou désignées seulement par un nom affiché
+   ne sont pas réécrites : aucun auteur/date passé ne peut être inventé. Une reprise
+   d'archives doit rester explicite, sur copie et avec rattachement de source.
+6. Les outils de maintenance, imports de masse, écritures indirectes de hiérarchie/
+   organigramme et variantes de configuration nécessitent une cartographie dédiée
+   des traces détaillées. Leurs résumés/synchronisations existants ne sont pas une
+   promesse de trace CRUD unitaire pour chaque sous-opération. Toute l'application
+   n'est pas déclarée exempte de défauts. La suite MySQL complète n'est pas exécutée.
+Retour arrière : examiner/inverser seulement le patch du lot sur une copie, en
+préservant les travaux suivants. Aucun reset global ni retour arrière de données
+nécessaire ici ; aucune donnée réelle n'a été modifiée.

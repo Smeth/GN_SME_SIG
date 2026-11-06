@@ -1,0 +1,47 @@
+# --- Données nominatives / opérationnelles (ne jamais pousser) ---
+*.xls
+*.xlsx
+*.xlsm
+*.mdb
+*.accdb
+*.csv
+*.pdf
+*.jsonl
+*.log
+*.log.*
+
+# Exceptions : gabarits vides dans modeles/
+!sme_python/modeles/
+!sme_python/modeles/**
+!sme_python/modeles/*.xlsx
+!sme_python/modeles/*.mdb
+!sme_python/modeles/*.docx
+
+# Archives mensuelles, dumps, exports temporaires
+sme_python/Archive/
+**/tmp_*.xlsx
+**/_tmp_*
+ordre_general.txt
+
+# Secrets / config machine
+.env
+.env.*
+*.pem
+*.key
+auth_config.json
+credentials.json
+
+# Sauvegarde publique : ressources locales susceptibles de contenir des données
+paths.json
+*.bundle
+*.zip
+*.docx
+sme_python/.venv-build/
+sme_python/build/
+sme_python/dist/
+**/__pycache__/
+.pytest_cache/
+sme_python/modeles/*.xlsx
+sme_python/modeles/*.mdb
+sme_python/modeles/*.docx
+sme_python/modeles/ordre_general.txt

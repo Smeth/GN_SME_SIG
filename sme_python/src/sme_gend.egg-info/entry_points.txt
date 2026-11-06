@@ -1,0 +1,2 @@
+[console_scripts]
+sme-gend = sme_gend.__main__:main

@@ -1,0 +1,212 @@
+IMPRESSION — HIÉRARCHIE U→D→T, FUSIONS ET SYNCHRONISATION — LOT 30
+31/10/2026
+
+Portée et protection
+Chemins actifs : Structures & subdivisions → Maintenance → Nomenclature U→D→T
+et Harmonisation des archives, services et dépôts associés. Aucun exécutable
+généré, aucune dépendance ajoutée, aucune migration ni donnée réelle modifiée.
+Travail sur feature/mysql-migration, sans reset ni commit. État Git avant/après,
+empreintes initiales et originaux des fichiers modifiés conservés. Les corrections
+antérieures servent de base ; le patch fourni ne contient que les changements
+de ce lot. Le miroir sources/ est resté en lecture seule.
+Les anciens EXE et ZIP distribués sont contrôlés inchangés par SHA-256.
+
+L30-01 — P1 confirmé — modifications hiérarchiques périmées acceptées
+Emplacements : src/sme_gend/repositories/mysql_subdiv_hierarchy_repository.py:46,
+src/sme_gend/repositories/hierarchy_merge_guard.py:87,
+services/subdiv_hierarchy_service.py, ui/views/subdivisions_hierarchy_view.py.
+Avant : UPDATE/DELETE/INSERT sans version de l'arbre affiché ; deux utilisateurs
+pouvaient remplacer la même valeur. La propagation relisait une feuille et des
+structures après confirmation, sans vérifier leur correspondance à l'affichage.
+Correction : les collections lues portent un MaintenanceSnapshot lié à la base,
+au type d'opération, à son périmètre et à l'état réellement observé. Les écritures
+exigent expected ; absence, autre base, mauvais périmètre ou état modifié sont
+refusés. La révision partagée est verrouillée avant les relectures SQL courantes
+FOR UPDATE et leur comparaison ; un ancien snapshot REPEATABLE READ ne suffit
+pas à faire accepter une ancienne version.
+La propagation prépare sa version AVANT la question de périmètre. Une modification
+de feuille, affiliation, structure cible ou rattachement carrière entre-temps
+annule la demande. Les paramètres explicites restent possibles ; une structure
+absente est refusée. Le retour indique maintenant les affiliations effectivement
+créées/modifiées, zéro pour un état déjà identique.
+Tests : même nœud simultanément, parent T non extensible, confirmations périmées,
+version absente/étrangère, relecture sous ancienne transaction et propagation no-op.
+
+L30-02 — P1 confirmé — fusion partielle après échec de mise en page
+Emplacements : src/sme_gend/services/referentiel_coherence_service.py:64,
+src/sme_gend/services/referentiel_coherence_service.py:86, src/sme_gend/repositories/mysql_coherence_repository.py.
+Avant : le dépôt validait ses changements avant la mise à jour du layout ;
+plusieurs mises à jour complémentaires étaient ensuite masquées par except/pass.
+Une erreur du layout laissait les référentiels déjà fusionnés.
+Correction : fusion, carrières de toutes périodes, dépendances, layout et signal
+partagent désormais la même transaction. Les commits internes sont différés par
+le mécanisme existant ; aucun échec de la fusion n'est absorbé. Si un appelant
+possède déjà une transaction et traite l'erreur, un savepoint annule le lot
+de maintenance sans abandonner ses autres opérations indépendantes.
+La mise en page conserve sa version et sa garde existantes. Les sections absorbées
+réunissent leurs ordres dans la section gardienne ; les identifiants RSA supprimés
+sont retirés et les affiliations valides conservées. Une cible portant le code
+d'une structure explicitement absorbée est possible, sans doublon de section.
+Tests : panne de layout, panne de publication, rollback externe, erreur traitée
+dans une transaction externe, cas du code absorbé et ordres RSA résultants.
+
+L30-03 — P1 confirmé — dépendances oubliées et rattachements hors périmètre
+Emplacement : src/sme_gend/repositories/mysql_coherence_repository.py:257, apply_subdiv_merge.
+Avant : la suppression d'une structure encore utilisée par agent_affectation
+échouait avec une contrainte FK ; fonctions rattachées et organigrammes étaient
+également oubliés. Des identifiants RSA sans contrôle d'appartenance pouvaient
+être fusionnés hors de la structure sélectionnée.
+Correction : affectations et codes structure, liens fonction-structure, nœuds
+d'organigramme et carrières sont rattachés à la gardienne avant toute suppression.
+Les liens fonctionnels sont réunis sans remplacer l'ordre déjà défini sur la
+gardienne. Les IDs, parents, titres, titulaires et positions des organigrammes
+restent conservés ; les références RSA changent seulement lors de la fusion
+de leurs affiliations. Les mêmes feuilles sont identifiées par leur ID, au lieu
+de détruire une autre feuille simplement parce que son libellé est similaire.
+Deux feuilles distinctes portant le même libellé exigent une fusion explicite
+des subdivisions avant la fusion des structures ; aucune décision métier n'est
+inventée pour choisir silencieusement une feuille.
+Les variantes texte non liées sont promues par les codes explicitement sélectionnés.
+Une référence déjà liée à une autre structure non sélectionnée n'est pas déplacée
+sur la seule base d'un ancien texte. Un RSA étranger, un rattachement externe
+incohérent ou un libellé cible déjà porté par un RSA non sélectionné est refusé.
+Un dernier test a aussi reproduit le cas structure_id NULL + code EXTERNAL :
+cette carrière ne peut plus être renommée par la fusion d'une autre structure.
+Tests : dépendances FK réelles, contrôle des affiliations étrangères, ordre de
+fonction existant conservé, parent/coordonnées d'organigramme conservés, autre base.
+
+L30-04 — P1 confirmé — absence de signal partagé après ces écritures
+Emplacements : src/sme_gend/repositories/hierarchy_merge_guard.py, services/shared_reference_write.py et data_sync.py
+réutilisés sans modification de leur moteur.
+Les changements publient maintenant une révision dans la même transaction que
+les données. Plusieurs opérations regroupées dans le même lot produisent une
+seule notification. Erreur ou rollback : ni état partiel ni faux signal. Un no-op
+ne publie rien ; l'invalidation locale des caches attend le commit réel.
+Le service conserve les signatures métier et résultats existants, en ajoutant
+expected aux écritures dangereuses. Les lecteurs restent compatibles avec list ;
+ils doivent conserver write_snapshot pour une modification ultérieure.
+Les huit appels concernés des modales transmettent leurs versions ; les versions
+ne sont pas remplacées silencieusement par une relecture avant l'enregistrement.
+Le droit structures.codes est vérifié dans le backend avant toute requête d'écriture,
+y compris pour des appels hors interface. L'authentification existante est intacte.
+Tests : un seul gagnant pour deux écritures du même nœud ou de la même fusion,
+visibilité séparée avant/après commit, caches différés, trois familles de panne
+de publication et quatre refus de droits avant SQL.
+
+L30-05 — P2 confirmé — chiffres d'aperçu incomplets ou comptés plusieurs fois
+Emplacements : src/sme_gend/repositories/mysql_coherence_repository.py:131, preview_structure_merge.
+Avant : une carrière liée par RSA mais sans texte donnait zéro à l'aperçu ;
+la même structure sélectionnée par ID et code pouvait faire compter quatre fois
+un unique segment. Les IDs répétés gonflaient aussi le nombre de RSA.
+Correction : union des critères dans une seule sélection, paramètres SQL liés,
+IDs/libellés dédupliqués. Les lignes liées par ID sont incluses même sans libellé.
+Les résultats restent des estimations de périmètre : une valeur déjà correcte
+peut ne pas provoquer d'UPDATE effectif. Les deux erreurs sont reproduites puis
+vérifiées corrigées par des tests natifs MySQL.
+
+L30-06 — P1 confirmé — ouverture d'Harmonisation interrompue
+Emplacement : src/sme_gend/ui/views/referentiel_coherence_view.py:158, _reload_struct_combo.
+Avant : appel à ViewDataState.mark_loaded(), méthode inexistante ; une panne de
+lecture des structures était masquée avant ce même appel. Deux tests Qt reproduisent
+l'AttributeError et la fausse gestion du chargement.
+Correction : terminer le chargement seulement quand les listes nécessaires ont
+réussi, afficher les erreurs, garder l'état à recharger et invalider les versions
+d'écriture en échec. Les booléens de chargement sont explicites.
+Les modales conservent le texte et les sélections après conflit. Le brouillon
+de nœud est lié à sa base et son ID ; un changement de connexion ne le réutilise
+pas pour un autre dossier. Un rafraîchissement réentrant pendant une confirmation
+ne remplace pas sa version attendue. L'ancienne connexion du dialogue est refusée
+si la référence du poste a été rebondée vers une autre base.
+Tests Qt hors écran : chargement vide normal, erreur de lecture explicite, brouillon
+conservé, confirmations, changement de base et valeurs de priorité invalides.
+
+L30-07 — P2 robustesse — invariants U/D/T et validation
+L'API refuse désormais les enfants sous T, les suppressions de nœuds utilisés,
+les mutations de la racine technique, les codes/libellés trop longs ou vides et
+les priorités non finies. La boîte de saisie reste ouverte après une priorité
+invalide, au lieu de laisser sortir une exception de conversion.
+Un arbre entièrement vide est lisible ; sa première création explicite initialise
+la racine technique et le premier U dans la même transaction. Un arbre corrompu
+existant n'est pas réparé arbitrairement : parent absent, cycle ou profondeur
+au-delà de T provoquent un refus explicite. Reconstruction par index de parent,
+sans balayage complet des nœuds pour chaque enfant. Aucun gain de performance
+chiffré n'est revendiqué dans ce lot.
+
+Vérifications réellement exécutées
+Avant : six échecs natifs reproduits avec le code original et une hiérarchie
+synthétique valide ; les définitions originales sont rejouées uniquement en mémoire,
+sans permuter ni écraser des sources. Deux échecs d'aperçu, deux échecs Qt de cycle
+de chargement et le cas de rattachement externe sont aussi consignés séparément.
+Les premiers ajustements de fixtures/normalisation JSON restent dans les logs ;
+ils ne sont pas présentés comme des défauts préexistants de l'application.
+Après, avec -W error :
+- suite locale entière : 1300 réussites, 71.19 s ;
+- MySQL natif : 45 réussites, 174.47 s, 547 autres cas explicitement exclus
+  par le filtre ; 36 nouveaux scénarios de ce lot et 9 régressions existantes.
+Total des commandes finales : 1345 cas pytest réussis, aucun échec ou test sauté,
+aucun test désactivé pour faire passer la suite. Aucun avertissement Python masqué.
+Les temps sont des durées de tests, pas des gains de vitesse de l'application.
+
+Deux processus Python indépendants : le second ne voit pas les changements non
+validés, puis observe ensemble feuille, structures, carrières, affectations,
+fonctions, organigramme, layout et révision après commit. Ses demandes anciennes
+de modification, propagation et fusion sont toutes refusées ; données et révision
+restent identiques. Le lot parent publie exactement une notification.
+Preuve : hierarchy_conflict_orlq2u3p\validation.json ; empreintes du code incluses et
+comparées aux sources figées de la validation finale.
+
+Environnement : MySQL 8.0.40 isolé sur loopback:64062 avec datadir vérifié sous
+build. Bases uniques créées par les tests puis détruites. Profils/fichiers purement
+synthétiques, écritures externes et autres connexions bloquées par les lanceurs.
+Le scénario à deux processus substitue l'acteur d'audit et l'initialisation de
+configuration locale pour protéger les fichiers réels ; les SQL de fusion,
+transactions, révisions et versions ne sont pas simulés.
+Ce sont deux clients locaux, pas deux PC physiques ni une recette SMB.
+
+Contrôle des modifications
+32 fonctions préservées dans les six fichiers existants examinés.
+Le helper privé _norm_code est remplacé par une validation commune plus complète ;
+aucune méthode métier du dépôt/service n'est supprimée. Transactions, pool,
+authentification, sauvegardes, dossier, Avancement, exports Access/Excel et shell
+de synchronisation restent inchangés dans ce lot. La fonction SQL de fusion
+bas niveau de referentiel_maintenance est réutilisée ; son fichier est inchangé.
+changes_manifest.json et corrections_only.patch isolent les changements du lot ;
+baseline/ conserve les originaux. Empreintes src/tests dans tested_source_hashes.json.
+Le patch inverse est contrôlé en lecture seule. Aucun reset, commit ou build EXE.
+
+Limites et prochaines priorités
+1. Recette sur copie anonymisée avec deux postes réels : ouvrir la même feuille
+   et les mêmes variantes, valider le premier, vérifier le refus du second et
+   le rafraîchissement après fermeture des modales. Répéter une panne réseau.
+   Le poll existant diffère volontairement le rechargement pendant les modales
+   et saisies ; un écran peut rester ancien, mais sa version ne doit pas écrire.
+   Le partage SMB réel reste non accessible ici.
+2. Les périmètres de maintenance sont volontairement larges : un changement de
+   rattachement ailleurs dans le référentiel peut imposer un rechargement et les
+   lectures verrouillées peuvent créer de la contention sur de grandes bases.
+   Mesurer en préproduction avant de réduire ces périmètres. Une erreur de verrou
+   doit conduire à une relecture, sans rejouer automatiquement une saisie.
+3. Les empreintes d'état ne distinguent pas un aller-retour revenu exactement
+   aux mêmes valeurs (ABA). D'anciens exécutables ou écritures SQL directes peuvent
+   contourner les gardes applicatives ; une future distribution doit être homogène.
+4. Lot distinct restant : scripts run_referentiel_maintenance / run_coherence_mois,
+   pipeline d'alignement automatique, dédoublonnages historiques et option DROP des
+   anciennes tables. Ils n'ont pas été exécutés ni modifiés ici. Le présent lot
+   sécurise les chemins manuels actifs, sans déclarer ces outils de maintenance sûrs.
+5. Poursuivre l'audit des configurations métier contenant des codes structure hors
+   layout. Elles ne sont pas réécrites arbitrairement par ce lot. Les cas de feuilles
+   différentes au même libellé ou de rattachements corrompus exigent une résolution
+   explicite sur les données ; aucune donnée réelle n'a été réparée ici.
+
+Validation et retour arrière
+Pour valider une fusion sur un environnement réel, prendre d'abord une sauvegarde
+vérifiée et tester sa récupération sur copie ; la fusion concerne toutes les périodes.
+Pas de migration de schéma nécessaire. Vérifier affectations, carrières archivées,
+fonctions, organigrammes et layout avant/après. Les anciennes applications appelant
+ces écritures sans expected devront recharger leur collection et transmettre sa version.
+Pour revenir sur le CODE, examiner le patch limité sur une copie et préserver les
+travaux antérieurs/ultérieurs, sans reset global. Un rollback du code ne défusionne
+pas des données déjà validées : leur récupération nécessite la sauvegarde correspondante.
+Commandes exactes, logs et contrôle d'arrêt du serveur de test : validation_summary.json.
+L'instance utilisée est arrêtée en fin de lot après vérification qu'aucun schéma
+de test ne reste. L'application entière n'est pas déclarée exempte de bugs.

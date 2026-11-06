@@ -1,0 +1,301 @@
+IMPRESSION — LOT 11 : CLÔTURE TRANSACTIONNELLE ET REPRISE DES JOURNAUX
+Sources corrigées, sans génération d'exécutable ni de portable.
+
+PROTECTION ET PÉRIMÈTRE
+
+La branche existante feature/mysql-migration et les changements précédents sont
+conservés. Chaque fichier édité possède une copie de son état avant ce lot et
+des empreintes sous build/corrections_20261030_lot11/. Aucun reset, commit,
+nettoyage des autres travaux ni modification des références sources/ du miroir.
+
+Les inspections et essais ne modifient aucune donnée réelle. Les écritures de
+tests sont confinées aux profils jetables sous build/ ; les connexions hors de
+l'instance MySQL 127.0.0.1:64062 vérifiée par @@datadir sont bloquées avant accès.
+Chaque fixture crée ses propres bases UUID et supprime uniquement ces bases.
+Les fichiers et événements des scénarios sont synthétiques.
+
+L11-01 — P1 CONFIRMÉ : CLÔTURE PARTIELLE ENTRE STATUTS ET ACTIVATION
+
+Emplacements :
+src/sme_gend/services/sme_month_closure.py:201 (_commit_closure_transition)
+src/sme_gend/services/sme_month_closure.py:252 (run_piste_a_month_closure)
+src/sme_gend/services/sme_workspace_service.py:194 (set_active_mois)
+
+Cause : _apply_tabsme_closure validait ses écritures avant l'activation du mois
+suivant et avant l'audit final. Les erreurs d'activation étaient transformées en
+avertissements puis save_sme_context pouvait encore modifier l'état opérationnel.
+
+Preuve avant correction : le test d'interruption d'activation n'obtenait pas
+d'erreur ; le test d'échec d'audit constatait septembre déjà Fermé malgré l'échec.
+Les deux tests ont effectivement échoué sur l'état initial du lot.
+
+Correction : un propriétaire transactionnel regroupe statuts, création du mois
+suivant, projection est_actuelle/dates de carrière, audit et révision partagée.
+Les lignes de période sont verrouillées dans l'ordre des identifiants. Les
+commits imbriqués restent différés jusqu'au propriétaire ; les exceptions ne
+sont plus réduites à des avertissements permettant une clôture partielle.
+La sauvegarde SQL valide, existante et non vide reste obligatoire avant cette
+transaction pour la clôture Piste A.
+
+Une demande Piste A devenue périmée est refusée si un autre mois actif incompatible
+a été choisi entre-temps. La répétition de la même clôture déjà appliquée est un
+succès sans seconde mutation/audit de clôture. L'activation reste possible lorsque
+la base n'a aucun mois ouvert ; aucune nouvelle règle de succession stricte à
+mois + 1 n'est imposée : le mois choisi doit simplement être postérieur.
+Les mois explicitement Réouvert sont préservés comme auparavant.
+
+Vérifications natives : activation interrompue et audit interrompu = rollback
+des statuts et des projections ; succès = septembre fermé, octobre ouvert,
+août Réouvert intact, carrière actuelle alignée. Deux clôtures simultanées
+identiques produisent une seule mutation et un seul audit final de clôture.
+
+L11-02 — P1 CONFIRMÉ : UN ANCIEN CONTEXTE LOCAL RÉTABLIT LE MAUVAIS MOIS
+
+Emplacements :
+src/sme_gend/config/sme_context.py:162 (_migrate_legacy_context_to_db)
+src/sme_gend/services/sme_month_closure.py:332 (import_existing_db_for_month)
+
+Cause : le contexte legacy pouvait être réimporté à chaque chargement. Le test
+initial a montré octobre actif redevenant septembre après lecture d'un ancien
+fichier local. Une sauvegarde de contexte après archivage sans activation pouvait
+aussi promouvoir à nouveau un mois qui venait d'être fermé.
+
+Correction : les préférences centrales existantes ne sont pas remplacées par le
+legacy. Même si la préférence workspace est absente, une base contenant déjà des
+périodes ne reçoit plus son mois actif depuis un ancien profil local. La première
+migration d'une base sans période garde son comportement de démarrage.
+
+La clôture lit ses mois depuis sme_periode, sans réécrire les préférences UI pour
+promouvoir un mois. La phase de clôture de l'import utilise le même propriétaire
+transactionnel. Sans activation, elle ferme le mois importé et conserve les autres
+mois ouverts, sans rouvrir celui qui vient d'être archivé. Les caches locaux de
+liste et d'édition sont invalidés et le signal partagé est validé avec la clôture.
+
+Vérifications : migration legacy avec et sans workspace central existant ;
+clôture du mois courant sans activation ; archivage d'un mois historique sans
+changer le mois courant. Les tests unitaires d'orchestration utilisent le nouveau
+point transactionnel et les assertions de données sont vérifiées en MySQL natif.
+
+Important : l'import de carrière conserve sa transaction propre, achevée avant
+la phase de clôture. Si cette dernière échoue, l'import déjà validé n'est pas
+annoncé comme annulé par le mécanisme transactionnel de clôture. Il faut vérifier
+son résultat avant de décider de le relancer. Les options d'activation explicite
+d'un import historique restent celles du flux existant.
+
+L11-03 — P1 CONFIRMÉ PAR LE CODE : CALLBACKS DE JOURNAUX NON PERSISTANTS
+
+Emplacements :
+src/sme_gend/repositories/app_config_repository.py:203 (append_audit)
+src/sme_gend/repositories/app_config_repository.py:248 (append_audit_batch)
+src/sme_gend/services/audit_mirror_recovery.py:97 (enqueue_on_connection)
+src/sme_gend/services/audit_mirror_recovery.py:131 (schedule_delivery)
+
+Cause : les callbacks post-commit du lot 8 empêchaient les copies de transactions
+annulées, mais n'existaient qu'en mémoire. Un arrêt après commit pouvait donc
+conserver les données MySQL sans leur copie locale et sans tâche persistante.
+
+Correction : la demande de livraison est stockée dans le JSON de la table
+app_config déjà existante, sous une clé réservée audit_mirror:<UUID>. L'insertion
+de cette demande utilise la même connexion et le même commit que l'événement
+audit_journal, et la transaction métier lorsqu'elle est partagée. L'API de lot
+insère les audits en groupe et découpe les demandes volumineuses en paquets
+d'environ 512 Kio, sans ouvrir une transaction par agent.
+
+Aucune nouvelle table, migration de schéma, contrainte ou suppression de données
+réelles n'est nécessaire. En cas de rollback, audit et demande disparaissent
+ensemble ; aucun miroir n'est créé avant le commit. Un échec de copie connu après
+commit conserve la demande et remonte CommittedMirrorError avec l'instruction de
+ne pas recommencer la modification métier.
+
+Les producteurs raccordés sont les journaux personnel/système, activité,
+actions sensibles et documents en ligne. Les flags de miroir existants restent
+respectés : SME_AUDIT_JSON_MIRROR et SME_SENSITIVE_AUDIT_JSON_MIRROR.
+La demande ne contient pas de chemin d'écriture arbitraire : type de journal et
+mois validé seulement. Les chemins sont résolus par les fonctions de l'application.
+
+L11-04 — P1 : REPRISE IDEMPOTENTE ET LIGNES INTERROMPUES
+
+Emplacements :
+src/sme_gend/services/audit_mirror_recovery.py:222 (deliver_key)
+src/sme_gend/services/audit_mirror_recovery.py:166 (_repair_tail)
+src/sme_gend/services/local_audit_mirror.py:13 (locked_mirror_stream)
+
+Chaque copie porte _mirror_event_id, un identifiant stable. Sous verrou entre
+processus, la livraison conserve en base un point de reprise avant d'écrire :
+position, identité du fichier et empreinte de son suffixe précédent. Elle relit
+normalement ce suffixe seulement ; un fichier remplacé/tronqué provoque une
+recherche depuis le début. Les identifiants déjà présents ne sont pas réécrits.
+Le même identifiant associé à un autre contenu est refusé, pas écrasé.
+
+Une dernière ligne JSON complète privée de retour à la ligne est conservée et
+terminée. Une fin invalide ou coupée au milieu d'un caractère UTF-8 est d'abord
+sauvegardée, synchronisée et protégée dans .audit-recovery/<UUID>.part ; seulement
+ensuite le fragment est retiré de la fin du journal et les événements manquants
+sont réécrits. Les lignes complètes précédentes restent en place.
+
+Les écritures sont synchronisées par flush/fsync avant suppression de la demande
+en base. Un arrêt entre écriture et confirmation rejoue la livraison en dédoublonnant
+les événements présents. Aucun rejeu de modification métier n'est effectué : la
+reprise écrit seulement la copie JSONL et son état de livraison.
+
+Vérifications MySQL + fichiers : panne avant append, append interrompu sur un
+octet UTF-8, panne après fsync avant DELETE de confirmation. Après rechargement
+du module (aucun callback/état mémoire conservé), la reprise produit une seule
+ligne complète contenant les valeurs gelées avant mutation du dictionnaire
+appelant. Une seconde reprise ne produit aucune nouvelle ligne.
+Le rollback métier ne laisse ni demande ni fichier. Les quatre destinations et
+les lots sont testés. Le repli document après accusé incertain garde le même
+identifiant et n'est pas ajouté une deuxième fois lors de la reprise.
+
+Une vérification supplémentaire utilise de vrais processus Windows : arrêt
+volontaire os._exit(91) après fsync d'une ligne et avant confirmation SQL, puis
+deux processus concurrents de reprise sur les 40 demandes du même profil.
+Résultat : 40 lignes JSON valides, 40 identifiants distincts, aucun doublon et
+aucune demande restante. La base UUID de cet essai est ensuite supprimée.
+La preuve est conservée sous native_process_validation.json dans le dossier du lot.
+
+L11-05 — P1/P2 : REPRISE AUTOMATIQUE, PROFILS ET CHEMINS
+
+Emplacements :
+src/sme_gend/services/audit_mirror_recovery.py:259 (recover_pending)
+src/sme_gend/ui/shell_window.py:1196 (_recover_local_journals)
+
+Le profil possède un identifiant local dans le dossier utilisateur audit_delivery/
+node_id, créé sous ACL privée et conservé entre démarrages. Un autre profil ne
+livre pas ses demandes. Un identifiant invalide provoque une erreur, pas une
+réattribution silencieuse d'événements à un nouveau propriétaire.
+
+La fenêtre principale lance la reprise en tâche de fond, après son démarrage,
+puis toutes les 45 secondes, avec une seule tâche de ce type simultanée. Les
+dialogues modaux suspendent son lancement ; le verrou MySQL de restauration
+suspend la sélection de demandes pendant une restauration préparée.
+Les erreurs restent visibles par message de statut et journal technique sans
+recopier le contenu personnel des événements. Les demandes ne sont pas effacées
+en cas d'échec. Sans identifiant local existant, aucun accès SQL n'est lancé par
+la reprise ; les types désactivés sont laissés en attente jusqu'à réactivation.
+
+La non-régression a détecté une incompatibilité du premier routage avec un nom
+de fichier sensible renommé par le profil de test. Elle a été corrigée en
+comparant les chemins des fonctions de destination autorisées, sans permettre
+de chemin arbitraire. Les scénarios historiques affectés ont été rejoués avec
+succès, puis la suite native entière relancée. Aucun test n'a été neutralisé.
+
+L11-06 — P2 : ARCHIVES DE CLÔTURE PARTIELLES OU ÉCRASÉES
+
+Emplacements :
+src/sme_gend/services/sme_month_closure.py:100 (_snapshot_file)
+src/sme_gend/services/sme_month_closure.py:110 (_snapshot_layout_from_central)
+
+Les snapshots Access et de mise en page sont maintenant écrits dans un temporaire
+adjacent, puis publiés sans remplacer un fichier final existant. Les noms ajoutent
+microsecondes et suffixe aléatoire. Un échec de copie ne publie plus de fichier
+partiel et conserve une archive précédente. Les anciens noms à horodatage court
+et les nouveaux restent lisibles, y compris les mois Access compacts MMYYYY.
+Les tests injectent une interruption et une collision de nom.
+
+La sauvegarde SQL demeure la copie de référence des données MySQL. Le snapshot
+Access facultatif reste la copie du fichier Access configuré, comme auparavant ;
+il ne faut pas l'assimiler à un nouvel export de la base MySQL courante. Le lot 9
+a testé le chemin d'export Access distinct, pas cette équivalence.
+
+TESTS ET CONTRÔLES EXÉCUTÉS
+
+Trois tests rouges avant correction ont reproduit : activation absorbée en
+avertissement, statuts conservés malgré échec d'audit, et réactivation depuis
+un ancien contexte local. Après correction ces cas passent. Les injections de
+pannes de fichiers sont non destructives et limitées aux données synthétiques.
+
+Passe finale sur les sources finales :
+- Hors MySQL : 859 tests réussis, 8 avertissements préexistants,
+  98.88 s ; 118 cas différés à la passe native.
+- MySQL isolé : 118 tests réussis, aucun ignoré,
+  774.01 s.
+- Total : 977 cas pytest validés, soit 34 de plus que le lot 10.
+
+Commandes depuis sme_python :
+..\.venv\Scripts\python.exe -B scripts/run_isolated_tests.py tests -q --tb=short --disable-warnings
+..\.venv\Scripts\python.exe -B scripts/run_isolated_tests.py --mysql-test-instance build/corrections_20261029/mysql_test_instance.json tests/integration/test_restore_mysql.py -q --tb=short --disable-warnings
+
+Les scénarios de clôture remplacent la production du backup par un fichier
+synthétique pour isoler la transaction. Le service de sauvegarde réel reste
+couvert par les tests natifs précédents et la suite de restauration complète.
+Les validations n'ont lancé ni migration destructive ni opération sur MySQL réel.
+
+Performance : aucun gain chiffré n'est revendiqué. Les demandes de reprise sont
+filtrées par préfixe/profil et traitées par groupes bornés ; les points de reprise
+évitent normalement la relecture de tout le journal. Le fsync et les confirmations
+SQL ont un coût justifié par la durabilité. Les durées pytest ne sont pas une
+mesure de rapidité de l'application en production. Les essais natifs répètent la
+création de schémas, les transactions et des scénarios concurrents ; ils expliquent
+une partie du temps de correction, sans être un benchmark métier.
+
+VALIDATION DE PRÉPRODUCTION ET EXPLOITATION
+
+1. Avec les sources corrigées sur une copie, clore un mois contenant des données
+   et vérifier statuts, date de fin du segment, carrière actuelle, audit et mois
+   suivant. Rejouer la même demande : aucune seconde bascule/audit de clôture.
+2. Tester les deux options d'import : archiver/fermer sans activation, puis avec
+   activation. Un mois historique sans activation ne doit pas déplacer le mois
+   courant. Vérifier qu'une fenêtre Réouvert reste conservée.
+3. Sur deux postes cohérents en version, confirmer que les autres postes voient
+   le changement après le signal partagé. Les anciennes versions contenant la
+   migration locale non protégée peuvent encore altérer le mois ; ne pas les
+   mélanger à une validation de ce mécanisme.
+4. Avec les miroirs activés, rendre seulement leur destination indisponible sur
+   un dossier synthétique. L'événement MySQL doit rester enregistré avec une
+   demande en attente. Ne pas répéter la mutation métier lorsqu'un message de
+   données déjà enregistrées l'indique. Rétablir les droits et attendre la reprise
+   ou redémarrer : un seul _mirror_event_id doit exister dans le fichier cible.
+5. Conserver audit_delivery/node_id lors d'une récupération du même profil.
+   Ne pas régénérer arbitrairement ce fichier, modifier les demandes réservées
+   audit_mirror: ni supprimer les fragments privés de récupération avant examen.
+   Le transfert vers un autre profil/poste exige une procédure contrôlée ; un
+   autre profil ne reprend pas automatiquement les demandes du poste d'origine.
+6. Les fichiers sont des copies du journal central. Un fragment .part préserve
+   la fin interrompue pour diagnostic ; le service ne certifie pas la validité
+   de tous les anciens fichiers ni ne réécrit en masse les lignes historiques.
+
+CONTRÔLE DES MODIFICATIONS ET RETOUR ARRIÈRE
+
+Le manifeste et le patch ne contiennent que les différences de ce lot par rapport
+à l'état de travail initial sale, et non toutes les différences avec HEAD :
+build/corrections_20261030_lot11/changes_manifest.json
+build/corrections_20261030_lot11/corrections_only.patch
+build/corrections_20261030_lot11/validation_summary.json
+Le dossier baseline/ contient les copies précédant chaque édition. La syntaxe
+Python et l'applicabilité inverse du patch sont vérifiées sans l'appliquer.
+Les empreintes des anciens EXE et ZIP sont identiques ; aucun exécutable généré.
+
+Aucune migration MySQL à appliquer pour ce lot : les demandes sont des données
+dans la table JSON existante. Avant tout retour de sources, sauvegarder les
+modifications postérieures et vérifier le patch sur une copie. Une version
+ancienne n'exploite pas la file de reprise : conserver ses demandes en base et
+l'identité du profil, sans les purger pour faire disparaître une erreur.
+
+LIMITES ET PRIORITÉS RESTANTES
+
+- La clôture est atomique pour les étapes SQL décrites, pas pour l'ensemble des
+  fichiers et de MySQL. Les snapshots préalables réussis restent conservés si la
+  transaction échoue. Le mécanisme ne constitue pas un verrou global sur les
+  écritures de tous les anciens modules, anciens postes ou outils SQL externes.
+- Le replay ne reconstruit pas automatiquement les copies manquantes antérieures
+  à cette version, qui n'avaient ni identifiant de livraison ni demande persistante.
+  Le journal MySQL reste la référence consultable/exportable.
+- La génération de documents sans MySQL conserve son repli local existant ; sa
+  réimportation centrale automatique hors connexion est un chantier distinct.
+  Les interruptions après commit d'un audit en ligne sont couvertes ici.
+- Une reprise peut ajouter en fin de fichier un événement horodaté plus ancien ;
+  son horodatage d'origine est conservé. L'ordre d'arrivée n'est pas un nouvel
+  horodatage métier et le journal central reste prioritaire pour la consultation.
+- Une panne matérielle, la durabilité réelle d'un partage SMB et la perte complète
+  d'un profil restent à valider dans l'environnement cible. Les tests actuels
+  utilisent MySQL et des fichiers locaux jetables, pas deux vrais postes SMB.
+- TLS, certains mots de passe MySQL non ASCII, la configuration seule associée
+  aux fichiers lors d'une restauration et les appels métier non couverts par
+  les comparaisons de clichés restent des lots distincts. Les avertissements
+  Qt/Pandas et le profilage volumétrique général restent ouverts.
+- Les demandes et fragments contiennent les données des journaux : droits de
+  stockage, sauvegarde et rétention restent nécessaires. Ne pas publier leurs
+  contenus. Aucun secret réel n'a été lu, affiché ou placé dans ce rapport.
+- Les correctifs sont dans les sources. L'ancien exécutable n'inclut pas ces
+  protections et aucune nouvelle construction n'a été produite dans ce lot.

@@ -1,0 +1,187 @@
+IMPRESSION — RECETTE ACCESS, EXPORTS, PERFORMANCES ET MAINTENANCE — LOT 29
+31/10/2026
+
+Portée et protection
+Travail sur feature/mysql-migration, sans reset, sans commit ni génération d'EXE.
+Modifications antérieures conservées ; état Git avant/après et originaux du lot
+enregistrés. sources/ du miroir est resté en lecture seule. Aucune donnée réelle,
+archive utilisateur ou base de production ouverte/modifiée. Aucun secret copié.
+Pas de dépendance ajoutée, pas de migration MySQL, gabarits non modifiés.
+Les anciennes distributions EXE/ZIP sont contrôlées inchangées par SHA-256.
+
+L29-01 — P1 confirmé — profils perdus à l'export/réimport Access
+Fichiers : src/sme_gend/services/access_agent_profile.py:36,
+src/sme_gend/services/mysql_bundle_export_to_access.py:182,
+src/sme_gend/repositories/liste_generale_access_repository.py (fetch_all/fetch_by_id),
+src/sme_gend/repositories/mysql_agent_repository.py:1278, models/liste_generale.py.
+Cause : les 19 colonnes historiques ne transportaient pas sexe/téléphone/adresse ;
+le réimport interprétait leur absence comme un effacement. Avant correction,
+l'aller-retour natif perd les profils et un test MySQL reproduit l'effacement
+d'un profil existant à partir d'une ancienne archive.
+Correction : extension locale facultative SGI_AgentProfile dans l'archive STAGÉE,
+liée aux identifiants Access exportés ; ListeGenerale reste à 19 colonnes.
+Les anciennes archives restent lisibles ; les colonnes directes reconnues dans
+des archives plus récentes sont aussi acceptées. La provenance distingue champ
+absent et vide explicite. L'UPDATE d'import conserve les valeurs non fournies,
+sans lecture préalable fragile ni changement des modifications interactives.
+Valeurs non nulles des appels DTO existants acceptées ; vide explicite efface
+uniquement les champs déclarés. Doublons, profils orphelins, tailles excessives,
+sexe invalide et table liée rejetés explicitement. SQL paramétré et noms de
+colonnes limités à une liste fermée. Les anciennes identités sont préservées.
+Vérifications : 6 tests MySQL de profils, tests d'archives anciennes/nouvelles,
+lecture GEN par ID, caractères accentués et deux réimports sans doublon.
+
+L29-02 — P1 confirmé — dates de stages remplacées par les bornes du mois
+Emplacement : src/sme_gend/services/mysql_access_numerique_import.py:270, helper _stage_dates.
+Reproduction native : exporter un stage du 07 au 17 septembre puis réimporter
+recréait le 01 au 30. Le champ DateDebutFin exporté n'était pas interprété.
+Correction : reconnaître uniquement la paire complète JJ/MM/AAAA — JJ/MM/AAAA
+produite par l'export ; conserver les dates exactes, y compris hors du mois.
+Les anciens textes libres, dates isolées et champs absents gardent leur repli
+mensuel et le texte source en observation. Une paire structurée invalide/inversée
+échoue explicitement ; elle ne produit pas une date inventée. L'import global
+reste dans sa transaction existante. Pas de changement des autres satellites.
+Avant : 4 échecs reproduits ; après : 7 nouveaux cas et l'ancien test INTERNE
+passent. Un test MySQL supplémentaire prouve que l'échec après DELETE restaure
+les stages originaux et les libellés de référentiel. La recette ODBC vérifie
+les trois types LOCAL/EXTERIEUR/INTERNE après chacun des deux réimports.
+
+L29-03 — P1 confirmé — un export interrompu détruisait le fichier précédent
+Fichiers : services/clean_sme_exports.py (build_numerique/build_dpf),
+services/parcours_pdf_export.py (export_parcours_pdf),
+services/limite_age_service.py (generate_docx/generate_docx_batch),
+services/soit_transmis_service.py (generate_docx).
+Reproduction : injecter une erreur après écriture partielle du fichier final.
+Les six générateurs remplaçaient une sortie complète par un fichier partiel.
+Correction : génération dans un temporaire du même dossier, publication atomique
+par la garde safe_paths déjà utilisée ailleurs ; Excel est fermé même en échec.
+PDF vide ou erreur du moteur refusés avant publication. Le contenu, les règles
+métier et la mise en page ne changent pas. Ce mécanisme protège contre les
+exceptions normales ; une coupure brutale peut laisser un temporaire non publié.
+Il ne garantit pas l'arbitrage de deux publications intentionnelles simultanées.
+Avant : 6 pertes reproduites ; après : les six tests conservent le fichier
+antérieur, relèvent l'erreur et vérifient le nettoyage des temporaires.
+
+L29-04 — P1 confirmé — échec de vidage Access masqué / table liée modifiable
+Emplacement : src/sme_gend/services/mysql_bundle_export_to_access.py:162.
+Cause : tout échec DELETE était traité comme une table absente, permettant de
+continuer avec des lignes obsolètes ; une table liée pouvait aussi être vidée.
+Correction : inventaire ODBC, absence facultative signalée comme auparavant,
+table non locale rejetée, échec sur table locale existante fatal. Seule la copie
+de travail est touchée ; une erreur empêche la publication de la nouvelle archive.
+Avant : 2 échecs ; après : tests table locale verrouillée/erreur et LINK refusée.
+Limite : un gabarit hostile avec liens ou objets actifs reste à exclure en amont ;
+ces contrôles ciblés ne constituent pas un bac à sable universel du moteur ACE.
+
+L29-05 — P2 confirmé — classifications KPI recalculées pour chaque agent
+Emplacement : src/sme_gend/services/dashboard_service.py:129.
+Correction : compter les positions brutes puis appliquer les prédicats existants
+une fois par valeur distincte. Accents, casse, présence configurée, sous-titres,
+ordre et totaux inchangés. Huit cas d'équivalence avec le comportement antérieur,
+populations vides/1/57/5000, modes présence alternés et cas inconnus passent.
+Mesure CPU appariée, neuf répétitions alternées, données synthétiques identiques,
+sans SQL et prédicat de présence remplacé par une fonction déterministe :
+- 5 000 agents : médiane 16.371 ms → 5.278 ms ;
+  appels _padmin_eq : 49 643 → 139 ;
+- 20 000 agents : 89.295 ms → 33.653 ms ;
+  appels _padmin_eq : 198 572 → 139.
+Mesure snapshot avec contexte MySQL natif local, personnel/référentiels simulés
+en mémoire, 5 000 agents, six répétitions après échauffement :
+- mois actif : 42.470 → 27.947 ms ;
+- archive : 39.028 → 36.931 ms.
+Même empreinte de snapshot avant/après, toujours un chargement de contexte et
+cinq requêtes SQL observées. Les mesures intègrent du bruit local et ne mesurent
+ni un chargement froid complet ni le réseau SMB. Ce n'est pas une accélération
+chiffrée de toute l'application. Les six JSON bruts sont dans performance/.
+
+L29-06 — P3 maintenance — recettes autonomes et contrôles des tâches de fond
+Les nouveaux tests KPI utilisent une référence historique dans tests/fixtures,
+pas le dossier build de cette session. Le benchmark natif n'exige plus son
+baseline temporaire. Un faux curseur préexistant est adapté à columns(), API
+ODBC réellement utilisée ; son assertion d'identité n'est pas supprimée.
+Les gardes du lanceur isolé, les tests préexistants et les filtres -W error restent
+actifs. Les tests Qt de cycle de vie des workers sont inclus dans la suite complète
+(fermeture du parent, thread GUI, résultat périmé, erreur, arrêt des workers).
+Aucun nouveau défaut Qt/Pandas n'a été reproduit dans cette suite ; les corrections
+du lot 27 n'ont pas été réécrites. Cela ne valide pas tous les pilotes ni toutes
+les séquences de l'interface en production.
+
+Recette réelle Access / MySQL
+Pilote Microsoft Access ODBC réellement utilisé sur un MDB créé exclusivement
+pour l'essai, avec tables locales synthétiques ; aucun MDB utilisateur ouvert.
+MySQL 8.0.40 jetable sur loopback:64062, datadir contrôlé sous build, bases uniques
+créées/détruites par les recettes. Les autres connexions sont bloquées.
+Export réel de 8 agents, dont une identité interne GEN et des noms accentués,
+lecture native puis deux imports complets dans une autre base de test ; un
+troisième import d'une copie sans SGI_AgentProfile vérifie la compatibilité ancienne.
+26 contrôles passent : profils, identités, dates, stages, missions,
+absence de doublons, 8 carrières du mois, autre mois et statut inchangés,
+exports SME/DPF depuis la source MySQL native et absence de changement de profils
+de la source. Configuration, authentification d'essai et sauvegarde de sécurité
+sont substituées pour ces bases fraîches : ce scénario ne valide pas la vraie
+sauvegarde de production. Le lecteur Access, l'export/import SQL et la conversion
+des données ne sont pas simulés. Les détails figurent dans access_native_475121581cfe4d3f8686d4caa05e26c8\after_g4x7eanu\validation.json.
+
+Recette des documents
+Les générateurs applicatifs ont produit réellement SME.xlsx, DPF.xlsx, une fiche
+PDF courte (1 page A4) et une longue (4 pages, 75 missions). Dix vues de feuilles
+et cinq pages PDF contrôlées visuellement : champs fournis, dates, totaux,
+titres, retours de ligne et en-têtes répétés sans texte tronqué observé.
+Les 15 images finales sont identiques par SHA-256 aux vues contrôlées.
+Les cellules vides des scénarios correspondent aux données absentes ; les tests
+ne déclarent pas toute colonne métier toujours obligatoire. Mois septembre 2026
+et zones d'impression contrôlés, avec totaux SME/DPF/CS correspondant au scénario.
+Trois recettes Word réelles rouvrent les DOCX individuels, batch et soit-transmis,
+contrôlent noms synthétiques, intégrité ZIP et relations OOXML sans doublon.
+Word/LibreOffice n'étant pas disponibles, la pagination Word n'a pas été validée
+visuellement. L'impression native Excel n'a pas été exercée ; les vues Excel
+sont rendues depuis le fichier et ses zones d'impression inspectées.
+
+Tests finaux réellement exécutés
+- suite locale complète : 1284 réussites en 64.73 s ;
+- MySQL profils/rollback stage/identités/statuts : 14 réussites en
+  71.32 s, 549 autres cas exclus explicitement par filtre ;
+- benchmark natif autonome : 2 réussites en 8.44 s.
+Total : 1300 cas pytest réussis dans ces commandes finales,
+plus les 26 contrôles natifs Access. Aucune réussite inventée, aucun test sauté
+ou désactivé pour obtenir ces résultats. Les journaux avant correction sont
+conservés, dont les échecs de fixtures intermédiaires distingués des bugs réels.
+Les avertissements Python sont traités en erreurs ; aucune suppression Qt/Pandas
+ajoutée. La suite MySQL entière n'a pas été relancée dans ce lot.
+Revue AST : 186 fonctions inchangées dans les dix fichiers modifiés examinés,
+aucune fonction antérieure supprimée ; dossier, transactions, pool, sauvegardes,
+authentification, Avancement et moteur des tâches de fond inchangés dans ce lot.
+
+Limites et suite ordonnée
+1. Sur copie anonymisée en préproduction, refaire export/réimport avec un vrai
+   ancien gabarit Access métier et contrôler les rubriques attendues. Le format
+   Access reste un instantané de compatibilité mensuel : il n'est pas une sauvegarde
+   complète de tous les champs/historiques MySQL (missions multiples, observations
+   ou dates non représentées par les tables historiques restent hors garantie).
+   L'ancien mode persist_legacy_ids pour agents sans clé historique n'est pas
+   exercé ici ; les nouveaux agents GEN utilisent le chemin d'identité stable.
+2. Sur les PC réels, valider partage UNC commun malgré les lettres différentes,
+   contention de fichiers ouverts, coupures/reconnexions SMB et notifications
+   entre deux postes. Ces PC restent indisponibles ; aucune validation réseau
+   réelle ni garantie de renommage SMB n'est annoncée.
+3. Contrôler visuellement DOCX dans Word et impression Excel avec les pilotes
+   utilisés sur place ; compléter les rubriques absentes du jeu synthétique.
+4. Poursuivre la revue des propagations hiérarchie U→D→T, fusions de référentiels
+   et anciens scripts SQL déjà signalés ; ils ne sont pas corrigés par ce lot.
+5. Mesurer démarrage froid, import massif, exports volumineux, photos réseau et
+   latence SQL sur données anonymisées représentatives avant toute optimisation
+   supplémentaire. Éviter de déduire un gain global du seul calcul KPI.
+
+Validation, Git et retour arrière
+changes_manifest.json détaille chaque fichier, ses empreintes et lignes ajoutées/
+retirées. corrections_only.patch isole ce lot du travail antérieur ; baseline/
+conserve les originaux. Le patch inverse est contrôlé en lecture seule.
+Tout retour doit se préparer sur copie en préservant les modifications ultérieures,
+jamais par reset global. Aucune migration ni suppression MySQL nécessaire.
+Une archive nouvelle ajoute une table facultative ; les anciens lecteurs des
+19 colonnes restent compatibles mais ne liront pas ces profils supplémentaires.
+Commandes exactes et résultats : validation_summary.json. Pour rejouer les essais,
+utiliser uniquement un profil isolé et l'instance jetable contrôlée, jamais adapter
+les commandes vers une base réelle. L'instance locale de cette session est arrêtée
+en fin de lot et l'absence de schémas de test est contrôlée séparément.
+L'application entière n'est pas déclarée exempte de bugs.

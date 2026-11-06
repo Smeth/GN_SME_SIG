@@ -1,0 +1,102 @@
+IMPORTER, EXPORTER ET RESTAURER UN SEUL MOIS
+Impression — 1er novembre 2026
+
+ACCES
+Archives & clôture > Fichiers d'archive >
+« Importer / exporter / restaurer un mois… ».
+Sélectionner un SQL dans le catalogue puis « Choisir un mois à restaurer… »
+ouvre directement le même parcours. Les ZIP mensuels sont aussi reconnus.
+
+OPERATIONS
+1. Exporter un mois : choisir la période, consulter l'aperçu si souhaité, puis
+   exporter en ZIP mensuel SME ou en SQL mensuel SME. Le fichier ne contient
+   qu'une période, ses lignes métier et les identités/référentiels nécessaires.
+2. Importer un mois absent : charger la source, sélectionner l'un des mois
+   réellement présents, contrôler l'aperçu puis confirmer. Si la période existe
+   déjà, l'import invite à utiliser le mode restauration.
+3. Restaurer / remplacer un mois : charger la source, sélectionner le mois,
+   contrôler les effectifs, historiques et conflits puis confirmer explicitement
+   le remplacement. Les autres mois ne sont pas remplacés et le mois de travail
+   reste inchangé. Une période créée par ce parcours est fermée, jamais activée.
+
+SOURCES ACCEPTEES
+- Une archive mensuelle SME produite par le nouvel export (ZIP avec month.json).
+- Un SQL global ou mensuel de l'application, dialecte interne ou dump natif
+  mysqldump compatible avec le modèle normalisé MySQL/InnoDB.
+- Un ZIP de sauvegarde globale de l'application contenant le dump SQL, après
+  vérification du manifeste et du CRC par le service de sauvegarde existant.
+Le SQL importé n'est JAMAIS exécuté. Les définitions et valeurs sont lues en
+mémoire ; les seules écritures sont des requêtes paramétrées construites par
+le service de transfert et contrôlées contre le schéma actuel.
+Un SQL mensuel exporté doit être réimporté par cet écran, pas exécuté à la main.
+
+CONTROLES ET CONSERVATION
+- Sélection d'un mois du calendrier présent une seule fois dans la source.
+- Provenance explicite : période, mois d'événement et lot d'import. Pour les
+  historiques de dossier existants, réutilisation des conventions de provenance
+  « Import archive YYYY-MM », puis date lorsque aucune provenance n'existe.
+  Une date ancienne de diplôme ne l'exclut pas du mois qui l'a importé.
+- Dépendances conservées par clés étrangères ; refus des références à un autre
+  mois et des dépendances qui ne peuvent pas être isolées sans ambiguïté.
+- Comparaison des identités, référentiels, clés uniques et structures de données.
+  Les différences sont affichées, avec champs et valeurs source/base.
+  Un conflit bloque la restauration. Aucune identité ni référence existante
+  n'est écrasée ou rapprochée automatiquement. Les dépendances manquantes
+  compatibles peuvent être ajoutées ; les autres périodes ne sont pas modifiées.
+- Contrôle des anciens identifiants déjà rapprochés via agent_identity_alias :
+  un ancien dossier fusionné n'est pas recréé silencieusement.
+- Remappage de l'identifiant de période, des lots et des lignes mensuelles pour
+  ne pas réutiliser des clés techniques appartenant à d'autres mois.
+- Conservation des statuts existants et de la projection du mois de travail.
+- Sauvegarde fraîche obligatoire, nouvelle comparaison sous le verrou commun
+  d'écriture, puis remplacement dans une transaction. Une modification sur un
+  autre poste après l'aperçu provoque un refus. Une erreur annule les écritures.
+- Trace de restauration dans le journal métier existant, avec période, compte,
+  empreinte source, sauvegarde et décomptes. Révision partagée et caches actualisés.
+- Réutilisation des permissions : archives pour consulter, sauvegarde pour
+  exporter ; administrateur autorisé à importer pour remplacer/importer un mois.
+
+PERIMETRE ET LIMITES EXPLICITES
+Les médias locaux/photos, comptes, configurations, journaux, tâches et
+acquittements ne sont pas réimportés par le transfert mensuel.
+Les événements sans provenance mensuelle exploitable ne sont pas attribués
+arbitrairement à un mois. Un schéma incompatible, des dépendances inconnues,
+des cycles non pris en charge ou des déclencheurs métier sont refusés.
+Les procédures, événements SQL, directives natives inconnues et modes SQL qui
+changent l'interprétation des littéraux ne sont pas exécutés et sont refusés.
+La restauration exige InnoDB et un mode SQL strict.
+Lecture en mémoire : limite de 512 Mo pour le SQL, 256 Mo pour le JSON mensuel.
+L'empreinte du ZIP protège la cohérence du contenu, pas l'identité de son auteur.
+Les conflits d'identités/référentiels exigent une vérification préalable dans
+les écrans métier ; ce module ne devine pas une correspondance entre personnes.
+
+FICHIERS DE CETTE INTERVENTION
+Nouveaux :
+- src/sme_gend/services/month_transfer.py
+- src/sme_gend/ui/month_transfer_dialog.py
+- tests/test_month_transfer.py
+- tests/test_month_transfer_ui.py
+- tests/integration/test_month_transfer_mysql.py
+Adaptés :
+- src/sme_gend/ui/views/archives_view.py
+- src/sme_gend/services/archive_catalog.py
+- tests/test_archive_cycle_ui.py
+Recette locale : build/audit_20261101/run_month_mysql.py,
+visual_month_transfer.py, rendus et résultats associés.
+Toutes les modifications préexistantes du dépôt sont conservées.
+
+VALIDATION
+211 tests unitaires/interface/régression réussis.
+Recette SQL : 30 tests unitaires + 8 tests d'intégration réussis sur une instance
+MySQL 8.0.40 créée uniquement sous build/audit_20261101/month_mysql_20261101,
+port 64093, avec vérification de @@datadir et création de bases de test uniques.
+Ces huit tests couvrent le remplacement isolé, le SQL global interne et natif,
+le refus des écritures concurrentes, le rollback après erreur SQL, l'import
+d'une période absente, la restauration du mois actif et le schéma complet.
+La source native a été produite par le mysqldump installé, en lecture uniquement
+sur la base de recette. Aucun binaire applicatif n'a été construit.
+Six rendus du nouveau dialogue en thèmes clair/sombre, huit rendus du module.
+Résultats : build/audit_20261101/month-transfer-results.txt,
+month-mysql-results.txt et month-mysql.xml.
+L'instance jetable a été arrêtée après vérification de son datadir et de son port.
+Aucune connexion à la base opérationnelle et aucune donnée réelle modifiée.

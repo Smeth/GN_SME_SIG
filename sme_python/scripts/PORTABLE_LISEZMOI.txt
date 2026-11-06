@@ -1,0 +1,100 @@
+SME Gendarmerie — version portable (test sur un autre PC)
+=========================================================
+
+Contenu du dossier dist\SME_Gendarmerie\
+---------------------------------------
+- SME_Gendarmerie.exe      : application
+- _internal\               : bibliothèques (ne pas supprimer)
+- data\                    : schémas SQL + configs JSON (modifiable)
+- modeles\                 : gabarits Excel/Word (resultat, numerique, DETACHES, docx…)
+- personnel_media\grades\ : insignes de grade (fiches personnel, exports parcours)
+- lancer_SME_Gendarmerie.cmd : raccourci de lancement
+- PORTABLE_LISEZMOI.txt      : ce fichier
+
+Copiez TOUT le dossier sur l'autre PC (clé USB, partage réseau, etc.).
+
+Prérequis sur le PC de test
+---------------------------
+1. Windows 10 ou 11 (64 bits).
+2. Serveur MySQL accessible (réseau ou local) avec la base SME.
+3. Pilote ODBC Microsoft Access (*.mdb, *.accdb) si vous importez depuis Access :
+   « Microsoft Access Database Engine » Redistributable (64 bits, même architecture que l'exe).
+
+Premier lancement
+-----------------
+1. Double-clic sur SME_Gendarmerie.exe (ou lancer_SME_Gendarmerie.cmd).
+2. Authentification (optionnelle) :
+   - Par défaut : DÉSACTIVÉE (pas d'écran de connexion au démarrage).
+   - Si aucun compte n'existe encore, l'application crée automatiquement :
+     Les modalités du compte initial restent définies par l'application.
+     Activer l'authentification et changer le mot de passe initial dans
+     Paramètres > Utilisateurs avant toute utilisation en réseau.
+3. Configuration MySQL (OBLIGATOIRE au 1er lancement sur un nouveau PC) :
+   - Au premier démarrage, l'application teste MySQL (127.0.0.1 par défaut).
+   - Si la connexion échoue : fenêtre « Premier lancement — configurez MySQL »
+     avec bouton « Configurer MySQL… ».
+   - Renseignez : hôte (IP serveur), port (3306), base (smegend), utilisateur, mot de passe.
+   - Utilisez « Tester la connexion » puis « Enregistrer les paramètres ».
+   - Access (.mdb) : optionnel, uniquement pour importer des archives.
+   - Menu permanent : Fichier → Configuration MySQL et chemins…
+   - Modèle : copiez paths.json.example vers
+     %LOCALAPPDATA%\SME_Gendarmerie\paths.json puis adaptez les valeurs.
+4. Les réglages sont enregistrés dans :
+   %LOCALAPPDATA%\SME_Gendarmerie\paths.json
+   (chaque utilisateur Windows a sa propre config — normal en réseau).
+
+Fichiers à côté de l'exe
+------------------------
+- data\schema\           : scripts SQL MySQL (fournis avec l'exe)
+- data\*.json            : configs par défaut (liste présents, détachés…)
+- modeles\               : gabarits (resultat.xlsx, numerique.xlsx, DETACHES.xlsx, limite_age.docx…)
+- personnel_media\grades\ : insignes PNG livrés avec l'application (modifiables)
+- modeles\smegend.mdb    : gabarit vide vérifié pour les exports Access.
+  Les archives contenant des agents doivent être sélectionnées séparément pour un import.
+- Les journaux sont créés dans data\sme_app.log
+
+Données métier (MySQL)
+----------------------
+L'application utilise MySQL comme base opérationnelle (effectifs, SME, config
+centralisée). Préparez la base sur le serveur (scripts dans data\schema\) avant
+le premier lancement, ou importez un export SQL depuis Admin → Sauvegarde.
+
+Fichiers utilisateur (hors dossier portable)
+--------------------------------------------
+  %LOCALAPPDATA%\SME_Gendarmerie\paths.json   — connexion MySQL / chemins
+  %LOCALAPPDATA%\SME_Gendarmerie\backups\     — sauvegardes ZIP SQL
+
+Gabarits Word/Excel (dossier modeles\)
+-------------------------------------
+  resultat.xlsx, numerique.xlsx, DETACHES.xlsx, limite_age.docx, soit_transmis.docx
+  (copiez-les depuis votre poste de développement dans modeles\ si besoin.)
+
+Variables d'environnement utiles (optionnel)
+--------------------------------------------
+  SME_MYSQL_HOST=192.168.x.x
+  SME_MYSQL_PORT=3306
+  SME_MYSQL_USER=...
+  SME_MYSQL_PASSWORD=...
+  SME_MYSQL_DATABASE=smegend
+  SMEDB_PATH=C:\chemin\vers\smegend.mdb
+
+Mode performance (PC peu de RAM)
+--------------------------------
+  SME_FULL_FEATURES=1   → charge toutes les pages au démarrage (ancien mode)
+  SME_LOG_DEBUG=1       → logs détaillés dans data\sme_app.log
+
+Dépannage
+---------
+- Écran blanc / plantage : vérifier antivirus (ajouter une exception sur le dossier).
+- Erreur MySQL : ping du serveur, pare-feu port 3306, identifiants.
+- Erreur Access / import : installer le pilote ODBC Access 64 bits.
+
+Construction du portable
+-----------------------
+Le poste de construction nécessite DAO (Access Database Engine).
+Le générateur travaille uniquement sur une copie dans build/, vide les tables
+utilisateur, compacte le fichier et compare les structures avant/après.
+Le fichier Access original reste intact. Le ZIP est refusé si un MDB/ACCDB
+non vérifié subsiste, y compris dans _internal/.
+Les médias personnalisés sont conservés : contrôler les photos destinées aux
+postes de déploiement avant de diffuser le portable.

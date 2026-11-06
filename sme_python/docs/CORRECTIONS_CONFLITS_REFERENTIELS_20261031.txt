@@ -1,0 +1,189 @@
+IMPRESSION — CONFLITS DES GRADES, STRUCTURES ET FONCTIONS — LOT 22
+31/10/2026
+
+Protection et périmètre
+Racine : C:\Users\MONSTER\Desktop\GN\Impression\sme_python.
+Branche feature/mysql-migration conservée ; 497 entrées Git préexistantes au début
+du lot. État initial, empreintes et copies baseline/ conservés. Aucun reset,
+commit, déploiement, nettoyage de fichiers utilisateur ou génération d'exécutable.
+Aucune donnée réelle ni partage SMB modifié. MySQL 8.0.40 jetable uniquement,
+datadir vérifié sous build, port 64062. Les tests pytest bloquent réseau externe,
+ODBC et écritures hors profil synthétique. Les sondes interprocessus limitent aussi
+les fichiers et connexions à leur propre schéma et dossier temporaire.
+Aucun changement de schéma de production, migration ou dépendance nouvelle.
+
+L22-01 — P1 confirmé — éditions concurrentes des trois catalogues
+Emplacements : src/sme_gend/repositories/mysql_bundle_repositories.py:120,
+190 et 621 ;
+src/sme_gend/repositories/reference_write_guard.py:32.
+Avant correction, les UPDATE ciblaient un code ou id sans comparer les champs
+présentés à l'utilisateur. Deux lecteurs ouvraient le même grade, structure ou
+fonction ; après le premier commit, le second remplaçait ses champs sans conflit.
+Pour les fonctions, une édition périmée pouvait aussi propager un ancien libellé
+dans les carrières/affectations de façon incohérente avec le catalogue.
+Trois tests natifs avant correction échouaient faute de refus du second éditeur.
+
+Correction : jeton opaque (type de catalogue, clé, SHA-256) ajouté aux lignes
+chargées. L'empreinte porte sur toutes les colonnes brutes utiles, y compris l'id
+interne : grade (id, code, libellé, ordre, effectif), structure (id, code,
+désignation, ordre, famille) et fonction (id, libellé). NULL, casse et espaces
+restent distingués des valeurs normalisées pour l'affichage. Une suppression
+puis recréation du même code avec un autre id est donc détectée.
+Le jeton est comparé par SELECT ... FOR UPDATE dans la même transaction que le
+DML et la notification du lot 19. Lecture courante, y compris dans un import
+REPEATABLE READ dont les SELECT ordinaires voient encore un ancien instantané.
+Le verrou reste détenu jusqu'au commit ou rollback réel. Une différence ou une
+disparition lève ReferenceConflictError avant mutation et sans nouvelle révision.
+L'ancien libellé de fonction doit correspondre au cliché transmis ; le contrôle
+précède toute propagation aux carrières/affectations. Leurs SQL restent inchangés.
+Référence primaire sur les lectures verrouillantes :
+https://docs.oracle.com/cd/E17952_01/mysql-8.0-en/innodb-locking-reads.html
+
+L22-02 — P1 confirmé — créations pouvant remplacer un code existant
+Emplacements : src/sme_gend/repositories/mysql_bundle_repositories.py:MySQLGradeRepository.insert, MySQLStructureRepository.insert.
+Les deux chemins utilisaient INSERT ... ON DUPLICATE KEY UPDATE : une création
+faite depuis une liste ancienne pouvait écraser un grade/une structure déjà créé.
+Deux reproductions natives avant correction ne levaient pas l'erreur attendue.
+Correction : création stricte par INSERT, doublon 1062 traduit en conflit explicite.
+La création des fonctions refusait déjà les doublons ; son erreur de précontrôle
+partage maintenant le type de conflit. Les imports SQL et leurs propres règles
+de remplacement ne sont pas détournés vers cette politique de création manuelle.
+Validation : deux créations simultanées d'un même code ont un seul succès, une
+seule révision et les premières valeurs restent intactes. Aucun index ajouté
+en production ; la fixture synthétique a reçu l'unicité de code structure déjà
+présente dans le schéma applicatif et absente de sa version minimale antérieure.
+
+L22-03 — P1 — suppressions et renommages depuis un écran périmé
+Emplacements : delete des trois dépôts, MySQLStructureRepository.rename_code,
+src/sme_gend/repositories/mysql_organigram_repository.py:445 et
+478.
+Même comparaison obligatoire pour une suppression directe, une suppression avec
+contrôle d'usage dans l'organigramme et un renommage de code. Le verrou précède
+les contrôles d'usage. Les règles empêchant la suppression d'une entrée utilisée
+sont conservées ; aucun contournement par un appel sans version.
+Les façades et services transmettent le cliché d'origine ; un jeton absent,
+invalide, d'une autre entrée ou d'un autre catalogue est refusé avant transaction.
+protected_entry_points.json inventorie les neuf méthodes SQL protégées et leurs
+emplacements. Les anciennes signatures sont étendues par expected ; les appels
+de modification/suppression sans cliché doivent d'abord charger les données.
+Validation : neuf courses (trois types × édition/édition, édition/suppression,
+suppression/suppression), six disparitions et deux suppressions périmées depuis
+l'organigramme. Un seul effet et un seul signal sont observés dans chaque course.
+
+L22-04 — P1 — lot de types d'unité et édition de structure depuis la mise en page
+Emplacements : src/sme_gend/services/referentiel_service.py:303,
+src/sme_gend/services/layout_config_service.py:229.
+Le changement groupé relisait les structures après la confirmation et enregistrait
+chaque ligne séparément. Désormais les clichés sont capturés dans l'écran avant
+la modale, validés ensemble et traités dans un ordre stable dans une transaction
+unique. Si la seconde structure a changé, la première modification est annulée ;
+en cas de succès, une seule publication couvre le lot.
+Le renommage du code et l'édition de désignation/ordre de la mise en page sont
+regroupés dans une transaction ; la configuration en mémoire est copiée avant
+renommage. Le cliché du nouveau code est relu uniquement sous le verrou toujours
+détenu par cette même transaction, après son propre renommage. Cela ne remplace
+pas une version périmée par celle d'un autre utilisateur.
+La famille d'unité est conservée lorsque cet écran ne l'édite pas ; l'ancien appel
+transmettait implicitement None et pouvait l'effacer. Un échec de seconde phase
+annule le renommage SQL et ne change pas l'objet de configuration initial.
+Le test natif de regroupement utilise des doublures pour les deux appels de
+miroir ListeGenerale ; il valide la transaction du catalogue et la copie en
+mémoire, pas une nouvelle validation exhaustive du miroir réel et des fichiers.
+L'enregistrement de configuration après ce groupe conserve son mécanisme existant.
+
+L22-05 — parcours utilisateur et compatibilité
+Écrans raccordés : grades, hub structures, fonctions, sous-dialogue de structure,
+fonction avec suggestions/rattachements et éditeur de mise en page.
+En conflit d'édition, avertissement puis réaffichage de la même modale et des
+mêmes champs. Annuler puis actualiser avant de reprendre ; aucune fusion ou
+substitution automatique de la version. Les champs de l'édition inline de
+structure restent consultables après refus. Après une sauvegarde et une relecture,
+les champs visibles de l'éditeur de type sont maintenant alignés sur le cliché
+effectivement retenu. Un test a reproduit le décalage entre nouveaux jeton/objet
+et anciens textes affichés, avant correction. Les suppressions en conflit
+affichent l'erreur puis rechargent la liste sans faux succès.
+La modale de fonction conserve le catalogue chargé à l'ouverture au lieu de
+relire une version plus récente lors de l'enregistrement. Si la fonction initiale
+a disparu, elle n'est pas recréée implicitement. Confirmations et restrictions
+de saisie existantes sont préservées et vérifiées par les tests UI.
+Les trois modèles ajoutent write_token en fin de dataclass, défaut None, exclu
+de repr et de l'égalité métier. DTO historiques et lectures d'export restent
+compatibles ; les écritures exigent un cliché frais, sans mode de contournement.
+
+Validation exécutée
+- Avant correction : 5 échecs natifs, 341 non sélectionnés, 7,25 s.
+- Nouveau périmètre natif : 44 réussis, 341 non sélectionnés, 66,93 s.
+- 41 nouveaux tests unitaires : versions absentes/incohérentes, modèles historiques,
+  transmission des façades, brouillons, annulations, saisie verrouillée, modale
+  de fonction, lot capturé avant confirmation, configuration préservée et champs
+  alignés sur leur version rechargée. Dernière reproduction UI : 1 échec en 0,48 s ;
+  les 41 nouveaux cas passent ensuite en 1,22 s.
+- Passe finale unitaire complète : 1066 réussis, 8 avertissements,
+  50.75 s. Aucun test désactivé pour obtenir ce résultat.
+- Passe finale MySQL ciblée : 144 réussis, 241 non sélectionnés,
+  205.54 s. Filtre : catalog_lot22 or reference_lot19 or gain_lot21.
+  Elle rejoue les 69 tests référentiels du lot 19 et les 31 cas gains/pertes du
+  lot 21. Pas une nouvelle passe complète des 385 cas natifs disponibles.
+- Total pytest final : 1210 réussis ; 85 nouveaux cas ajoutés.
+- Six scénarios entre processus Python indépendants sur MySQL réel : mise à jour
+  puis tentative périmée d'édition ou de suppression pour chacun des trois types.
+  Le conflit est explicite, les premières données et leur révision restent intactes.
+  Empreintes des six sources centrales consignées dans la preuve.
+- Revue AST : cinq autres classes et quatre fonctions du module de dépôts
+  inchangées ; onze UPDATE/DELETE des catalogues et trois DELETE de l'organigramme
+  conservent exactement leurs SQL et l'ordre des paramètres. Les créations strictes
+  et nouvelles projections de version sont des changements intentionnels distincts.
+- Les anciens tests sans effet utilisent maintenant un cliché courant ; les deux
+  suppressions sans version d'une clé absente vérifient le refus explicite, tout
+  en conservant les assertions absence de données modifiées, de signal et
+  d'invalidation. Les autres assertions des tests précédents sont maintenues.
+- Contrôle syntaxique global, patch isolé contrôlé sans application, conservation
+  de l'état Git antérieur et des empreintes EXE/ZIP. Arrêt du serveur jetable et
+  absence de bases synthétiques résiduelles consignés dans validation_summary.json.
+Commandes, profils et durées exactes : final_unit_confirmed.json, final_mysql.json et logs
+correspondants dans build/corrections_20261031_lot22 (la dernière passe unitaire
+utilise final_unit_confirmed.json/.log, les preuves antérieures sont conservées).
+Le dernier ajustement d'affichage ne modifie que l'UI ; toute la suite unitaire
+a été rejouée après. Les sources backend, scripts et tests d'intégration sont
+antérieurs à la passe MySQL et sont restés inchangés, contrôlés par dates et
+empreintes. Sonde interprocessus :
+catalogue_conflict_*/validation.json ; scripts conservés dans le même dossier.
+
+Performance et limites
+Pas de gain de latence globale revendiqué : aucun benchmark avant/après
+représentatif. L'empreinte est ajoutée au SELECT existant ; chaque écriture
+contrôlée ajoute une lecture ciblée sous verrou. Les lots partagent une révision
+et ne gardent aucun verrou pendant les confirmations ou la saisie utilisateur.
+L'attente sur les lignes communes et la révision globale reste normale ; les
+interblocages ou pertes d'acquittement de commit ne déclenchent aucun rejeu métier
+automatique. Vérifier l'état réel avant de relancer un résultat incertain.
+
+Travail restant et risques résiduels
+- Validation locale seulement, pas de partage SMB réel ni deux PC de travail.
+  Le rafraîchissement utilise le polling existant et ses règles de report.
+- La version couvre les champs des catalogues. Les sélections de rattachements
+  fonction↔structure, priorités, réordonnancements d'organigramme, insignes et
+  configuration de présentation ne reçoivent pas ici de comparaison optimiste
+  dédiée. Un changement de liens seul ne change pas l'empreinte du catalogue.
+- Les anciens exécutables et outils SQL directs peuvent écrire hors de ces
+  contrôles. Déployer ultérieurement une version homogène lors d'un lot autorisé
+  de packaging ; aucun exécutable n'est généré maintenant.
+- L'empreinte compare l'état, pas une séquence historique : une modification puis
+  retour exactement aux mêmes valeurs et au même id n'est pas détectée comme
+  version nouvelle. Un compteur persistant exigerait un lot de schéma séparé
+  avec sauvegarde et procédure de retour arrière. Recréation avec nouvel id testée.
+- Vérifié sur InnoDB/MySQL 8.0.40 ; aucune migration réelle ni garantie pour un
+  autre moteur. TLS, mots de passe non ASCII et profilage restent séparés.
+
+Validation en préproduction et retour arrière
+Ouvrir le même grade, structure puis fonction dans deux clients ; enregistrer
+dans le premier, tenter une édition/suppression depuis l'ancien cliché du second.
+Vérifier conflit, brouillon conservé, absence de second signal et données du
+premier intactes. Annuler, actualiser, puis reprendre volontairement l'édition.
+Tester deux créations du même code, deux entrées distinctes, la famille groupée,
+le renommage depuis la mise en page et les confirmations annulées.
+Utiliser uniquement une base synthétique pour ces essais.
+changes_manifest.json et corrections_only.patch isolent ce lot du dépôt déjà
+modifié ; baseline/ garde les originaux. Retour de sources à vérifier sur copie,
+en préservant les changements ultérieurs, sans reset global. Aucune migration
+ou restauration de données à annuler. Aucun exécutable généré.

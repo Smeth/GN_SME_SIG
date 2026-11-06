@@ -1,0 +1,190 @@
+IMPRESSION — VALIDATION SMB ET POSTES : KIT PRÊT, RÉSEAU DE TRAVAIL EN ATTENTE
+Date : 30 octobre 2026. Aucun exécutable généré.
+
+ÉTAT RÉEL DE LA VALIDATION
+
+L'utilisateur a confirmé ne pas avoir accès aux PC de travail actuellement.
+Le chemin UNC exact et les lettres des lecteurs sur ces postes ne sont pas
+disponibles. Sur le poste accessible : Get-SmbMapping et Win32_LogicalDisk
+n'affichent aucun lecteur réseau ; aucun partage non système n'est listé.
+Get-SmbConnection est inaccessible via CIM : son absence de résultat ne prouve
+donc pas l'absence de toute connexion SMB.
+
+Les essais sur le partage de travail et la synchronisation de l'application
+entre deux vrais postes n'ont PAS été exécutés. Aucun résultat local ne les
+remplace. Aucun serveur, pare-feu, droit, lecteur mappé ou profil MySQL n'a été
+modifié pour créer artificiellement un environnement réseau.
+
+Un kit autonome est fourni :
+  scripts/Test-ImpressionSmb.ps1
+  tests/manual/Test-ImpressionSmb.Local.ps1  (répétition locale du kit)
+
+Le script principal utilise Windows PowerShell 5.1, sans Python ni accès MySQL.
+Il résout une lettre de lecteur par WNetGetUniversalName vers le chemin UNC.
+Des lettres différentes peuvent donc être utilisées sur les deux postes.
+Les identifiants Windows déjà ouverts sont utilisés, sans demander ni enregistrer
+de mot de passe. Le kit ne met pas à jour l'application.
+
+COMMENT LANCER SUR LES PC DE TRAVAIL
+
+1. Copier Test-ImpressionSmb.ps1 sur les deux postes, dans un dossier accessible
+   à l'utilisateur. Ouvrir PowerShell dans ce dossier, avec le compte Windows
+   qui utilise habituellement le partage. Ne pas changer de compte par élévation
+   simplement pour retrouver les lecteurs d'une autre session Windows.
+
+2. Sur le poste A, lancer en remplaçant Z:\Photos par le dossier réseau choisi :
+
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Test-ImpressionSmb.ps1 -Role Start -Path 'Z:\Photos'
+
+   Un sous-dossier neuf impression_smb_validation_<UUID> est créé. La console
+   affiche SESSION_FOLDER= suivi de son chemin UNC. Le poste A attend le poste B.
+   Les fichiers existants de l'application ne sont ni remplacés ni supprimés.
+
+3. Pendant cette attente, sur le poste B, lancer :
+
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Test-ImpressionSmb.ps1 -Role Join -SessionFolder '\\serveur\partage\Photos\impression_smb_validation_<UUID>'
+
+   Remplacer le chemin par celui affiché par A. Pour tester explicitement la
+   lettre différente sur B, on peut utiliser le chemin équivalent, par exemple :
+
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Test-ImpressionSmb.ps1 -Role Join -SessionFolder 'P:\Photos\impression_smb_validation_<UUID>'
+
+   Les deux chemins doivent viser le même sous-dossier UUID. Le script compare
+   l'identité de session et la racine UNC résolue ; il refuse les messages anciens
+   et les racines différentes. Le délai est de 180 secondes par phase ; l'option
+   -TimeoutSeconds permet de le choisir entre 1 et 600 secondes.
+
+4. Consulter a.result.json dans ce sous-dossier, ou lancer :
+
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Test-ImpressionSmb.ps1 -Role Report -SessionFolder '<chemin de la session>'
+
+   Ne pas ajouter -AllowLocalSelfTest aux essais réels. Cette option est réservée
+   à la répétition locale et empêche de déclarer les vrais postes/SMB validés.
+
+L'autorisation d'exécution des commandes ci-dessus est limitée au processus lancé.
+Aucune politique Windows globale n'est modifiée. Si une politique de l'entreprise
+bloque toujours le script, utiliser une exécution approuvée/signée par son
+administrateur ; le kit ne modifie ni cette politique ni les réglages du poste.
+
+CE QUE LE KIT MESURE
+
+- Création, écriture, lecture et publication de fichiers dans le seul sous-dossier
+  neuf de validation, avec l'utilisateur de chaque poste.
+- Refus d'un verrou de plage d'octets détenu par l'autre participant, dans les
+  deux sens, puis acquisition après libération du verrou.
+- Remplacement d'un fichier créé par l'autre participant, dans les deux sens.
+  Cela aide à repérer des droits de remplacement différents des seuls droits
+  de création/lecture dans un dossier.
+- Cinquante publications atomiques par MoveFileExW pendant les lectures de B ;
+  contrôles de l'identifiant, de la séquence et du contenu complet. Une erreur
+  de contenu/JSON échoue ; elle n'est pas remplacée par un résultat fictif.
+- Observation du dialecte SMB quand Get-SmbConnection est accessible pour ce
+  serveur et ce partage. Une impossibilité d'observer le dialecte reste explicite.
+- Vérification que les deux noms de postes Windows diffèrent, sans les conserver
+  en clair : un hachage lié à la session est utilisé. Deux processus sur le même
+  poste ne peuvent pas passer pour deux postes dans le mode normal.
+
+Le diagnostic réessaie les contentions temporaires connues de lecture/renommage
+pendant 500 ms maximum par opération. Les codes et nombres de reprises sont
+publiés dans RenameRetriesA/B, ReadRetriesB et RetryCodesA/B. Une erreur durable
+ou un autre code provoque un échec. Ces reprises appartiennent AU DIAGNOSTIC :
+elles n'ajoutent aucun mécanisme de réessai aux services Python de l'application.
+Des compteurs non nuls doivent être examinés avant de conclure à la robustesse
+de l'application pendant des lectures/exportations de photos concurrentes.
+
+Le temps PublicationRoundtripMilliseconds comprend la sérialisation et les pauses
+du protocole ; ce n'est pas un benchmark du débit SMB ou de la rapidité métier.
+
+COMMENT INTERPRÉTER LES RÉSULTATS
+
+SMB_FILE_CHECKS_PASSED : les primitives de fichier ont passé entre deux noms
+de postes distincts via UNC et le dialecte SMB a été observé des deux côtés.
+Cela ne valide pas les transactions MySQL ou l'ensemble de l'application.
+
+UNC_FILE_CHECKS_PASSED : les primitives ont passé entre les deux postes via UNC,
+mais le protocole SMB n'est pas observable des deux côtés. Le champ
+SmbFileChecksValidated reste false ; UncFileChecksValidated est true.
+
+LOCAL_REHEARSAL_PASSED : répétition locale explicitement activée. Elle ne valide
+ni le réseau de travail ni deux vrais postes. Les champs réseau restent false.
+
+VALIDATION_INCOMPLETE : échec de précondition, d'accès, de protocole ou de délai.
+Le stade et le code natif sont conservés. Une erreur d'autorisation ne devient
+pas une prétendue réussite du partage. Relancer une nouvelle session après examen,
+sans réutiliser une session interrompue ou ses marqueurs.
+
+MySQLApplicationSyncValidated reste toujours false dans ce script : il n'ouvre
+aucune connexion SQL et n'appelle pas les flux métier Python.
+
+VALIDATION APPLICATION / MYSQL À EFFECTUER ENSUITE
+
+Préparer une base MySQL de test accessible des deux postes, des données
+synthétiques et une racine médias de test. Les deux postes doivent exécuter
+les mêmes sources corrigées et leurs dépendances, avec des profils distincts
+de la production. Les EXE actuels ne contiennent pas les derniers lots ; le kit
+PowerShell ne change pas cette situation. Aucun nouvel EXE n'a été construit.
+
+Sur cet environnement isolé, vérifier :
+1. Import d'une carrière synthétique sur A puis mise à jour de B au contrôle
+   partagé suivant ou à l'actualisation. Comparer le mois, les effectifs et les
+   lignes ; aucune attente de mise à jour instantanée pendant une modale/saisie.
+2. Saisie commencée sur B pendant une modification de A : la saisie reste intacte,
+   puis B reprend l'actualisation après validation/annulation.
+3. Ajout/remplacement de photo, y compris changement d'extension, et consultation
+   ou export simultané sur l'autre poste. Noter les erreurs de partage Windows.
+4. Bascule de dossier pendant une copie ; l'écriture participante doit attendre
+   puis relire le dossier actif, selon les protections des lots 13/14.
+5. Restauration de configuration seule : chemins actifs conservés, ancienne file
+   de journaux ignorée, nouvelle révision visible sur B. Vérifier la reprise d'une
+   session interrompue avant une nouvelle tentative de restauration.
+
+Les coupures de réseau et arrêts de serveur ne sont pas déclenchés par le kit.
+Ces scénarios nécessitent un réseau de test où aucune saisie réelle n'est en cours.
+Les droits Windows et le serveur MySQL de travail n'ont pas été modifiés ici.
+
+ESSAIS EFFECTIVEMENT EXÉCUTÉS ICI
+
+- Parse PowerShell : 0 erreur.
+- Windows PowerShell 5.1 : deux processus de répétition sur fichiers locaux.
+- Refus d'un chemin local hors mode de répétition, sans création de dossier.
+- Refus d'un manifeste de session altéré, sans modification de cette session.
+- Verrouillage dans les deux sens, libération, remplacement croisé : réussis.
+- Cinquante publications ; 64 lectures complètes contrôlées.
+- 36 reprises de renommage observées, code Windows 5 ;
+  0 reprise de lecture dans cette passe. Cette contention locale
+  est une observation à investiguer, pas une preuve de panne SMB en production.
+- Délai expiré sans participant B : échec explicite et verrou libéré.
+- Sous-dossier contenant espaces et apostrophe : arguments transmis correctement.
+- Les rapports locaux conservent real_smb_tested=false, two_workstations_tested=false
+  et mysql_application_sync_tested=false. Aucun résultat de production inventé.
+
+La première exécution du banc a révélé la politique d'exécution par défaut de
+Windows PowerShell, puis une contention locale de renommage. Le banc exige
+maintenant un véritable rapport du script pour accepter un cas négatif ; une
+simple erreur de lancement ne suffit plus. Les contentions sont comptées et
+bornées, plutôt que supprimées des résultats. Aucun test métier n'a été désactivé.
+
+PÉRIMÈTRE GIT ET LIMITES
+
+Ajouts uniquement : script de diagnostic, banc local et cette procédure.
+Les sources métier, tests Python et anciens EXE/ZIP restent inchangés par rapport
+au lot 14. Les 963 tests du lot 14 ne sont pas présentés comme réexécutés ici.
+Les empreintes le vérifient ; les essais de ce lot concernent le kit PowerShell.
+
+Les sous-dossiers de validation sont conservés pour analyse. Le script ne supprime
+que ses propres temporaires .part ; aucun nettoyage récursif, dossier utilisateur
+existant, service ou configuration partagée n'est modifié. Après examen, archiver
+les rapports puis supprimer manuellement uniquement la session de test voulue.
+
+build/corrections_20261030_lot15/validation_summary.json
+build/corrections_20261030_lot15/changes_manifest.json
+build/corrections_20261030_lot15/corrections_only.patch
+
+La validation réelle SMB/application restera ouverte jusqu'à réception d'un
+rapport exécuté sur le réseau de travail et du contrôle métier sur deux postes.
+
+Références primaires :
+https://learn.microsoft.com/en-us/windows/win32/api/winnetwk/nf-winnetwk-wnetgetuniversalnamew
+https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw
+https://learn.microsoft.com/en-us/dotnet/api/system.io.filestream.lock?view=netframework-4.8
+https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies?view=powershell-5.1

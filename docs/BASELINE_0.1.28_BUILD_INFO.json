@@ -1,0 +1,46 @@
+{
+  "application_version": "0.1.28",
+  "source_sha256": "0caaa5257d242b519a90a66b967a911402f6c93017c7d6ca0f247d4dc0f89e4a",
+  "dependencies": {
+    "PyInstaller": "6.19.0",
+    "PySide6": "6.9.1",
+    "PyMySQL": "1.2.0",
+    "pyodbc": "5.3.0",
+    "openpyxl": "3.1.5",
+    "python-docx": "1.2.0",
+    "Pillow": "12.1.1"
+  },
+  "built_at_utc": "2026-11-06T12:59:54.784922+00:00",
+  "executable_sha256": "a509b7655d91937fe843f3264d894ade9575e18cc768a5a12ebd88ce4a8348dc",
+  "access_templates_sha256": {
+    "modeles\\smegend.mdb": "27bceea889b1cbb1b9806512945862c26486d1f4706a0e03929fca60580c256b"
+  },
+  "runtime_self_test": {
+    "ok": true,
+    "frozen": true,
+    "checks": [
+      "imports",
+      "resources",
+      "journal_and_charts",
+      "pdf_output",
+      "structure_effectifs_print",
+      "users_interface",
+      "optional_event_fields_and_selection",
+      "immediate_position_prompt",
+      "date_keyboard_and_nomination_reference",
+      "application_reset_choices",
+      "monthly_backup_codec",
+      "login_event_loop"
+    ]
+  },
+  "changes": [
+    "impression des effectifs par structure : filtre, tri, mois et total",
+    "situation numérique fidèle à SME_GEND_model.xlsx",
+    "référence facultative des désertions",
+    "références des stages et missions",
+    "session texte facultative des stages internes",
+    "sélection et désélection des lignes visibles",
+    "filtre par nature des missions",
+    "restauration des mois sélectionnés avec conservation des notes et sessions"
+  ]
+}

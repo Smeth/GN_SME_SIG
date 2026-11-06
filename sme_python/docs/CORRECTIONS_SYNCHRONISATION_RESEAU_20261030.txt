@@ -1,0 +1,263 @@
+IMPRESSION — LOT 12 : SYNCHRONISATION ENTRE POSTES ET MÉDIAS PARTAGÉS
+Sources corrigées ; aucun exécutable ni portable généré.
+
+PROTECTION ET PÉRIMÈTRE
+
+Branche feature/mysql-migration conservée, avec l'ensemble du travail préexistant.
+L'état Git, les empreintes et les copies des fichiers avant modification sont
+conservés sous build/corrections_20261030_lot12/. Aucun reset, commit ou nettoyage
+du dépôt. Les références sources/ du miroir n'ont pas été modifiées.
+
+Les tests ont des profils temporaires, des données synthétiques et un garde
+bloquant les écritures hors de leur dossier et les accès externes. Les seuls
+accès SQL autorisés ciblent MySQL de test 127.0.0.1:64062, dont @@datadir est vérifié.
+Chaque fixture crée puis supprime sa propre base UUID. Aucune donnée réelle,
+configuration utilisateur réelle ou base de production n'a été modifiée.
+Aucune migration de schéma n'est nécessaire.
+
+L12-01 — P1 CONFIRMÉ : RAFRAÎCHISSEMENT DISTANT PENDANT UNE SAISIE
+
+Emplacements :
+src/sme_gend/ui/shell_window.py:1219 (_shared_refresh_blocked)
+src/sme_gend/ui/shell_window.py:1230 (_poll_shared_data_revision)
+
+Cause : la modalité et l'édition étaient vérifiées au lancement de la requête
+uniquement. Une boîte de dialogue ou une édition pouvait commencer pendant la
+lecture SQL ; le callback rechargeait alors les vues. Les formulaires réellement
+non enregistrés n'étaient pas vérifiés. Un changement de base pendant la requête
+pouvait aussi appliquer à la nouvelle connexion une réponse de l'ancienne.
+
+Preuves avant correction : les trois cas modal/saisie/table en cours pendant
+la requête ainsi que le formulaire déjà sale et le changement de base ont échoué.
+La révision était acquittée et le rechargement appelé malgré ces situations.
+
+Correction : vérifier les saisies avant la requête et à son retour, capturer les
+paramètres de connexion utilisés et refuser le résultat devenu hors contexte.
+Les vues différées ne sont pas construites pour vérifier les formulaires.
+Le jeton reste non acquitté quand la saisie empêche la mise à jour : la prochaine
+interrogation peut reprendre après validation ou annulation du formulaire.
+La cadence existante reste de 10 secondes, avec une seule requête de ce type
+simultanée ; ce n'est pas une promesse de rafraîchissement instantané.
+
+Tests : callbacks différés, vraie table Qt dans l'état EditingState, boîte modale
+simulée, formulaire sale puis libéré, réponse de l'ancienne base. Les cas libérés
+finissent par actualiser une seule fois. Aucun écrasement automatique de formulaire
+en cours n'est ajouté ; un dossier modal ouvert doit être fermé avant actualisation.
+
+L12-02 — P1/P2 CONFIRMÉ : RÉVISION ACQUITTÉE MALGRÉ UN ÉCHEC DE CHARGEMENT
+
+Emplacements :
+src/sme_gend/ui/shell_window.py:1795 (refresh_for_month_change)
+src/sme_gend/ui/shell_window.py:1267 (_reload_current_view)
+
+Cause : le jeton partagé était mémorisé avant les rechargements. Une exception
+laissait donc l'écran ancien avec une révision considérée comme traitée. Certains
+échecs de rebind étaient absorbés dans refresh_for_month_change.
+
+Correction : acquitter seulement après les appels de rechargement réussis ; en
+cas d'exception, conserver la révision précédente, montrer un message et réessayer.
+Un mode strict optionnel propage les erreurs de rebind dans ce flux automatique.
+Les autres appelants conservent le comportement par défaut et leur interface.
+Cette garantie concerne les appels synchrones : une vue lançant ensuite son
+propre worker conserve sa gestion existante des erreurs asynchrones.
+
+Le cache des médias partagés est invalidé avant le rebind et lors d'une
+actualisation manuelle. Les caches liste/édition/présence existants restent
+invalidés par le flux de rafraîchissement. La lecture du mois opérationnel et
+les choix de consultation restent régis par les règles de clôture du lot 11.
+
+Tests : erreur de vue après lecture de révision ; erreurs strictes de rebind
+avec ou sans mois ; chemin ancien en cache remplacé avant le rebind distant.
+
+L12-03 — P1 CONFIRMÉ : COPIE DE MIGRATION PARTIELLE OU ÉCRASEMENT CONCURRENT
+
+Emplacement :
+src/sme_gend/services/shared_media.py:94 (configure_shared_media)
+
+Cause : shutil.copy2 écrivait directement le nom final après un test exists.
+Une panne pouvait laisser une photo tronquée visible ; un autre poste pouvait
+créer sa photo entre exists et copy2, puis être écrasé. Une ancienne photo JPG
+pouvait aussi être copiée à côté d'une PNG récente et être préférée à la lecture.
+
+Preuves : la panne injectée laissait un fichier partiel ; la photo publiée par
+l'autre poste était écrasée ; le cas d'extensions différentes reproduisait le
+masquage de la photo partagée par l'ancienne copie locale.
+
+Correction : copie dans un temporaire adjacent et publication exclusive sans
+remplacement ; verrou commun par identité d'image ; toute variante existante
+empêche l'ajout d'une ancienne variante pendant la migration. Une création
+concurrente du même nom par un ancien client reste préservée. Les chemins source
+et destination passent par contained_path pour refuser une sortie de racine.
+Les sources ne sont ni déplacées ni supprimées. Les copies complètes déjà faites
+restent présentes si la migration échoue ensuite ; la migration n'est pas une
+transaction distribuée de tous les fichiers.
+
+La configuration UNC centrale et son signal partagé sont maintenant validés
+dans une seule transaction SQL. Si la publication du signal échoue, l'ancienne
+configuration reste en base. L'invalidation locale est différée au commit réel.
+Un choix local reste une préférence locale et ne remplace pas le chemin partagé.
+
+Tests : interruption de copie, concurrent créant le fichier final, extension
+différente, conservation des sources, absence de temporaire après exception ;
+MySQL natif pour succès et rollback configuration/révision.
+
+L12-04 — P1/P2 : ÉCRITURES SIMULTANÉES ET SIGNAL DES PHOTOS
+
+Emplacements :
+src/sme_gend/services/personnel_media.py:208 (media_variant_lock)
+src/sme_gend/services/personnel_media.py:215 (_save_media)
+src/sme_gend/services/personnel_media.py:193 (_notify_shared_media_write)
+
+Cause : la racine était résolue plusieurs fois par copie ; elle pouvait changer
+entre création des répertoires et destination. Le nettoyage des extensions
+concurrentes n'était pas verrouillé : deux écritures de variantes différentes
+pouvaient supprimer la photo de l'autre. Les erreurs de suppression étaient
+ignorées. Enfin une modification d'image ne publiait pas de signal partagé.
+
+Correction : capturer une seule racine par opération ; sérialiser copie et
+nettoyage sous un verrou Windows de plage d'octets, identique entre migrations,
+photos et insignes. Les fichiers .media-locks/<type>-<empreinte>.lock sont
+persistants : ne pas les supprimer pendant des opérations en cours. Le dernier
+écrivain réussi remplace les variantes précédentes, comme auparavant ; ce n'est
+pas un refus de conflit fondé sur une ancienne image affichée.
+
+Le nettoyage ne supprime que les extensions d'image prévues ; les fichiers
+homonymes non image sont conservés. Une suppression refusée est désormais
+explicite et signale que la nouvelle copie existe déjà. Pour une racine UNC,
+un signal personnel_media est publié après la copie et son nettoyage. Une panne
+de notification SQL lève MediaWriteCommittedError(committed=True), indiquant
+de ne pas recommencer la copie et d'actualiser les postes. La copie de fichier
+n'est pas annulée et cette notification n'a pas de file durable de reprise.
+Les racines locales n'envoient pas de signal d'image partagée.
+
+Tests : racine unique malgré une résolution changeante, droits de suppression,
+erreur explicite de notification après écriture, signal visible depuis une
+connexion MySQL indépendante. Un essai hors pytest lance deux vrais processus
+Windows, 20 écritures chacun, JPG et PNG pour le même agent. Résultat : une seule
+variante complète, aucun temporaire restant, un seul verrou d'identité commun.
+Réseau bloqué pendant cet essai ; cela valide les processus sur disque local.
+
+L12-05 — P2 CONFIRMÉ : CHEMINS AMBIGUS ET CACHE PARTAGÉ PÉRIMÉ
+
+Emplacements :
+src/sme_gend/services/shared_media.py:30 (canonical_network_path)
+src/sme_gend/services/shared_media.py:60 (invalidate_shared_media_cache)
+src/sme_gend/services/shared_media.py:68 (shared_media_root)
+
+Cause : un choix vide devenait le répertoire courant ; des UNC incomplets et
+des espaces de noms de périphérique étaient acceptés. Un lecteur déconnecté
+pouvait être traité comme un chemin local si GetDriveType ne le classait plus
+réseau. Le cache à cinq secondes n'était pas invalidé par la révision distante.
+
+Correction : serveur et partage obligatoires, composants validés avant accès
+fichier, refus des chemins de périphérique et des chemins relatifs au lecteur
+comme Z:photos ; conversion des lecteurs connectés en UNC et erreur explicite
+quand le lecteur n'est pas résolu. Les formes //serveur/partage et UNC étendu
+sont normalisées vers le même serveur/partage.
+
+Le cache possède une invalidation explicite et un compteur empêchant une requête
+ancienne en vol de le réinstaller après invalidation. En cas de panne MySQL, le
+dernier chemin connu de la même base reste utilisable ; celui d'une autre base
+n'est pas réutilisé. Le cache reste en mémoire, pas un nouveau fichier utilisateur.
+
+Tests : chemins invalides sans accès réseau, deux lettres de lecteur vers un
+même UNC, lecteur déconnecté/non résolu, agrandissement du buffer Windows,
+formes UNC, erreur MySQL et séparation des bases, invalidation pendant lecture.
+Les API Windows sont simulées : aucun partage réel n'a été monté pour les tests.
+
+Références primaires consultées pour la résolution des lecteurs et la syntaxe :
+https://learn.microsoft.com/en-us/windows/win32/api/winnetwk/nf-winnetwk-wnetgetuniversalnamew
+https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file
+
+VÉRIFICATIONS EXÉCUTÉES
+
+- Avant correction : 14 échecs reproduits dans test_shared_sync_regressions.py.
+  Un cas supplémentaire d'extension concurrente a échoué avant sa correction.
+- Passe finale hors MySQL : 887 réussis, 123 cas MySQL différés,
+  8 avertissements préexistants, 48,14 s.
+- Passe native ciblée finale : 16 réussis, 107 non sélectionnés, 29,10 s.
+  Elle couvre les cinq nouveaux cas de synchronisation, les signaux d'écriture
+  antérieurs et les scénarios de clôture sélectionnés. Les 123 cas MySQL ne sont
+  pas tous rejoués dans ce lot. Les 118 précédents avaient passé au lot 11.
+- Total distinct de la passe finale exécutée : 903 cas pytest réussis.
+  Ajouts : 28 cas unitaires et 5 natifs ; aucun test désactivé ou supprimé.
+- Processus indépendants supplémentaires : 40 copies, 1 variante finale complète,
+  0 temporaire restant ; preuve media_process_validation.json et script conservés.
+- Syntaxe de tous les fichiers Python, patch inverse en lecture seule, espaces
+  ajoutés, empreintes des sources testées et des anciens EXE/ZIP : contrôles
+  consignés dans validation_summary.json.
+
+Commandes depuis sme_python :
+..\.venv\Scripts\python.exe -B scripts/run_isolated_tests.py tests -q --tb=short --disable-warnings
+..\.venv\Scripts\python.exe -B scripts/run_isolated_tests.py --mysql-test-instance build/corrections_20261029/mysql_test_instance.json tests/integration/test_restore_mysql.py -k "sync_lot12 or position_model_register_and_revision_are_atomic or direct_registry_revision_failure_rolls_back_entry or closure or shared_revision or prepared_restore_rolls_back_files" -q --tb=short --disable-warnings
+
+Les deux passes finales ont été lancées sur les mêmes sources, sans changement
+fonctionnel ultérieur. Aucun gain de vitesse en production n'est revendiqué.
+Les durées ci-dessus sont celles des tests, pas une mesure du réseau réel.
+Les verrouillages, vérifications de fichiers et commits ont un coût ; un partage
+lent peut toujours ralentir une copie ou l'affichage d'une photo.
+
+VALIDATION SUR LES VRAIS POSTES — RESTE À EFFECTUER
+
+1. Utiliser les mêmes sources corrigées sur les deux postes et une copie de base,
+   sans mélanger les anciens exécutables. Vérifier qu'ils ciblent le même serveur,
+   port et schéma MySQL, sans transmettre les mots de passe dans un rapport.
+2. Utiliser un partage de test commun, Z: sur le poste A et une autre lettre sur B.
+   Enregistrer le choix réseau sur A : le chemin central doit être UNC. Les comptes
+   Windows des deux postes doivent pouvoir lire, créer et renommer dans ce dossier,
+   ainsi que créer/ouvrir les verrous .media-locks. Le compte MySQL ne donne pas
+   les droits Windows du partage. Conserver les dérogations locales voulues.
+3. Importer une carrière synthétique sur A. Sur B, hors saisie et dialogue modal,
+   vérifier liste, effectifs, période et export après le contrôle automatique
+   ou une actualisation manuelle. Un changement annulé ne doit pas apparaître.
+4. Commencer une saisie sur B, modifier sur A : la saisie sur B doit rester intacte.
+   Après validation/annulation et fermeture des modales, la reprise doit arriver.
+5. Changer la photo d'un agent sur A, y compris JPG vers PNG, puis observer B.
+   Tester deux modifications simultanées et confirmer une image complète finale.
+   Tester la migration avec des photos déjà présentes sous une autre extension.
+6. Sur ce partage de test seulement, interrompre l'accès pendant une copie :
+   l'image précédente doit rester lisible ; vérifier les messages de droits et
+   de notification SQL. Une panne de notification après copie exige un F5 manuel
+   ou une nouvelle révision ultérieure ; ne pas recopier l'image pour l'acquitter.
+
+LIMITES ET PRIORITÉS RESTANTES
+
+- Deux ordinateurs physiques, les ACL et la durabilité/les verrous du serveur SMB
+  cible ne sont pas testés ici. Aucun identifiant réseau ou secret réel n'a été lu.
+  Les lecteurs sont simulés ; MySQL et les processus indépendants sont réels mais
+  locaux. On ne peut pas conclure à la disparition de tout incident réseau.
+- Le changement global de racine pendant que d'autres postes écrivent encore
+  dans l'ancienne n'a pas de verrou de maintenance distribué. Une opération
+  capture sa racine pour rester cohérente, mais une copie tardive peut rester
+  dans l'ancienne racine. Planifier la bascule de dossier sans écritures sur les
+  autres postes, puis vérifier les images avant de reprendre. Les anciens fichiers
+  restent conservés ; un mécanisme de bascule global est un lot distinct.
+- La lecture du dernier UNC connu ne traverse pas un redémarrage de profil :
+  sans MySQL et sans chemin réseau localement enregistré, la découverte centrale
+  reste impossible. Aucune garantie de fonctionnement hors ligne général n'est
+  ajoutée. Les dérogations locales/env gardent leur priorité et peuvent expliquer
+  volontairement des photos différentes entre postes.
+- Un module effectuant des écritures SQL directes sans publication de révision
+  ne devient pas automatiquement synchronisé. Les imports carrière, écritures
+  personnel/historiques raccordées, clôtures et changements de médias décrits
+  sont couverts. Les anciennes versions et les outils SQL externes ne respectent
+  pas nécessairement ces signaux ni les verrous de fichier.
+- Les rechargements métier et accès d'images existants peuvent encore exécuter
+  des opérations bloquantes sur le thread graphique. Les copies, chemins réseau
+  défaillants, gros dossiers et rafraîchissements de vues doivent être profilés
+  sur le réseau cible avant toute promesse de gain. Aucun benchmark SMB inventé.
+- Les autres chantiers signalés au lot 11 restent ouverts : TLS, cas particuliers
+  de mots de passe, restauration de configuration seule, autres écritures non
+  couvertes, avertissements de dépréciation et validation volumétrique.
+
+CONTRÔLE ET RETOUR ARRIÈRE
+
+Le patch corrections_only.patch et changes_manifest.json isolent seulement ce
+lot par rapport au dépôt déjà modifié, sans intégrer les modifications précédentes.
+Les copies baseline/ et empreintes permettent de vérifier chaque changement.
+Vérifier un éventuel patch inversé sur une copie avant retour de sources, en
+préservant tout travail ultérieur ; le contrôle inverse fourni ne l'applique pas.
+Aucun schéma à migrer ou à annuler ; conserver les nouvelles photos et les
+fichiers de verrou plutôt que supprimer des données pour revenir en arrière.
+Les anciens exécutables et ZIP ont leurs empreintes inchangées et n'incluent pas
+ces corrections. Aucun nouveau binaire n'est produit.

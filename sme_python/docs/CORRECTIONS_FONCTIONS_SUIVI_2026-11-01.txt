@@ -1,0 +1,145 @@
+Structures / Fonctions — suite des corrections, 1 novembre 2026
+
+Périmètre demandé : 8, 20, suppression des suggestions de rattachement,
+22, 23, 24, 25, 26, 27, 28, 29, 30 et 31 de la liste de suivi.
+Le gestionnaire de restauration des exclusions (point 19) n'est pas ajouté.
+
+8 — L'export Structures résout le type d'unité avec le même mécanisme
+que le tableau : type enregistré, sinon type déduit du code/désignation.
+
+20 — Le dialogue Modifier / rattacher remplace maintenant l'ensemble
+des liens de la fonction. Décocher un lien le retire réellement. Décocher
+toutes les structures laisse la fonction au catalogue sans rattachement.
+Le lot valide d'abord l'instantané global affiché, puis crée/renomme la
+fonction et remplace ses liens dans la même transaction de référentiel.
+La version spécifique aux liens est relue après cette validation sous
+le verrou déjà acquis ; elle n'efface pas une modification concurrente.
+
+Suggestions — Plus de bouton d'actualisation des suggestions, de
+préremplissage de libellé à partir d'une subdivision ou de précochage
+de structure courante/poste attendu dans ce dialogue. Seuls les liens
+déjà enregistrés sont cochés. Modifier le texte ne reconstruit plus les
+coches. La recherche manuelle des structures conserve les sélections,
+y compris celles qui deviennent masquées. Le moteur de suggestions
+n'est plus appelé par ce dialogue. Les règles de calcul des postes de
+tête restent distinctes et conservées pour la consultation métier.
+
+22 — Sans aucun rattachement signifie toujours absence de lien global,
+y compris avec un filtre de structure. Une fonction liée à B ne figure
+plus comme « sans structure » simplement parce qu'on filtre A.
+
+23 — Les messages distinguent catalogue vide, absence de résultat selon
+les filtres et données non actualisées. Un filtre vide ne permet plus
+d'affirmer à tort que toutes les fonctions sont rattachées.
+
+24 — Catalogue et postes : état périmé avant lecture, actions désactivées
+en cas d'échec et maintien de la possibilité de réessayer. Un changement
+de contexte/génération pendant le chargement empêche la publication de
+ses résultats. Une recherche n'efface pas le message d'échec. Les appels
+directs aux actions vérifient aussi la fraîcheur. Un échec de lecture
+pendant une attribution est signalé et rend les postes non actualisés.
+
+25 — La reprise prépare d'abord un plan, sans écrire. Le tableau de
+confirmation présente chaque couple structure/fonction, les créations
+éventuelles au catalogue et les rattachements. Le nombre de fonctions
+distinctes à créer est annoncé. Annuler ne lance aucune écriture.
+L'application revérifie contexte, version des référentiels et fiches
+observées, puis applique le plan dans une transaction unique. Une étape
+en échec annule le lot au lieu de laisser un résultat partiel caché.
+
+26 — Export d'harmonisation : vérification effectifs.export dans l'UI
+et dans le service, aperçu explicite des lignes après filtres, production
+en arrière-plan, sauvegarde atomique et trace dans le journal central
+(type Harmonisation des fonctions). Les cellules texte sont écrites
+littéralement : un texte commençant par '=' ne devient pas une formule.
+Une erreur d'écriture préserve le fichier existant. La trace contient
+le nombre exporté et la période consultée. Si le journal échoue après
+publication, le mécanisme existant signale ce résultat non confirmé.
+
+27 — Filtres et commandes du module Fonctions passent à la ligne. Les
+pages peuvent défiler sans imposer une largeur excessive à la fenêtre.
+Les colonnes disposent de largeurs lisibles et d'un défilement horizontal ;
+les infobulles donnent le texte complet. Les commandes restent accessibles
+sur petite fenêtre, sans chercher à afficher toutes les colonnes à la fois.
+
+28 — Onglet renommé Postes de tête du mois. Une explication permanente
+indique que seules les unités ayant du personnel dans le mois sont prises
+en compte, et que les unités vides/fonctions ordinaires ne constituent
+pas automatiquement des postes recensés. Aucun inventaire théorique
+complet de postes n'est inventé par cette correction.
+
+29 — Les titulaires conservent identifiant, grade et matricules disponibles.
+Deux homonymes avec deux identifiants ne sont plus fusionnés par leur nom.
+Un état et un filtre signalent les postes à plusieurs titulaires ; une
+nouvelle attribution y est bloquée jusqu'à vérification des affectations.
+Titulaires / dossiers permet de choisir une personne par identifiant et
+d'ouvrir son dossier avec le mécanisme existant, en consultation et après
+contrôle de permission. L'identité retenue est aussi explicite dans l'export
+d'harmonisation. Aucun rapprochement ou changement automatique des personnes.
+
+30 — Les traitements I/O concernés utilisent les workers gérés existants,
+avec l'identité d'audit et une progression. Le helper conserve les exceptions
+pour les gestionnaires de conflits/messages UI existants. Lectures, écritures,
+reprises, exports, nomenclature, affiliations, aperçus/fusions de maintenance
+et configuration de l'ordre des fonctions sont ainsi exécutés hors du thread
+graphique. Les structures du filtre Fonctions sont lues dans le worker du
+chargement. Les listes détaillées de fonctions du hub sont chargées en lot
+et mises en mémoire, sans requête à chaque sélection de structure.
+
+31 — Alignement Qt : utilisation du type de drapeaux attendu à la place
+de l'appel déprécié avec un entier.
+
+VALIDATION
+338 tests réussis en 16,92 secondes, sans avertissement Qt dans cette
+sélection. 22 nouveaux cas ciblés couvrent liens décochés/tous décochés,
+absence de suggestions, maintien des coches, filtres, états périmés,
+changements de contexte, aperçu/annulation de reprise, contrôle des
+dépendances et rollback du plan, export filtré/littéral/atomique/journalisé,
+permissions, homonymes, accès au dossier par identifiant, panne pendant
+l'attribution et réactivité du worker réel avec une minuterie Qt.
+Les tests de régression précédents passent également (conflits, versions
+affichées, hiérarchie, exports, journal et synchronisation partagée).
+
+Captures produites à 640x700 et 1000x700, thèmes clair et sombre. Inspection
+visuelle des onglets Référentiel et Postes de tête. Diff --check sans erreur.
+
+FICHIERS APPLICATIFS CONCERNÉS (relatifs à src/sme_gend/)
+- services/structure_referentiel_export.py
+- services/fonction_referentiel_harmonize.py
+- services/fonction_backfill.py (nouveau)
+- services/postes_vacants.py
+- services/referentiel_service.py
+- repositories/fonctions_repository.py
+- repositories/mysql_fonction_structure_repository.py
+- ui/fonction_smart_dialog.py
+- ui/fonction_structures_dialog.py
+- ui/fonction_assign_agent_dialog.py
+- ui/fonction_rename_confirmation.py
+- ui/fonction_priority_dialog.py
+- ui/reference_plan_preview.py (nouveau)
+- ui/reference_task.py (nouveau)
+- ui/structure_subdivisions_dialog.py
+- ui/views/fonction_referentiel_view.py
+- ui/views/doc_gen_log_view.py
+- ui/views/structure_hub_view.py
+- ui/views/subdivisions_hierarchy_view.py
+- ui/views/organigram_quality_banner.py
+- ui/views/referentiel_coherence_view.py
+
+TESTS AJOUTÉS / ADAPTÉS
+- tests/test_fonctions_remaining_fixes.py (nouveau)
+- tests/test_structure_fonction_corrections.py
+- tests/test_catalogue_concurrency.py
+- tests/test_reference_collection_conflicts.py
+
+LIMITES
+- Point 19 conservé : exclusions globales toutes périodes, sans écran
+  dédié de restauration. La portée du retrait demeure affichée explicitement.
+- Les conflits de titulaires sont signalés et vérifiables ; leur résolution
+  nécessite un contrôle métier et une correction des affectations autorisée.
+- Recette native MySQL/Access, scénario de plusieurs postes utilisateurs,
+  configurations DPI personnalisées et ouverture native Excel non exécutés.
+  Les bases/cursors sont simulés et les jeux de données sont fictifs.
+- Le runner d'audit interdit les connexions réelles et processus externes.
+  Aucune donnée réelle modifiée, aucun exécutable généré.
+- Toutes les modifications préexistantes ont été conservées.

@@ -1,0 +1,11 @@
+{
+  "mysql_host": "192.168.1.10",
+  "mysql_port": 3306,
+  "mysql_database": "smegend",
+  "mysql_user": "sme_app",
+  "mysql_password": "CHANGER_MOI",
+  "database_path": "C:\\chemin\\optionnel\\smegend.mdb",
+  "template_excel_path": "",
+  "template_numerique_path": "",
+  "template_detaches_path": ""
+}

@@ -1,0 +1,168 @@
+IMPRESSION — AUDIT DES DONNÉES SENSIBLES — LOT 32
+31/10/2026
+
+Résultat et protection
+Correction de la recherche du module Audit données sensibles : filtres, source,
+dates, métadonnées, détail et actualisation. Aucun exécutable généré, aucune
+dépendance ajoutée, aucune migration de schéma ou donnée réelle modifiée.
+Travail sur feature/mysql-migration avec les modifications antérieures préservées,
+sans reset ni commit. Les fichiers sources/ du miroir sont restés en lecture seule.
+Les journaux et profils opérationnels n'ont pas été ouverts pour diagnostiquer
+les défauts : les reproductions utilisent exclusivement des données synthétiques.
+Les EXE/ZIP existants sont vérifiés inchangés par empreintes SHA-256.
+
+L32-01 — P1 confirmé — mauvais journal présenté après une recherche vide
+Emplacement : src/sme_gend/services/sensitive_audit_log.py:233.
+Avant : zéro ligne SQL ou exception entraînait une relecture du fichier local,
+sans indiquer le changement de source. Un miroir local d'une ancienne base pouvait
+réapparaître après changement de connexion, restauration ou suppression centrale.
+Correction : la base MySQL sélectionnée est la source autoritaire de cette vue,
+y compris lorsqu'elle retourne zéro résultat. Une panne ou une table absente donne
+une erreur explicite, sans résultat local présenté comme central. Le mécanisme
+d'écriture et de reprise des miroirs locaux est conservé ; aucun journal supprimé.
+Tests : zéro résultat, ancien miroir synthétique d'une autre base, erreur contenant
+un faux secret non affiché, table centrale absente et réessai possible.
+
+L32-02 — P1 confirmé — filtres divergents et résultats hors sujet
+Emplacements : src/sme_gend/repositories/app_config_repository.py:554,
+src/sme_gend/services/sensitive_audit_log.py:268, src/sme_gend/services/sensitive_audit_log.py:217.
+Avant : le nom cherchait aussi dans tout le JSON ; BETA dans une observation
+faisait remonter l'agent ALPHA. Le numéro 12 retournait également 112. Le texte
+libre SQL ne cherchait que le payload, contrairement au second filtre Python.
+La collation SQL trouvait ÉLOI pour eloi, mais le filtre Python rejetait la ligne.
+% et _ étaient interprétés comme des jokers. Des espaces autour de l'action
+étaient retirés côté SQL, mais conservés lors de la comparaison Python.
+Correction : tous les filtres centraux sont appliqués dans la même requête avant
+LIMIT, sans second filtrage divergent. Nom limité à personnel_nom, numéro carrière
+exact et libellé explicite, auteur/nom/texte insensibles à la casse et aux accents
+via la collation utf8mb4_unicode_ci. Jokers et échappement traités littéralement,
+requêtes paramétrées. Texte libre : action, auteur, numéro, mois SME et payload.
+Normalisation des espaces, validation du mois et de la limite avant SQL.
+Le matcher de compatibilité des archives reste disponible avec les mêmes règles
+principales, sans intervenir dans le résultat central.
+Tests : filtres individuels et combinés, accents, identifiant GEN, caractères
+%, _, = et antislash, limite appliquée après sélection, filtre module préservé.
+
+L32-03 — P1 confirmé — dates UTC comparées à un affichage local incohérent
+Emplacements : src/sme_gend/repositories/app_config_repository.py:13, src/sme_gend/ui/views/sensitive_audit_log_view.py:47,
+src/sme_gend/repositories/app_config_repository.py:229, src/sme_gend/repositories/app_config_repository.py:274.
+Avant : un DATETIME UTC sans fuseau était interprété comme une heure locale à
+l'affichage. Le filtre DATE(ts_utc) utilisait le jour UTC, différent du jour affiché
+près de minuit. Une date de début après la fin passait sans avertissement.
+Correction : timestamps de lecture explicitement UTC, conversion en heure locale
+pour l'affichage. Dates Du/Au inclusives selon le calendrier local ; chaque minuit
+est converti séparément en UTC, y compris lors d'un changement d'heure. Comparaisons
+SQL >= début et < lendemain, sans DATE() sur la colonne. Intervalle inversé refusé.
+Les écritures datetime avec fuseau sont converties en UTC avant retrait du fuseau,
+au lieu de simplement enlever celui-ci. Écriture centrale et miroir sensible
+reçoivent désormais le même instant. Les archives existantes ne sont pas réécrites.
+Les contrôles Année SME/Mois SME sont explicitement distincts des dates des actions.
+Une année SME ancienne ou future peut être saisie, sans être limitée à la liste
+des dernières années. Réinitialiser efface aussi cette saisie.
+Tests : minuit local, dernière milliseconde du jour, borne suivante exclue,
+journée synthétique de 23 heures, horodatage UTC+1 normalisé, contexte SME 2025
+avec action datée 2026 et réinitialisation complète des filtres.
+
+L32-04 — P1 robustesse confirmé sur données synthétiques — métadonnées remplacées
+Emplacement : src/sme_gend/repositories/app_config_repository.py:554, src/sme_gend/services/sensitive_audit_log.py:63.
+Avant : **payload fusionné après les colonnes permettait à des clés de payload
+actor/action/module/personnel_id/ts_utc/sme_mois_context de remplacer les valeurs
+réelles affichées. Le filtre SQL et la ligne affichée pouvaient donc se contredire.
+Correction : les colonnes du journal sont prioritaires et le payload original
+est conservé séparément pour inspection. La même priorité s'applique au miroir
+des nouvelles actions sensibles. Il s'agit d'une protection de restitution,
+pas d'une modification ou réparation des lignes historiques.
+Tests natifs : payload synthétique avec toutes ces clés ; colonnes autoritaires
+inchangées à l'affichage et contenu original conservé dans le détail.
+
+L32-05 — P2 confirmé — ordre et payload affichés incomplets
+Emplacements : src/sme_gend/services/sensitive_audit_log.py:255, src/sme_gend/ui/views/sensitive_audit_log_view.py:429,
+src/sme_gend/ui/views/sensitive_audit_log_view.py:462.
+Avant : ordre par ID d'insertion seulement, donc une ancienne action réimportée
+pouvait devancer une action récente. Seul changes était affiché ; les actions
+d'historique avec date_debut/ndecision/etc. donnaient un payload vide.
+Correction : tri ts_utc DESC puis id DESC avant LIMIT. Aperçu et détail affichent
+le payload complet, avec compatibilité des anciennes entrées aplaties. La limite
+atteinte est signalée comme limite d'affichage, pas comme un décompte exhaustif.
+Les valeurs dynamiques de l'en-tête de détail sont échappées avant rendu HTML.
+Tests : date d'événement différente de l'ordre d'insertion, égalité de timestamp,
+décision/date d'affectation visibles et balises d'un contenu non fiable neutralisées.
+
+L32-06 — P1/P2 confirmé — actualisation et résultats périmés de la vue
+Emplacements : src/sme_gend/ui/views/sensitive_audit_log_view.py:368, src/sme_gend/ui/views/sensitive_audit_log_view.py:332,
+src/sme_gend/ui/views/sensitive_audit_log_view.py:340, src/sme_gend/ui/shell_window.py:2168.
+Avant : les changements de filtre ne lançaient pas de recherche ; seule l'action
+Rechercher le faisait. Le F5 du shell appelait une vue déjà marquée chargée sans
+pouvoir l'invalider. Un refus de droits vidait la table, mais conservait _entries,
+et le double-clic ne vérifiait pas à nouveau le droit. Lecture SQL sur thread UI.
+Correction : recherche automatique après 300 ms de stabilité, Entrée et Rechercher
+immédiats. F5/invalidation et changement de configuration sont pris en charge.
+Une seule lecture de fond active ; demandes intermédiaires regroupées. Une version
+de recherche invalide les anciens résultats lors d'un changement de filtre/base.
+Table et cache du détail sont vidés dès l'invalidation ; une erreur reste visible
+et la vue reste à recharger. Le worker capture les réglages de sa propre recherche.
+Vérification des droits côté service avant SQL, à la livraison du résultat et
+avant ouverture du détail. Un refus efface table, cache et recherche en attente.
+Le moteur de tâches gérées existant est réutilisé, sans modification.
+Tests Qt hors écran : rafraîchissement, regroupement de demandes, rejet d'une
+réponse ancienne, nouvelle base, refus initial ou pendant la lecture, double-clic
+refusé, erreur sans faux secret affiché. Un vrai worker Qt démontre le travail
+hors thread graphique et l'application des lignes sur le thread graphique.
+
+Tests réellement exécutés
+Avant : 10 échecs locaux et 10 échecs MySQL reproduits avec le code initial.
+Les essais intermédiaires ont également identifié et corrigé une divergence de
+recherche accentuée et adapté la relecture du garde de droits dans les callbacks.
+Les logs avant/après sont conservés ; aucun résultat n'est inventé.
+Après, commandes finales avec -W error :
+- suite locale entière hors intégration : 1349 réussites en 92.81 s ;
+- MySQL natif : 38 réussites en 65.43 s,
+  dont 25 nouveaux scénarios et 13 régressions existantes ;
+  543 autres cas d'intégration explicitement hors filtre.
+Total final : 1387 cas pytest réussis, sans échec ni test sauté
+dans ces commandes. 27 tests locaux nouveaux, y compris Qt et validation pure.
+Régressions : audit du mois sélectionné, rollback d'import, miroir après commit
+réel, pannes d'accusé/écriture, reprise après interruption sans doublons, routes
+des quatre journaux, isolement des profils et annulation de clôture si audit en panne.
+Les commandes exactes et codes de retour sont dans validation_summary.json.
+
+Environnement : MySQL 8.0.40 jetable sur loopback:64062, datadir vérifié sous build,
+bases uniques créées et supprimées par la fixture. Profils temporaires isolés,
+autres connexions et écritures hors test bloquées par run_isolated_tests.py.
+Les réglages injectés et actions synthétiques évitent l'ouverture des fichiers
+opérationnels. L'instance est arrêtée après vérification de l'absence de bases
+de test restantes. Aucun test n'a utilisé les PC de travail ni le partage SMB.
+Les durées ci-dessus sont des durées de tests, pas un gain applicatif mesuré.
+
+Contrôle du code et livraison
+4 fichiers applicatifs modifiés, 2 fichiers de tests ajoutés et ce rapport.
+135 fonctions existantes préservées dans les quatre fichiers modifiés ;
+aucune fonction existante supprimée. Transactions/pool, authentification, moteurs
+de miroirs/reprise, sauvegarde/restauration, import et service dossier inchangés.
+AST des fichiers Python, empreintes des sources testées, état Git et patch inverse
+contrôlés. changes_manifest.json isole ce lot ; baseline/ conserve les originaux.
+corrections_only.patch ne contient pas les corrections antérieures. Pas de migration.
+Retour arrière du code : examiner ce patch sur une copie en préservant les autres
+travaux, sans reset global. Aucun retour arrière de données nécessaire pour ce lot.
+
+Limites et validation utilisateur
+1. Sur un poste de test connecté à une copie de la base, choisir un auteur puis
+   un nom avec/sans accent, un numéro carrière exact, un mois SME et des dates
+   d'action. Comparer les résultats et ouvrir un détail d'affectation/diplôme.
+   Réinitialiser, F5, puis simuler une coupure MySQL : aucune ancienne liste locale
+   ne doit apparaître comme résultat central.
+2. La vue restitue les valeurs au moment de l'action. Un ancien nom, auteur ou
+   mois réellement enregistré dans l'audit n'est pas remplacé par l'état actuel
+   de la fiche. Une ancienne entrée sans nom ne peut pas être retrouvée par nom
+   sans données supplémentaires ; aucune reconstitution historique n'est inventée.
+3. La recette réelle sur plusieurs PC/SMB reste à faire lorsqu'ils seront accessibles.
+   Les changements de base et réponses retardées sont vérifiés localement par
+   tests contrôlés ; ils ne remplacent pas une panne réseau réelle.
+4. Authentification locale existante conservée : en l'absence de contexte auth,
+   la politique générale autorise le mode local. Les accès OS/MySQL restent à protéger.
+5. Le texte libre et les sous-chaînes sur JSON peuvent nécessiter un balayage sur
+   un gros journal. Les dates utilisent maintenant des bornes comparables à l'index
+   ts_utc, mais aucun gain mesuré n'est revendiqué. Une mesure sur un volume
+   représentatif précédera toute migration/index supplémentaire.
+6. Suite MySQL complète, tous gabarits Access/exports et toute l'application non
+   revalidés dans ce lot. Aucun constat global d'absence de bugs n'est formulé.

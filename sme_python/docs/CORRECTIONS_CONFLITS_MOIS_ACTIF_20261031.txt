@@ -1,0 +1,204 @@
+IMPRESSION — CONFLITS DU MOIS ACTIF ENTRE POSTES — LOT 26
+31/10/2026
+
+Périmètre et protection
+Racine : C:\Users\MONSTER\Desktop\GN\Impression\sme_python.
+Branche feature/mysql-migration préservée ; 524 entrées Git préexistantes au début
+du lot. Originaux sous baseline/, état Git et empreintes conservés. Aucun reset,
+commit, déploiement ou exécutable généré. EXE/ZIP précédents vérifiés inchangés.
+Aucune donnée réelle de production, archive ou photo utilisateur modifiée. Aucun
+fichier sources/ du miroir modifié. Tests limités à leurs dossiers/schémas dédiés,
+MySQL 8.0.40 sur 127.0.0.1:64062 avec datadir sous build contrôlé. ODBC, réseau
+externe et écritures hors profils de tests bloqués. Aucune dépendance ajoutée.
+
+Décision métier appliquée
+L'utilisateur a demandé de conserver les statuts MySQL des périodes existantes
+lors d'un import Access et de réserver leurs changements aux actions explicites
+de clôture/activation. Cette règle remplace la réapplication des anciens statuts
+Ouvert/Fermé de l'archive. Les nouveaux mois historiques ne peuvent introduire
+un second mois actif ; un premier mois sélectionné peut être initialisé à partir
+de l'archive si aucune période de travail n'existait. Les Réouvert existants restent
+préservés. Le fichier Access de référence n'est pas réécrit par cette correction.
+
+L26-01 — P1 confirmé — dernier poste gagnant malgré un ancien écran
+Emplacements : src/sme_gend/services/active_month_guard.py:72,
+111 ; src/sme_gend/services/sme_workspace_service.py:192.
+Le verrou précédent ordonnait les changements, mais ne vérifiait pas l'état que
+le second poste avait réellement vu. Deux choix octobre/novembre pouvaient donc
+se remplacer successivement. Reproduit avant correction : la seconde sauvegarde
+était acceptée. Maintenant, une lecture cohérente unique fournit périodes et
+jeton ; comparaison sous le verrou commun avant toute modification. Une version
+absente ou provenant d'une autre base est refusée. Le second choix périmé reçoit
+un conflit, y compris s'il désigne finalement le même mois que le premier client.
+L'état courant est relu avec verrou dans une transaction REPEATABLE READ ancienne.
+
+L26-02 — P1 confirmé — aller-retour et première initialisation
+Emplacements : src/sme_gend/services/active_month_guard.py, src/sme_gend/config/sme_context.py:182.
+Une empreinte des seules valeurs ne distingue pas septembre → octobre → septembre.
+Le nouveau jeton active_month_revision change avec une transition de périodes
+validée. L'ancien instantané n'est donc pas réutilisable après cet aller-retour.
+La première activation est également sérialisée lorsque la table est vide.
+Un ancien profil local ne peut plus remplacer le mois qu'un autre poste vient
+d'initialiser : la comparaison porte sur l'instantané réellement vide, sans
+recharger discrètement la nouvelle version après le contrôle d'absence.
+Ce jeton utilise une ligne du app_config existant ; aucune DDL/migration de schéma.
+
+L26-03 — P1 confirmé — écriture partielle préférences + mois
+Emplacement : src/sme_gend/config/sme_context.py:283.
+Le contexte rechargeait le mois courant puis pouvait en imposer un autre, et
+enregistrait d'abord ses préférences dans une transaction distincte.
+La version du mois affiché est maintenant conservée séparément du workspace.
+Préférences partagées, statuts, projection des carrières, audit, jeton et signal
+sont validés ensemble lorsqu'une action combine ces changements. Une erreur ou
+un conflit sur le mois annule aussi les préférences de cette opération.
+Les instantanés en mémoire avancent au commit réel ; les savepoints annulés
+restaurent leurs versions en attente et n'activent pas de mauvais callbacks.
+Les thèmes/colonnes restent locaux : ils ne forment pas une transaction distribuée
+avec MySQL et ne changent pas de période. Une saisie partagée seule ne réactive
+toujours pas un ancien mois, conformément au lot 25.
+
+L26-04 — P1 confirmé — confirmations, clôture et statuts annexes
+Emplacements : ui/context_banner.py, ui/shell_window.py, ui/sme_session_dialog.py,
+ui/views/sme_workflow_panel.py, services/sme_month_closure.py,
+services/sme_editing_policy.py, repositories/mysql_bundle_repositories.py,
+sous src/sme_gend/.
+Le bandeau, la fenêtre des mois, le démarrage et la clôture transmettent l'état
+affiché avant confirmation. Un clic explicite est vérifié même si le mois choisi
+est identique à celui de l'ancien écran. Les choix faits après une relecture
+silencieuse ne sont plus assimilés à un nouvel instantané utilisateur.
+La clôture vérifie aussi les changements survenus pendant la sauvegarde préalable.
+Une clôture identique déjà appliquée reste idempotente : aucun deuxième changement
+ni audit de clôture. Un aller-retour revenu à la source ouverte est refusé.
+Les écritures de période et la réouverture utilisent la même transaction de
+contrôle ; une panne d'audit de réouverture annule les statuts. Les formules
+existantes de projection/date de carrière et la préservation des Réouvert sont
+inchangées. Une mise à jour bas niveau ne peut valider deux mois distincts Ouvert.
+
+L26-05 — P1 confirmé — import d'anciens statuts et conflit après import
+Emplacements : services/mysql_bundle_import.py, services/active_month_guard.py
+(preserved_import_period), services/sme_month_closure.py, sous src/sme_gend/.
+Avant, TabSme/sme_periode de l'archive pouvait remplacer les statuts des mois
+existants. Les imports utilisent maintenant le contrôle de périodes et conservent
+les statuts MySQL autoritaires, selon la décision de l'utilisateur.
+L'erreur de lecture/application des périodes n'est plus une simple alerte suivie
+d'un succès partiel de l'import. Le jeton résultant est transmis après le vrai
+commit à la clôture qui suit ; un autre poste intervenant entre ces étapes ne
+peut être écrasé par cette clôture. Si l'import est déjà validé, le message le
+dit explicitement et demande de ne pas réimporter automatiquement. Ce workflow
+reste composé de deux étapes : le refus de la clôture n'annule pas un import
+déjà enregistré. Les snapshots/fichiers de sauvegarde réussis restent conservés.
+
+L26-06 — P2 — compatibilité des sauvegardes de configuration
+Emplacement : services/backup_restore_service.py (_app_config_rows_for_restore).
+Une restauration de configuration seule conserve le jeton du mois en cours,
+au lieu de réappliquer celui d'une ancienne archive sans ses périodes.
+Le moteur de restauration est inchangé hormis ce filtre de métadonnée runtime,
+vérifié structurellement. Une restauration complète suit son mécanisme existant
+de maintenance et ses règles propres ; elle exige une recette complémentaire
+après déploiement avec les nouveaux jetons.
+
+Synchronisation et erreurs
+Le mois, les flags/dates de carrière, le workspace éventuel, le journal MySQL,
+active_month_revision et shared_data_revision partagent le même commit.
+L'autre connexion voit l'ancien état jusqu'au commit, puis la nouvelle période
+et sa projection avec le nouveau signal. Une panne de notification, projection,
+audit ou jeton annule l'opération. Aucun rejeu automatique n'a été ajouté.
+Une sélection réellement sans effet n'écrit ni audit de mois ni notification.
+Le verrou neutre interne peut être initialisé sans produire de nouveau signal.
+Les lectures ordinaires d'écran restent sans verrou ; le polling existant reste
+à 10 secondes et diffère ses rafraîchissements pendant les saisies/modales.
+Les écrans ne sont donc pas annoncés comme instantanément synchronisés pendant
+une saisie protégée. Startup garde ses champs après refus ; certains assistants
+doivent être rouverts après un conflit, sans rechargement implicite de l'intention.
+
+Résultats vérifiables
+- Avant correction : 5 reproductions échouaient, log before_mysql.log,
+  26,03 secondes : choix périmé, contexte périmé, aller-retour, mois multiples,
+  préférences susceptibles d'être validées malgré un choix de mois périmé.
+- Suite unitaire finale complète : 1191 réussites, 8 avertissements signalés,
+  46.75 secondes ; log final_unit_confirmed.log.
+- Suite MySQL finale ciblée : 120 réussites, 418 autres cas non sélectionnés,
+  338.42 secondes ; log final_mysql_confirmed.log. Comprend mois,
+  workspace, configurations du lot 24, clôtures, archives, journaux et signaux
+  retenus par la commande exacte conservée dans le JSON correspondant.
+- 18 nouveaux cas unitaires + 33 nouveaux cas MySQL = 51 nouveaux cas.
+- Trois preuves additionnelles avec deux processus Python indépendants : API
+  directe, SmeContext et aller-retour. Conflit, premier résultat/projection,
+  signal et Réouvert préservés ; nouveau mois relu par le second processus.
+  Preuve finale : month_conflict_sashb1dr\validation.json.
+- 141 méthodes existantes préservées selon revue structurelle ; noyaux de
+  transaction, gardes partagées, calculs de carrière et auth inchangés.
+Les premiers résultats restent conservés. La course de première initialisation
+a ensuite été ajoutée ; suites complète unitaire et MySQL rejouées sur les sources
+finales. Les dates/empreintes correspondent à ces dernières passes.
+Les tests ne lisent/écrivent aucun Access réel : ODBC bloqué ; imports SQL simulés
+pour leurs frontières de transaction. Ce lot ne prouve pas un export/réimport
+Access complet, une restauration complète ou une recette visuelle de documents.
+
+Performance et compromis
+Aucun gain de latence globale mesuré ni annoncé. Une lecture cohérente d'écran
+est contrôlée par un test unitaire à une instruction SELECT. Les écritures sont
+sérialisées avec les configurations/référentiels par le verrou déjà existant.
+Un import long peut donc faire attendre un autre enregistrement. Les contrôles
+et jetons ont un coût ; il faudra mesurer avec volumes et latence réseau réels
+avant d'affiner les verrous. Retirer un contrôle pour raccourcir l'attente ferait
+réapparaître les pertes de changements. Les durées de tests ne sont pas des
+benchmarks de l'application, et les deux passes ne sont pas une mesure avant/après.
+
+CE QUI RESTE À TRAITER — ordre proposé
+
+P1 — Validation sur site et préparation du déploiement
+1. Tester sur deux vrais PC le partage SMB/UNC, les lettres différentes, ACL,
+   photos/fichiers simultanés, coupures réseau et reprise. Les PC sont toujours
+   indisponibles ici ; ces essais ne sont pas remplacés par MySQL local.
+2. Vérifier les périodes de la base réelle avant diffusion. Si plusieurs mois
+   sont déjà Ouvert, le code les signale sans choisir arbitrairement ni corriger
+   les données réelles. Prévoir sauvegarde et choix métier du mois correct avant
+   une régularisation contrôlée. Les anciens imports peuvent avoir laissé des
+   incohérences, mais aucune inspection de production n'a été réalisée ici.
+3. Prévoir une version homogène sur tous les postes lors d'un futur packaging
+   autorisé. Les anciens exécutables et outils SQL directs contournent les
+   nouvelles préconditions. Aucun exécutable n'est produit dans ce lot.
+4. Mettre en place et valider le chiffrement TLS MySQL (CA/nom de serveur), puis
+   les droits réseau avec l'administrateur du site. Aucun certificat réel n'est
+   disponible dans cette session et aucun secret ne doit être transmis ici.
+
+P2 — Couverture fonctionnelle et performances
+5. Faire une recette complète Access avec pilotes natifs et jeu anonymisé :
+   nouveaux agents, identité Access/interne, réimport, options de clôture/activation.
+   Contrôler visuellement les exports SME complets/DPF/CS-DPF et fiches individuelles
+   Excel/PDF/DOCX avec les vrais gabarits. Il s'agit d'une validation restante,
+   pas d'une affirmation que les anciens défauts d'export sont encore présents.
+6. Rejouer en préproduction restauration complète/configuration seule, reprise
+   des journaux et bascules de partage avec les nouveaux jetons, après interruption.
+   Tester aussi sauvegardes/restaurations avec mots de passe MySQL non ASCII sur
+   l'environnement cible. Aucun résultat natif complet n'est revendiqué ici.
+7. Compléter l'inventaire des appels métier bas niveau et des modales restant
+   sans instantané obligatoire. Les API de période bas niveau sont sérialisées,
+   mais n'expriment pas à elles seules l'intention d'un ancien écran : l'activation
+   interactive doit passer par le service versionné. Ne pas généraliser les
+   garanties de ce lot à tous les modules non revérifiés.
+8. Profiler temps UI, requêtes, imports, exports et contention sur une volumétrie
+   représentative ; optimiser ensuite avec comparaison fonctionnelle avant/après.
+
+P3 — Maintenance
+9. Traiter les avertissements de dépréciation, simplifier les grandes fonctions
+   et poursuivre la revue des dépendances et des tests. Ce n'est pas une raison
+   pour entreprendre une refonte générale ni déclarer des vulnérabilités non vérifiées.
+
+Limites techniques persistantes
+Le jeton d'historique ajouté ici concerne les périodes ; d'autres ensembles
+utilisent encore une empreinte d'état et ne distinguent pas tous les allers-retours.
+Les restaurations complètes sont des opérations de maintenance distinctes.
+Un interblocage ou une perte d'acquittement doit donner lieu à une vérification
+de l'état réel avant nouvelle tentative, sans rejeu automatique d'une saisie.
+Les fichiers locaux et MySQL ne forment pas une transaction unique ; un fichier
+de sauvegarde peut rester présent après un refus SQL. Aucune garantie générale
+d'absence de bugs n'est donnée pour l'application entière.
+
+Contrôle et retour arrière
+changes_manifest.json et corrections_only.patch isolent ce lot du travail antérieur ;
+baseline/ conserve les originaux. Examiner tout retour sur copie en préservant
+les changements ultérieurs, sans reset global. Les nouvelles lignes de métadonnées
+dans app_config n'exigent ni suppression de données métier ni changement de schéma.
+Ne pas effacer leur jeton en exploitation. EXE/ZIP existants inchangés.

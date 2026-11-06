@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "template_sheet": "Liste",
+  "output_sheet": "Liste_SME",
+  "header_row": 3,
+  "style_row_section": 4,
+  "style_row_sub": 5,
+  "style_row_data": 6,
+  "ncols": 18,
+  "sections": []
+}

@@ -1,0 +1,180 @@
+IMPRESSION — CORRECTIONS DE L'AUDIT DU 1er NOVEMBRE 2026
+
+PÉRIMÈTRE LIVRÉ
+Les 13 anomalies B01 à B13 du rapport initial ont été corrigées.
+Le correctif précédent de ConfigPathsDialog est conservé et revérifié.
+Conformément à la demande, M01 (filtre de diagnostic d'identité) et M02
+(réinitialisation des filtres d'Alertes parcours) n'ont pas été implémentés.
+Les modifications préexistantes du dépôt ont été préservées.
+
+CORRECTIONS
+
+B01 — Dossier correct après tri de la recherche globale.
+Chaque ligne transporte le résultat de recherche associé dans UserRole.
+L'ouverture lit cet objet, indépendamment de la position de tri du tableau.
+Tests dans les deux ordres de tri, sur résultats actifs et historiques.
+
+B02 — Cohérence du mois pour Missions, Désertions et Congés.
+Chaque lecture capture génération, révision d'invalidation, configuration et mois.
+Une réponse ou une erreur obsolète est ignorée. Les détails de congé sont
+interprétés avec les paramètres capturés pour cette lecture.
+Les anciennes lignes et sélections sont retirées au chargement, avec un message
+explicite. Les actions de modification sont désactivées tant que le mois demandé
+n'est pas prêt ; une vérification protège également l'appel direct aux actions.
+Tests : réponses inversées, changement de configuration, invalidation sans
+nouvelle lecture, erreur périmée et interdiction d'écriture avant chargement.
+
+B03 — Propagation de configuration et construction différée.
+Alertes parcours et Personnel supprimé sont inclus dans le rebinding des pages.
+Alertes parcours suit aussi le mois consulté lors du rebinding des services.
+Les anciennes lectures d'alertes sont invalidées et leurs sélections effacées
+lors du changement de configuration.
+Les fabriques différées lisent la configuration au moment de la création, et
+non celle capturée à l'ouverture de l'application. Les pages mensuelles lisent
+la portée actuelle du service Personnel ; les pages système utilisent la
+configuration courante de la fenêtre.
+
+B04 — Export SME numérique complet.
+L'entrée export_numerique_workbook utilise maintenant build_numerique, le
+générateur complet déjà présent, et le lecteur de détails commun au SME DPF.
+Congés : dates de début/fin et observations ; punitions : lieu, décision,
+dates et motif ; stages internes : feuille dédiée avec les informations saisies.
+Les tables sont reconstruites sans reprendre les fiches ou formules du gabarit.
+Le gabarit fournit l'ordre des grades. La présentation des tables est unifiée
+avec celle du SME DPF : titres du mois, filtres Excel, dates, lignes adaptées,
+zones d'impression et pagination. Les anciennes fusions de la matrice du
+gabarit ne sont donc plus conservées telles quelles.
+La publication reste atomique ; la journalisation porte sur le fichier final.
+La source des mouvements explicitement fournie et le mois choisi sont conservés.
+Les tests vérifient le contenu réel des cellules, les effectifs, les périodes,
+les feuilles et l'absence de données résiduelles/formules de gabarit.
+Deux tests dépendant auparavant du répertoire courant utilisent maintenant
+le chemin absolu du gabarit du projet et s'exécutent depuis la racine du dépôt.
+
+B05 — Port MySQL validé sans exception fatale.
+Un validateur et une validation commune imposent un entier entre 1 et 65535.
+Tester la connexion et Enregistrer utilisent la même règle. Une valeur invalide
+affiche un message et remet le focus dans le champ sans lancer de connexion.
+Le champ vide conserve le défaut 3306. Tests des bornes et entrées invalides.
+
+B06 — Configuration appliquée : message de réussite conditionnel.
+Un résultat False du rechargement produit un avertissement indiquant que
+l'enregistrement a eu lieu mais que l'application des paramètres a échoué.
+Le message de succès est réservé à un rechargement réussi.
+
+B07 — Recherche historique par grade et structure.
+La recherche porte sur la dernière situation historique du dossier : grade,
+code et désignation de structure, fonction et position, en plus des identifiants
+et des matricules. Une ancienne affectation ne remplace pas la dernière.
+La recherche courante prend aussi en compte la désignation de structure.
+Tests sur MySQL jetable, y compris l'exclusion d'un ancien grade/structure.
+
+B08 — Résultats historiques complets.
+La recherche globale ne passe plus par un plafond implicite de 80 lignes.
+Le dépôt renvoie toutes les correspondances par défaut ; une limite explicite
+reste disponible aux appelants qui en ont besoin.
+Test MySQL sur 85 dossiers, recherche par nom, grade, code et désignation.
+
+B09 — Recherche des alertes insensible aux accents.
+Réutilisation du mécanisme commun search_values dans les alertes actives
+et l'historique des acquittements. Tests avec HERVÉ/herve et Vérifié/verifie.
+
+B10 — Bandeau de contexte adapté à la largeur.
+Informations réparties sur deux lignes, textes adaptables et raccourcis courts.
+Les raccourcis détaillés restent accessibles en infobulle.
+Tests de largeur à 640, 1032 et 1440 pixels ; rendus clair/sombre inspectés.
+
+B11 — Dossiers homonymes distinguables dans la recherche globale.
+Ajout de la fiche, de la naissance et du matricule solde. L'identifiant est
+placé visuellement en première colonne ; la colonne Nom garde l'espace restant.
+Des infobulles donnent le texte complet des cellules. Rendus clair/sombre et
+tests vérifient les valeurs des identifiants et données complémentaires.
+
+B12 — Sélection conservée dans les alertes.
+La sélection est restaurée par identité d'occurrence, avec son empreinte,
+dans les alertes et les acquittements. Le tri/filtre/rafraîchissement n'utilise
+pas un ancien indice de ligne. Une version modifiée du constat ne récupère
+pas la sélection d'une ancienne version.
+
+B13 — Ctrl+F cohérent avec la page visible.
+Raccourci géré par la fenêtre principale, dirigé vers le champ de recherche
+de la page ou de l'onglet visible. Les deux anciens branchements locaux ont été
+retirés pour éviter les raccourcis ambigus. Le bandeau n'annonce Ctrl+F que
+lorsqu'un champ est disponible. Test du ciblage du deuxième onglet visible.
+
+VALIDATIONS
+Campagne générale : 1601 tests, dont 1563 réussis et 38 en échec dans les
+conditions Windows restreintes de cet environnement. Aucun test ignoré.
+Ces 38 échecs sont ceux déjà observés avant les corrections : 29 erreurs de
+protection ACL, 7 erreurs d'accès aux dossiers temporaires et 2 assertions liées
+au chemin de sauvegarde/protection des options MySQL dans ce même environnement.
+Ils ne sont pas présentés comme réussis. Les restrictions de sécurité de
+l'application n'ont pas été affaiblies pour faire passer les tests.
+
+Tests d'intégration : 28 réussis sur une instance MySQL jetable dédiée,
+incluant les nouvelles recherches, les alertes et les rapprochements existants.
+Le port 64173 et le datadir sous sme_python/build ont été vérifiés avant les
+connexions. Les fixtures ne créent et ne suppriment que leurs propres bases
+impression_test_*. Le serveur jetable a été arrêté après vérification du datadir.
+
+Dernière vérification ciblée après les derniers changements : 104 tests réussis
+(régressions de cet audit, configuration, démarrage, préférences, synchronisation,
+pages différées et exports). Ces 104 cas recoupent la campagne générale et ne
+sont pas ajoutés à son total.
+
+Analyse syntaxique : 392 fichiers Python source valides.
+Contrôle git diff --check sur les fichiers suivis concernés : réussi.
+Six rendus Qt conservés : bandeau à deux largeurs dans les deux thèmes,
+recherche globale dans les deux thèmes. Contrôle visuel effectué.
+
+ISOLATION ET LIMITES
+Aucune donnée réelle modifiée, aucune fusion, clôture ou restauration réelle.
+Aucune compilation ni génération d'exécutable. Les fichiers .exe factices et
+vides utilisés par les tests de sauvegarde/packaging sont retirés du bac à sable.
+Profil utilisateur, journaux de tests et fichiers générés restent sous build.
+Les appels de base réels sont bloqués dans la campagne unitaire ; les tests SQL
+ne peuvent joindre que le serveur jetable vérifié.
+
+La validation native des ACL Windows et de certains nettoyages temporaires
+reste à effectuer dans un environnement Windows qui autorise ces opérations.
+Pas de recette d'impression papier, de plusieurs postes physiques ni d'essai
+sur la base de production. Ces limites sont distinctes des 13 anomalies corrigées.
+L'application déjà ouverte doit être relancée pour charger le nouveau code.
+
+FICHIERS APPLICATIFS MODIFIÉS DANS CE LOT
+repositories/mysql_agent_repository.py
+services/numerique_excel_export.py
+services/clean_sme_exports.py
+ui/global_search_dialog.py
+ui/context_banner.py
+ui/paths_config_form.py
+ui/view_lifecycle.py
+ui/page_search.py (nouveau)
+ui/shell_window.py
+ui/views/career_alerts_view.py
+ui/views/missions_view.py
+ui/views/desertion_view.py
+ui/views/conges_view.py
+ui/views/settings_view.py
+ui/views/personnel_list_view.py
+ui/views/edition_sme_view.py
+Les chemins ci-dessus sont relatifs à src/sme_gend/.
+
+TESTS ET DOCUMENTATION
+tests/test_audit_corrections.py (nouveau)
+tests/integration/test_search_audit_mysql.py (nouveau)
+tests/test_numerique_export_workbook.py
+docs/AUDIT_APPLICATION_2026-11-01.txt (statut mis à jour, constats initiaux conservés)
+docs/CORRECTIONS_AUDIT_2026-11-01.txt (présent compte rendu)
+
+PREUVES LOCALES
+build/audit_20261101/corrections-final-full.txt et .xml
+build/audit_20261101/corrections-integration.txt et .xml
+build/audit_20261101/corrections-final-smoke.txt
+build/audit_20261101/corrected-banner-{light,dark}-{640,1032}.png
+build/audit_20261101/corrected-search-{light,dark}.png
+build/audit_20261101/visual_corrections.py
+
+AMÉLIORATIONS VOLONTAIREMENT DIFFÉRÉES
+M01 : filtre identités divergentes / doublons potentiels / données insuffisantes.
+M02 : bouton de réinitialisation des filtres d'Alertes parcours.

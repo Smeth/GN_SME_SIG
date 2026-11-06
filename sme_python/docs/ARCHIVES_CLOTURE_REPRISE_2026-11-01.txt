@@ -1,0 +1,127 @@
+IMPRESSION — REPRISE DU MODULE ARCHIVES & CLÔTURE
+1er novembre 2026
+
+RÉSULTAT
+Le module distingue maintenant trois parcours :
+1. Cycle mensuel : mois de travail, contrôles, clôture, réouverture et périodes.
+2. Alertes et tâches : points à vérifier, suivi partagé, filtres et détails.
+3. Fichiers d'archive : catalogue, recherche, filtres et accès aux fonctions liées.
+
+Les mécanismes métier existants restent utilisés : contrôle avant clôture,
+sauvegarde obligatoire, transition transactionnelle des périodes, contrôle des
+versions, confirmations, permissions et journalisation. Aucune opération n'a
+été exécutée sur les données réelles pendant cette intervention.
+
+CORRECTIONS FONCTIONNELLES
+- Les changements d'onglet chargent réellement l'onglet sélectionné.
+- Le bouton « Consulter les fichiers d'archive » ouvre le bon onglet.
+- Les alertes de tâches ouvertes peuvent rejoindre l'onglet de suivi.
+- La lecture du cycle ne calcule plus toutes les statistiques des effectifs.
+- Les lectures du cycle, du suivi et du catalogue passent par les workers Qt.
+- Les réponses anciennes sont ignorées après invalidation/changement de contexte.
+- Un changement de configuration recharge correctement l'onglet de suivi visible.
+- Les droits sont contrôlés lors des actions et à la livraison des lectures.
+- Une tâche non actualisée ne peut pas être traitée. Une confirmation est requise.
+- Le traitement utilise la version affichée, le service existant et son audit.
+- Si le contexte change pendant la confirmation, aucune écriture n'est lancée.
+- Les tâches ne sont plus limitées silencieusement à 30 lignes dans l'écran.
+- L'export Access utilisait un argument task= que run_with_progress n'accepte pas.
+  Il utilise maintenant run_with_determinate_progress avec la bonne signature.
+  Un résultat absent ne déclenche plus de message de réussite ni d'accès à .get().
+- Les contrôles de clôture s'exécutent hors du fil graphique.
+- Le mois suivant du formulaire suit les changements du mois à clôturer.
+- La réouverture reprend la période sélectionnée dans l'historique, si disponible.
+- L'auteur de la réouverture est prérempli depuis l'identité d'audit authentifiée
+  et n'est pas remplacé par le signataire partagé des documents.
+- Le motif de réouverture est vérifié avant de quitter le formulaire.
+- Le catalogue distingue SQL, ZIP, Access et mise en page JSON.
+- La lecture du catalogue ne crée pas un répertoire absent.
+- Les fichiers temporaires et les extensions inconnues ne sont pas présentés
+  comme des archives ; les liens symboliques sont ignorés.
+- L'actualisation conserve le filtre choisi, sans le remplacer par le mois actif.
+- Importer une archive Access exige un fichier Access sélectionné et les droits.
+- Les ZIP donnent accès à la page existante de restauration, sans la lancer.
+- Les SQL affichent leur nature : sauvegarde de base, pas restauration d'un mois.
+- Les tâches de maintenance restent dans des actions distinctes avec leurs
+  confirmations et contrôles existants.
+
+INTERFACE
+- Le bouton de clôture est visible en haut du cycle, avec l'action de contrôle.
+- Les périodes ont une recherche, un filtre de statut et une action de consultation.
+- Les tâches ont recherche, mois, priorité, compteur et détail de sélection.
+- Les états non chargé, en cours, vide, filtré et en erreur ont des textes distincts.
+- Les listes vides ne sont plus de grands tableaux sans explication.
+- Les fichiers ont recherche, mois, type, taille, date et sélection explicite.
+- Les opérations de maintenance ne partagent plus une longue barre d'actions
+  avec l'ouverture courante des fichiers.
+- Les résultats des contrôles avant clôture disposent d'un tableau lisible,
+  avec niveaux français : Conforme, À vérifier, Bloquant.
+- Les libellés « archive Access absente » et « aucune sauvegarde complète trouvée »
+  ne prétendent plus qu'aucune sauvegarde SQL n'existe ou qu'un âge a été contrôlé.
+- Les styles clair et sombre du projet sont réutilisés.
+
+VÉRIFICATIONS
+- 72 tests ciblés réussis sur la version finale : fichiers synthétiques,
+  filtres, états vides, navigation, permissions, concurrence, configuration,
+  confirmation des tâches, formulaire/progression Access et contrôles de clôture.
+- 9 tests MySQL réussis sur instance jetable : lecture des périodes et du mois
+  actif, 250 tâches avec versions d'écriture, clôture atomique et idempotente,
+  invalidation d'une clôture périmée, réouverture transactionnelle conservant
+  le mois actif, refus de traitement d'une tâche modifiée sur un autre poste.
+- Campagne générale : 1583 tests réussis, 38 en échec, aucun ignoré. Les 38
+  échecs correspondent aux restrictions Windows et aux dossiers temporaires
+  déjà relevés avant ce travail. Ils ne sont pas présentés comme réussis.
+  Les derniers ajouts et ajustements ont ensuite été vérifiés par les 72 tests
+  ciblés ; ces cas recoupent la campagne générale et ne s'ajoutent pas à son total.
+- Analyse syntaxique : 395 fichiers source Python valides.
+- git diff --check sur les fichiers suivis concernés : réussi.
+- Huit rendus Qt inspectés : cycle, suivi vide, suivi renseigné et fichiers,
+  dans les thèmes clair et sombre, sur des données synthétiques.
+
+ISOLATION
+Les tests unitaires bloquent les connexions réelles, les processus externes
+et les écritures hors de leur bac à sable. Le profil utilisateur est isolé.
+Les tests SQL ont vérifié le port 64173 et le datadir dédié sous build avant
+les accès. Seules leurs bases impression_test_* ont été créées et supprimées.
+L'instance MySQL jetable a ensuite été arrêtée après vérification du datadir.
+Aucune donnée réelle modifiée ; aucun exécutable compilé ou généré.
+Les fichiers .exe factices et non exécutables des tests sont retirés du bac.
+
+LIMITES
+- Pas de clôture, réouverture, import ou restauration sur la base réelle.
+- L'appel de l'export Access est testé avec un exporteur simulé. La recette
+  avec le pilote ODBC et un véritable ancien environnement Access reste à faire.
+- Une sauvegarde SQL mensuelle peut contenir toute la base. Elle n'est jamais
+  exécutée en double-cliquant dans ce module : sa restauration relève d'une
+  procédure d'administration MySQL. La page de restauration existante traite
+  les archives ZIP avec ses propres contrôles.
+- La présence d'un fichier dans le catalogue ne certifie pas son intégrité.
+- Les protections ACL Windows et certains nettoyages de fichiers temporaires
+  restent à valider dans un environnement autorisant ces opérations.
+- Les deux améliorations différées d'Alertes parcours ne sont pas implémentées.
+
+FICHIERS CONCERNÉS (relatifs à sme_python/)
+src/sme_gend/services/archive_catalog.py (nouveau)
+src/sme_gend/services/month_cycle_snapshot.py (nouveau)
+src/sme_gend/services/workflow_task_service.py
+src/sme_gend/services/workflow_alert_service.py
+src/sme_gend/ui/pre_closure_report_dialog.py (nouveau)
+src/sme_gend/ui/views/archives_view.py
+src/sme_gend/ui/views/cycle_archives_view.py
+src/sme_gend/ui/views/month_pilotage_view.py
+src/sme_gend/ui/views/sme_workflow_panel.py
+src/sme_gend/ui/views/workflow_status_panel.py
+tests/test_archive_cycle_ui.py (nouveau)
+tests/integration/test_cycle_archives_mysql.py (nouveau)
+tests/test_business_workflow_safety.py
+docs/ARCHIVES_CLOTURE_REPRISE_2026-11-01.txt
+
+PREUVES LOCALES
+build/audit_20261101/archive-full.txt et archive-full.xml
+build/audit_20261101/archive-final-targeted.txt
+build/audit_20261101/archive-integration.txt et archive-integration.xml
+build/audit_20261101/visual_archives.py
+build/audit_20261101/archives-{cycle,tasks-empty,tasks,files}-{light,dark}.png
+
+Relancer l'application pour charger le nouveau code. Les modifications
+préexistantes du dépôt ont été conservées ; aucun reset ni commit n'a été fait.

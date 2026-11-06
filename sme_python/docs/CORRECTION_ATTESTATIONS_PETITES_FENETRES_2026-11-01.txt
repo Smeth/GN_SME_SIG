@@ -1,0 +1,53 @@
+Attestations : adaptation aux petites fenêtres — 1 novembre 2026
+
+Correction du point 2 de la dernière liste de suivi.
+
+Filtres et actions Attestations : retour automatique à la ligne selon
+l'espace disponible ; les groupes de champs liés restent ensemble.
+Les commandes ne forcent plus une barre unique plus large que la fenêtre.
+Les indicateurs peuvent aussi passer à la ligne. Leurs signes « < » sont
+échappés correctement pour ne plus disparaître dans le texte HTML.
+Les hauteurs des commandes tiennent compte des styles au lieu d'imposer
+26 pixels. Les en-têtes du tableau disposent d'une largeur suffisante ;
+le tableau conserve son défilement horizontal sur les fenêtres étroites.
+
+Disposition : deux panneaux côte à côte sur grande fenêtre ; en dessous
+de 1 150 pixels de largeur disponible, panneaux empilés. Chaque panneau
+peut défiler pour garder ses commandes accessibles lorsque la hauteur est
+faible. Le séparateur reste réglable. Agrandir la fenêtre rétablit les deux
+colonnes sans perdre les coches ou les données saisies.
+
+Soit transmis bénéficie du même comportement. Les formulaires ne sont plus
+limités à une largeur maximale fixe. Le texte du destinataire est affiché
+depuis son début et disponible en entier dans une infobulle après chargement.
+Les champs texte restent éditables avec leur navigation habituelle.
+
+Les onglets Retraite, Configuration, Options et Formatage disposent d'un
+conteneur de défilement : leur largeur minimale ne se propage plus à toute
+la fenêtre. Les onglets utilisent leurs boutons de navigation si nécessaire.
+Les permissions, filtres métier et mécanismes de génération sont conservés.
+
+Fichiers :
+- src/sme_gend/ui/responsive_panels.py (nouveau)
+- src/sme_gend/ui/views/limite_age_view.py
+- src/sme_gend/ui/views/soit_transmis_view.py
+- tests/test_attestations_responsive.py (nouveau)
+
+Validation : 175 tests réussis en 81,94 secondes. Les nouveaux contrôles Qt
+couvrent les tailles 640x480, 800x600, 1100x760 et 1440x900, les thèmes clair
+et sombre, l'accès aux actions par défilement, l'absence de débordement
+horizontal des panneaux et la conservation des coches après redimensionnement.
+L'ensemble du module et ses cinq onglets sont aussi contrôlés à 640, 800 et
+1100 pixels. Régressions cochage, permissions, filtres, configuration et
+exports vérifiées. Captures produites sur personnes fictives, puis inspection
+visuelle des dispositions compacte et large. git diff --check sans erreur.
+
+Limites : sur petite hauteur il faut défiler dans les panneaux pour accéder
+à tout le contenu. Les colonnes du tableau restent consultables par son
+défilement horizontal. Pas de recette de tous les réglages DPI Windows ni
+de toutes les polices personnalisées ; les tests utilisent les styles du
+projet et Segoe UI. Les options Word et la distinction des homonymes ne sont
+pas incluses dans cette correction.
+
+Aucune donnée réelle modifiée, aucune connexion réelle utilisée par les
+tests, aucun exécutable généré. Modifications préexistantes conservées.

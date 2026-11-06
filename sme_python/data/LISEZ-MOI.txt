@@ -1,0 +1,11 @@
+Placez ici :
+  - smegend.mdb (extrait ou base complete) ;
+  - optionnel : resultat.xlsx (maquette liste des presents) ;
+  - optionnel : app.png (icone fenetre ; sinon icone integree app.svg) ;
+
+Le fichier liste_present_layout.json (ordre des sections, titres) est cree
+automatiquement au premier lancement ; vous pouvez aussi l'éditer depuis
+l'application : menu "Mise en page liste".
+
+L'application charge smegend.mdb depuis ce dossier par defaut.
+Vous pouvez remplacer les fichiers a tout moment.

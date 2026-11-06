@@ -1,0 +1,183 @@
+IMPRESSION — AVANCEMENT ACTIF, CONFLITS ET SYNCHRONISATION — LOT 28
+31/10/2026
+
+Décision utilisateur et portée
+L'utilisateur a précisé que les modules campagnes/quotas étaient retirés, puis
+choisi : « Ne plus utiliser les campagnes, quotas et nominations de campagne dans
+le calcul. » Ce choix remplace la proposition de sécuriser/réactiver ces anciens
+modules figurant au reste à faire du lot 27. Les seules écritures d'Avancement
+conservées concernent les règles du barème actif et leur rétablissement explicite.
+Le tableau continue de lire les dossiers et passations de grade réelles.
+Les anciennes données de campagne restent intactes ; aucune table n'est supprimée.
+Aucun exécutable généré, aucune dépendance ajoutée, aucune base réelle utilisée.
+
+Protection et méthode
+Dépôt : C:\Users\MONSTER\Desktop\GN\Impression\sme_python.
+Branche feature/mysql-migration préservée, originaux enregistrés dans baseline/,
+état Git complet avant/après et patch limité à ce lot. Aucun reset ni commit.
+sources/ du miroir est resté en lecture seule. Les anciens EXE/ZIP sont vérifiés
+inchangés par empreinte. Tous les essais utilisent un profil et des données
+synthétiques : MySQL 8.0.40 local 127.0.0.1:64062, datadir contrôlé sous build.
+Le lanceur refuse les écritures hors profils, les connexions externes et ODBC.
+
+L28-01 — P1 confirmé — deux utilisateurs remplacent la même règle
+Emplacements : src/sme_gend/repositories/mysql_avancement_repository.py:61,
+src/sme_gend/repositories/avancement_rule_guard.py,
+src/sme_gend/models/avancement.py (AvancementRegle).
+Cause : INSERT ... ON DUPLICATE KEY UPDATE était inconditionnel, sans version
+affichée ni notification. Reproduit avant correction : une ancienne règle pouvait
+remplacer la nouvelle durée saisie par un autre poste.
+La lecture fournit maintenant l'empreinte des 15 champs persistés, liée à la base.
+L'enregistrement exige explicitement la règle vue par l'utilisateur. Dans une
+transaction partagée, le verrou commun précède la relecture FOR UPDATE et la
+comparaison. Version absente, étrangère, mauvais grade ou règle changée/supprimée
+refusent l'écriture. L'absence d'une surcharge est aussi versionnée : deux postes
+ne peuvent créer silencieusement deux versions du même défaut.
+Deux règles de grades différents restent modifiables indépendamment depuis le
+même écran. Les droits avancement.regles sont vérifiés dans le dépôt avant SQL,
+y compris pour les appels hors interface. Le champ SQL et son mapping de valeurs
+préexistants sont conservés. Les métadonnées ne modifient ni égalité ni repr du DTO.
+Tests : écrasement ancien, version manquante/étrangère, première création concurrente,
+suppression, deux gagnants sur grades différents et un seul gagnant sur même grade,
+ancienne transaction REPEATABLE READ, refus de permission avant SQL.
+
+L28-02 — P1 confirmé — rétablissement périmé ou partiel du barème
+Emplacements : src/sme_gend/repositories/mysql_avancement_repository.py:96, src/sme_gend/ui/views/avancement_view.py:755.
+Cause : DELETE puis INSERT successifs sans contrôle du barème réellement affiché.
+L'interface capture maintenant sa version complète AVANT confirmation. Le dépôt
+compare l'ensemble sous verrou, détecte modifications, ajouts et suppressions,
+puis effectue le remplacement et le signal dans la même transaction. Une panne
+d'insertion après DELETE restaure l'ancien barème ; une panne de publication le
+restaure également. Le barème déjà identique reste un no-op sans nouveau signal.
+Des règles individuelles peuvent utiliser leurs versions propres sans conflit
+artificiel sur tout le catalogue ; le rétablissement compare réellement tout.
+Tests : ancien écran, deuxième rétablissement périmé, snapshot absent/étranger,
+ajout/suppression entre affichage et confirmation, trigger de panne après DELETE,
+validation/annulation externe et savepoint si une erreur est traitée par l'appelant.
+
+L28-03 — P1 confirmé — synchronisation au commit réel
+Emplacement : écritures de src/sme_gend/repositories/mysql_avancement_repository.py, garde shared_reference_write existante.
+Cause : les écritures de règles ne publiaient pas le signal partagé.
+Elles rejoignent désormais la garde commune : règles et shared_data_revision se
+valident ensemble. Les modifications regroupées dans un même lot partagé ne
+publient qu'une notification. Un no-op n'en publie pas ; rollback/panne ne laisse
+ni règle partielle ni signal isolé. L'invalidation des caches suit le commit réel.
+Le noyau transactionnel n'a pas été modifié.
+La vue Avancement recharge sa configuration visible sur activation distante,
+y compris quand le tableau effectif est marqué périmé. Elle diffère le calcul
+du tableau masqué jusqu'à son ouverture et invalide ses versions lors d'un
+changement de connexion. Les anciennes versions ne peuvent être réutilisées sur
+une autre base. Les tests d'interface et natifs couvrent ces chemins.
+
+L28-04 — P1 confirmé — campagnes retirées encore influentes
+Emplacements : src/sme_gend/services/avancement_service.py:51,
+src/sme_gend/services/avancement_engine.py (evaluer), src/sme_gend/repositories/mysql_avancement_repository.py,
+src/sme_gend/ui/views/avancement/dialogs.py, src/sme_gend/models/avancement.py.
+Constat : les seuls onglets actifs étaient « Tableau avancement » et
+« Configuration », mais le service chargeait une campagne et ses lignes ;
+« nommé » ou « écarté » pouvait encore court-circuiter le calcul, et une ancienne
+inscription pouvait être utilisée comme preuve. Les anciennes actions pouvaient
+encore créer campagnes, quotas, propositions et nominations sans interface.
+Ces actions et leurs requêtes/dialogues/DTO inutilisés ont été supprimés.
+Le calcul ne lit plus les tables avancement_campagne, avancement_quota ou
+avancement_ligne, et n'utilise plus les champs campagne_statut/ligne_id/voie_campagne.
+Ces trois champs d'entrée restent acceptés uniquement pour compatibilité des
+anciens constructeurs DTO ; ils sont ignorés et testés comme tels. Les paramètres
+annee/trimestre restent acceptés par vigilance sans sélectionner de campagne.
+Les limites, durées, diplômes, voies de grade et passations du dossier sont
+préservés. Les critères manuels ne sont pas inventés : sans avis favorable connu,
+le dossier reste à préparer ; le temps de commandement garde son contrôle.
+L'obligation administrative d'inscription reste affichée comme à vérifier hors
+module, sans prétendre que l'agent est inscrit ou nommé. Une éligibilité calculée
+ne crée jamais une nomination. Les barèmes default_rules sont inchangés.
+Les anciennes tables et définitions SQL sont conservées pour l'historique et les
+sauvegardes. Aucune donnée n'a été effacée ni migration de suppression proposée.
+Un ancien identifiant de permission avancement.gerer reste accepté pour préserver
+les profils, avec un libellé « retirée » ; il ne donne accès à aucune ancienne action.
+Tests : ancien statut nommé/écarté/absent sans influence, aucune lecture de campagne
+par vigilance, anciennes API absentes, données historiques synthétiques inchangées.
+
+L28-05 — P1 confirmé — ancien initialiseur et défauts réécrits sans notification
+Emplacement : src/sme_gend/services/mysql_import_period.py:140.
+L'initialiseur spécifique exécutait encore la migration trimestrielle des campagnes
+et réinsérait les règles absentes par INSERT IGNORE. Il initialise maintenant
+uniquement la table active avancement_regle, sans migration des anciennes tables,
+sans suppression d'index et sans réinsertion automatique des défauts.
+Les défauts sont superposés en mémoire ; leur persistance passe par une action
+versionnée. La définition SQL globale historique reste disponible pour compatibilité ;
+ce lot ne migre pas ni ne supprime les tables d'une base déjà installée.
+Tests : base sans surcharge, première surcharge explicite, initialisation idempotente,
+anciennes campagnes dépourvues de trimestre inchangées et schéma défaillant explicite.
+
+L28-06 — P1 confirmé — enregistrement réussi interprété comme un échec
+Emplacement : src/sme_gend/ui/views/avancement_view.py:767,
+src/sme_gend/ui/views/avancement/dialogs.py (edit_regle).
+Le service renvoyait None, également utilisé par la progression pour signaler
+un échec ; la vue ne rechargeait donc pas après une sauvegarde pourtant réussie.
+Le worker retourne maintenant un résultat explicite. En conflit, la sélection
+est conservée et le brouillon réaffiché pour consultation/copie/annulation, sans
+remplacement ni adoption silencieuse d'une nouvelle version attendue.
+Le rétablissement transmet sa version antérieure à la confirmation. Un échec
+de lecture conserve les anciennes lignes mais désactive les écritures, avec
+message explicite ; il ne substitue plus silencieusement le barème par défaut.
+L'import QLabel manquant dans la modale de règle a également été ajouté ;
+les tests ouvrent réellement cette modale, en acceptation et annulation.
+
+Vérifications exécutées
+Avant correction : 5 tests locaux et 4 natifs en échec, journaux conservés.
+Après correction, avec -W error (aucun avertissement masqué) :
+- suite locale entière : 1246 réussites, 36.35 s ;
+- Avancement MySQL natif : 35 réussites, 13.31 s ;
+- régressions passations/historiques/éditeurs mensuels : 8 réussites,
+  37.09 s, 548 autres cas non exécutés par ce filtre.
+Total final : 1289 cas réussis, aucun échec,
+aucun test sauté, aucun avertissement remonté. Aucun test préexistant désactivé.
+Les commandes sont consignées dans validation_summary.json. Les empreintes sont
+figées à la vérification finale après ces tests ; aucune source n'a été changée
+après eux. Les traitements d'Avancement seuls ne nécessitent pas la base réelle.
+
+Essai à deux processus indépendants, MySQL réel isolé : le second observe seulement
+les anciennes valeurs avant commit, puis la règle et sa révision après commit.
+Il refuse l'ancienne modification de règle et l'ancien rétablissement global,
+sans changer les données ni la révision du premier. Les empreintes du code testé
+sont incluses dans avancement_conflict_*/validation.json.
+Ce sont deux clients locaux, pas deux postes physiques ni un essai SMB réel.
+
+Revue : 44 fonctions préservées dans les cinq groupes comparés ; mapping des
+règles, lecture des agents/diplômes/passations et barèmes par défaut contrôlés.
+Les services de dossier et leurs projections, l'authentification, les sauvegardes,
+le pool et la transaction MySQL n'ont pas été changés. Le libellé d'une permission
+ancienne a changé, sans modifier les droits stockés. Aucun gain de performance
+chiffré n'est annoncé : le retrait de lectures de campagne n'a pas été benchmarké
+sur les postes réels. Les mesures du tableau de bord du lot 27 restent distinctes.
+
+Validation en préproduction et limites
+Utiliser une copie anonymisée ; ouvrir la même règle sur deux postes, enregistrer
+le premier, vérifier que le second reçoit un conflit et conserve son brouillon.
+Répéter avec « Rétablir le décret », un opérateur sans avancement.regles, une panne
+de connexion, le basculement de configuration visible et les premières surcharges.
+Vérifier que les passations réelles au dossier continuent d'alimenter le grade,
+et que des anciens états de campagne ne masquent plus les agents du tableau.
+Les actions retirées n'existent plus dans ce code : des outils externes non fournis
+qui les importeraient devront être adaptés. La distribution future devra être
+homogène sur les postes ; les anciens EXE ne sont pas modifiés par ce lot.
+Les empreintes d'état ne distinguent pas un aller-retour (ABA) revenu exactement
+aux mêmes valeurs. Les outils SQL directs et anciens exécutables peuvent encore
+contourner des contrôles applicatifs. Une perte d'acquittement exige une relecture
+avant toute nouvelle tentative, sans rejeu automatique d'une saisie.
+La recette réseau réelle, Access native et les autres modules ne sont pas déclarés
+entièrement validés. Prochaines priorités : hiérarchie U→D→T et propagation, fusions
+de référentiels, anciens scripts SQL, puis performances et maintenance restantes.
+
+Contrôle, reproduction et retour arrière
+changes_manifest.json et corrections_only.patch isolent ce lot du travail précédent.
+baseline/ contient les originaux ; tested_source_hashes.json fige src/tests.
+Examiner tout retour sur copie et préserver les travaux précédents/ultérieurs,
+sans reset global. Aucune migration ni suppression de données n'est nécessaire.
+Commande locale depuis sme_python avec ../.venv/Scripts/python.exe -B :
+ scripts/run_isolated_tests.py tests --ignore=tests/integration -q --tb=short -W error
+Commande native, seulement avec une instance jetable vérifiée et démarrée :
+ scripts/run_isolated_tests.py --mysql-test-instance build/corrections_20261029/mysql_test_instance.json tests/integration/test_avancement_writes_mysql.py -q --tb=short -W error
+L'instance de cette session est arrêtée à la fin ; son datadir/port doivent rester
+isolés. Ne jamais adapter cette commande vers une base de production.
+validation_summary.json confirme ensuite son arrêt et l'absence de schémas de test.

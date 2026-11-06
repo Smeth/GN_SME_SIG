@@ -1,0 +1,217 @@
+IMPRESSION — CONFLITS DES RATTACHEMENTS ET ORDRES — LOT 23
+31/10/2026
+
+Protection et périmètre
+Racine : C:\Users\MONSTER\Desktop\GN\Impression\sme_python.
+Branche feature/mysql-migration conservée ; 504 entrées Git au début du lot,
+déjà modifiées. Copies baseline/, empreintes et état Git initial conservés.
+Aucun reset, commit, déploiement ou exécutable généré. EXE/ZIP existants inchangés.
+Aucune donnée réelle, aucun fichier utilisateur ni partage SMB modifié par les
+tests. MySQL 8.0.40 jetable, datadir vérifié sous build, port 64062 ; le runner
+isole les fichiers et bloque la production, les autres réseaux et ODBC.
+Sondes interprocessus limitées à leur propre schéma et dossier synthétiques.
+Aucune migration réelle, dépendance nouvelle ou modification de schéma requise.
+
+L23-01 — P1 confirmé — remplacement de rattachements à partir d'une liste périmée
+Emplacements : src/sme_gend/repositories/mysql_fonction_structure_repository.py:166,
+206 ;
+src/sme_gend/repositories/reference_collection_guard.py:52, check_collection.
+Les deux modales remplaçaient tous les liens sélectionnés après lecture de listes
+indépendantes. Une validation après celle d'un autre poste pouvait supprimer ses
+nouveaux liens ou rétablir ceux qu'il venait d'enlever. Deux reproductions natives
+échouaient avant correction, sans erreur de conflit.
+Correction : instantané immuable de l'ensemble (type, propriétaire, empreinte,
+parents/choix et liens avec leurs ordres). Labels, choix et liens sont lus dans
+une même instruction SQL avec JSON_ARRAYAGG ; tri déterministe en Python pour
+calculer l'empreinte, aucune dépendance à l'ordre non garanti de l'agrégat et
+aucun GROUP_CONCAT susceptible de tronquer une liste. Un ensemble vide reçoit
+aussi une version valide. Le mode historique des fonctions observées en carrière
+reste affiché en repli lorsqu'aucun lien explicite n'existe ; il est lu à part et
+n'entre pas dans la version des liens effectivement enregistrés.
+À la validation, comparaison avec les lignes actuelles sous verrous partagés,
+dans la transaction d'écriture. Le propriétaire, les choix affichés et les liens
+doivent toujours correspondre ; sinon ReferenceConflictError avant tout DML.
+Une fonction choisie devenue inconnue n'est plus ignorée en enregistrant un
+sous-ensemble : le lot est refusé et annulé.
+
+L23-02 — P1 — concurrence sur ensembles vides et intersections entre les deux modales
+Emplacement : src/sme_gend/services/shared_reference_write.py:109.
+Une comparaison seule ne protège pas l'absence de ligne ni une insertion entre
+lecture de contrôle et remplacement. Toutes les écritures de référentiel prennent
+désormais d'abord le verrou de la ligne partagée shared_data_revision, puis lisent
+et modifient leurs lignes. Cela sérialise les rédacteurs conformes, y compris les
+deux sens du même lien, les catalogues, ensure_link et les backfills.
+Le token existant n'est pas modifié par cette prise de verrou. Si la clé manque,
+elle est initialisée avec un token vide dans la même transaction. Cette opération
+ne marque pas un changement métier, ne publie pas et n'invalide pas les caches.
+Un seul verrou anticipé par lot imbriqué ; la publication reste unique au commit.
+Le moteur générique de transaction/SAVEPOINT et ses cinq fonctions annexes sont
+inchangés. Aucun verrou conservé pendant les cases à cocher ou confirmations.
+Références primaires pour les verrous de lecture et ON DUPLICATE KEY UPDATE :
+https://docs.oracle.com/cd/E17952_01/mysql-8.0-en/innodb-locking-reads.html
+https://docs.oracle.com/cd/E17952_01/mysql-8.0-en/innodb-locks-set.html
+Validation : ensembles initialement vides/non vides, courses dans chaque sens,
+modification depuis l'autre modale et contrôle en REPEATABLE READ. Un seul effet
+et un seul signal dans chaque course où les deux propositions changent l'état.
+
+L23-03 — P1 — ajout de liens précédemment réalisé par lecture-union-remplacement
+Emplacements : services/referentiel_service.py:fonction_merge_structure_links,
+src/sme_gend/repositories/mysql_fonction_structure_repository.py:merge_links_for_fonction ; ui/fonction_smart_dialog.py.
+L'ancienne opération additive relisait l'ensemble puis remplaçait tous les liens,
+ce qui pouvait perdre un ajout concurrent et réécrire les ordres existants.
+Nouveau chemin atomique INSERT IGNORE pour les ajouts manquants, en conservant
+les liens et ordres déjà présents. Les structures inconnues sont refusées.
+La modale avec suggestions conserve un instantané global du graphe initial ;
+elle le vérifie avant de renommer/créer une fonction et d'ajouter les liens.
+Renommage et ajouts font partie du même lot SQL : un échec tardif annule aussi
+le renommage et ses propagations. Les anciennes règles d'ajout, d'exclusion du
+contrôle spécial/détachés et de postes attendus sont conservées.
+Validation : deux ajouts concurrents sont conservés et l'ordre préexistant 17
+reste 17 ; un lot contrôlé qui renomme puis reçoit une structure inconnue est
+entièrement annulé, sans révision.
+
+L23-04 — P1 confirmé — remplacement concurrent de l'ordre MySQL de l'organigramme
+Emplacements : src/sme_gend/repositories/mysql_organigram_repository.py:177,
+193 ;
+services/structure_organigram_service.py.
+Avant correction, les deux méthodes appliquaient la liste reçue sans vérifier
+l'ordre et la composition chargés ; deux reproductions natives échouaient.
+Elles exigent maintenant un instantané obtenu par load_order_*_snapshot. Ajout,
+suppression, déplacement, activation ou modification pertinente du parent/enfant
+invalide le cliché. Doublons et identifiants étrangers au parent sont refusés.
+Les ordres partiels restent autorisés pour les identifiants du périmètre chargé.
+Le chargement de l'organigramme et ses quatre requêtes groupées restent inchangés.
+Ces API d'ordre SQL n'étaient pas directement appelées par les glisser-déposer
+visibles : ceux-ci enregistrent la configuration de présentation, protégée ci-dessous.
+Les méthodes du service qui modifient directement SQL puis la mise en page sont
+groupées dans une transaction commune. Une erreur de sauvegarde de layout annule
+l'ordre SQL ; pas de première moitié validée. Les initialisations/migrations et
+le wizard global de maintenance ne reçoivent pas une transaction destructive globale.
+
+L23-05 — P1 confirmé — ordre de présentation sauvegardé depuis un brouillon périmé
+Emplacements : src/sme_gend/services/layout_config_service.py:load/save, src/sme_gend/services/layout_write_guard.py:27,
+models/liste_layout.py, ui/views/layout_editor_view.py.
+Le véritable éditeur d'ordre des sections/subdivisions sauvegardait toute la
+configuration sans comparer son état chargé. Une cinquième reproduction native
+avant correction montrait l'absence de refus de la seconde sauvegarde.
+Correction : empreinte canonique du payload MySQL chargé, comparée sous verrou
+de la clé liste_present_layout dans la transaction de référentiel. Un changement
+de n'importe quel réglage de cette configuration provoque un conflit, afin de
+préserver les autres champs et l'ordre du premier utilisateur.
+Les champs write_token et _pending_write sont uniquement en mémoire, exclus de
+to_dict, repr et de l'égalité métier ; anciens JSON et exports restent lisibles.
+Les copies/réconciliations, l'import de mise en page XLSX et les reconstructions
+conservent la version initiale. Les objets créés sans chargement ne peuvent pas
+écraser silencieusement une configuration déjà présente.
+La version ne progresse qu'au commit réel. Une référence faible et un état en
+attente permettent plusieurs sauvegardes du même objet dans une transaction
+externe, sans garder une connexion en vie après rollback. Les callbacks d'un
+appel annulé ne peuvent pas avancer la version au commit d'un autre appel.
+Au chargement, une panne SQL n'est plus assimilée à une clé absente entraînant
+l'enregistrement d'un défaut. Ce risque était visible dans le code antérieur ;
+le nouveau test injecte la panne et vérifie qu'aucun défaut ne remplace les données.
+Deux premiers chargements simultanés initialisent une seule fois la clé absente ;
+le second lecteur récupère la version déjà créée, sans écrasement.
+Une lecture dans une transaction déjà gérée ne crée pas un défaut intermédiaire :
+le service rédacteur enregistre son layout final une seule fois.
+
+Parcours utilisateur et notifications
+Les deux modales de rattachements transmettent leur instantané initial ; elles
+ne rechargent pas un cliché plus récent à la place de celui des cases cochées.
+En conflit, elles restent ouvertes et conservent la sélection, y compris les
+cases cochées masquées par un filtre. Échec de chargement : explication visible,
+bouton Enregistrer désactivé et refus d'un appel programmatique à la sauvegarde.
+Cette gestion est également appliquée au chargement du catalogue et du graphe
+dans la modale de fonction avec suggestions ; aucun défaut vide ne permet de créer.
+Le mode lecture seule et les exclusions métier sont préservés.
+L'éditeur de mise en page conserve le brouillon et affiche un statut de conflit.
+L'autosauvegarde est arrêtée après conflit ; les actions manuelles expliquent
+qu'il faut recharger. Le rechargement reste confirmé par l'utilisateur ; un échec
+de lecture garde le brouillon. La réconciliation en arrière-plan travaille sur
+une copie afin de ne pas muter le brouillon avant une sauvegarde refusée.
+Les modifications de code/désignation depuis cet écran englobent aussi la
+sauvegarde du layout dans le lot, sans assigner l'objet candidat avant commit.
+Les données et shared_data_revision restent dans la même transaction. Conflit,
+erreur ou rollback : pas de signal trompeur. Caches invalidés seulement après
+commit réel. Les appels sans version doivent charger un instantané d'abord ;
+pas de mode de forçage ni de nouvelle tentative métier automatique ajoutés.
+
+Validation exécutée et preuves
+- Avant correction : 5 échecs natifs, 385 non sélectionnés, 7,53 s.
+- Passe intermédiaire du nouveau périmètre : 37 réussis, 385 non sélectionnés,
+  61,89 s ; puis 12 contrôles supplémentaires de visibilité et de lecture cohérente.
+- Nouveaux tests unitaires : 28 réussis en 3,81 s.
+- Passe finale unitaire complète : 1094 réussis, 8 avertissements,
+  52.48 s. Aucun test désactivé pour obtenir ce résultat.
+- Passe finale MySQL ciblée : 249 réussis, 185 non sélectionnés,
+  367.67 s. Filtre : links_lot23 or reference_lot19 or catalog_lot22
+  or business_lot20 or gain_lot21 or sync_lot12. Cette passe comprend les 49 cas
+  du lot et les régressions des référentiels, catalogues, gains/pertes, workflow
+  et synchronisation ; ce n'est pas une nouvelle passe complète des 434 cas natifs.
+- Total pytest final : 1343 réussis ; 77 nouveaux cas ajoutés.
+- Dix cas avec une seconde connexion observent données et révision uniquement
+  après commit réel, et aucun changement après rollback, pour les cinq chemins.
+- Cinq scénarios supplémentaires entre processus Python indépendants : même
+  refus pour les deux sens de liens, les deux ordres SQL et le layout. Données
+  du premier et révision intactes ; empreintes des sept sources centrales enregistrées.
+- Revue AST : cinq fonctions du moteur générique inchangées ; module des
+  catalogues/gains-pertes strictement inchangé ; seize DML et leurs paramètres
+  des chemins existants liens/organigramme conservés. L'ajout pur est un chemin distinct.
+- Les anciens tests transmettent leurs clichés chargés. La barrière du test de
+  deux rédacteurs est placée avant la section désormais sérialisée ; les assertions
+  d'indépendance, rollback et nombre de signaux sont maintenues. Aucun blocage
+  évité par retrait de test. Les attentes métier antérieures sont conservées.
+- Syntaxe globale, patch isolé contrôlé sans application, état Git antérieur et
+  empreintes EXE/ZIP vérifiés ; arrêt du serveur jetable et absence de schémas
+  synthétiques résiduels consignés après finalisation dans validation_summary.json.
+Commandes exactes, profils et temps : final_unit_confirmed.json, final_mysql.json
+et leurs logs dans build/corrections_20261031_lot23. Les premières preuves unitaires
+sont aussi conservées. La dernière gestion d'erreur ne change que l'UI ; la suite
+unitaire complète est rejouée après. Les sources backend, scripts et tests
+d'intégration sont antérieurs à la passe MySQL et inchangés depuis, contrôlés
+par dates et empreintes. Preuve interprocessus sous
+collection_conflict_*/validation.json ; scripts et inventaire des cinq entrées
+protégées conservés dans ce dossier.
+
+Performance et compromis
+Deux tests constatent une seule instruction SELECT pour charger chaque sens de
+rattachements lorsque les liens existent ; le repli historique sans liens ajoute
+la lecture des fonctions observées. Un autre test mesure un seul verrou anticipé
+et un seul signal pour un lot imbriqué de deux écritures.
+Aucun gain de latence globale revendiqué : pas de benchmark représentatif avant/
+après. Calcul JSON/empreinte et contrôles ont un coût. Les écritures de référentiel
+s'attendent désormais avant le contrôle, jusqu'au commit : nécessaire aux ensembles
+vides et aux intersections. Un import/lot long peut retarder une autre écriture.
+Les instantanés comprennent les choix affichés ; une modification d'un choix
+non coché ou d'un réglage du layout peut donc imposer de recharger par prudence.
+
+Limites et travail restant
+- Validation sur ce PC, MySQL réel et processus distincts ; pas de validation
+  réelle SMB ni de deux PC de travail, toujours indisponibles. Le polling et
+  ses règles de report lors d'une saisie restent en place.
+- Les anciennes versions et outils SQL directs ne suivent pas forcément le
+  verrou commun ni les contrôles. Déploiement homogène à effectuer lors d'un
+  futur lot de packaging autorisé ; aucun exécutable généré maintenant.
+- Les empreintes comparent l'état, pas un compteur historique : modification
+  puis retour aux valeurs et identités exactement initiales non distingué.
+  Un compteur persistant nécessite un lot de schéma avec sauvegarde/retour arrière.
+- L'affichage de fonctions observées en carrière reste un repli d'affichage,
+  sans versionnement de toutes les écritures de personnel dans ce lot.
+- Autres configurations, priorités et maintenance globale ne sont pas déclarées
+  entièrement protégées par cette correction. TLS, mots de passe non ASCII et
+  profilage volumétrique restent des périmètres séparés.
+- Vérifié sur InnoDB/MySQL 8.0.40. Interblocage ou acquittement de commit perdu :
+  erreur explicite, vérifier l'état réel avant de relancer, aucun rejeu automatique.
+
+Validation en préproduction et retour arrière
+Sur une base synthétique, ouvrir les mêmes rattachements dans deux clients, aussi
+depuis les deux modales opposées et depuis une liste vide. Enregistrer dans le
+premier, tenter le second : conflit, cases conservées, premier résultat intact,
+aucune deuxième notification. Tester ensuite deux ajouts et les ordres existants.
+Déplacer des sections/subdivisions dans deux éditeurs de mise en page : le second
+doit conserver son brouillon et suspendre l'autosauvegarde jusqu'à rechargement
+confirmé. Tester annulation, rechargement en panne et reprise explicite.
+changes_manifest.json et corrections_only.patch isolent ce lot du dépôt déjà
+modifié ; baseline/ conserve les originaux. Tout retour de sources doit être
+contrôlé sur copie en préservant les changements ultérieurs, sans reset global.
+Aucune migration réelle ou restauration de données à annuler. Aucun exécutable généré.

@@ -1,0 +1,40 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+*.mdb.lock
+
+# Bases, listes, exports et journaux locaux
+*.mdb
+*.accdb
+*.xls
+*.xlsx
+*.xlsm
+*.csv
+*.pdf
+*.jsonl
+*.log
+*.log.*
+Archive/
+tmp_*.xlsx
+_tmp_*
+
+# Conserver les gabarits (feuilles vides / modèle Access de structure)
+!modeles/
+!modeles/**
+!modeles/*.xlsx
+!modeles/*.mdb
+!modeles/*.docx
+
+# Rapports et audits générés
+data/*.log
+data/*.log.*
+data/*.jsonl
+data/rapports/
+data/sexe_sync_reports/
+data/_alerts_dump.json
+data/_test_liste_presents_export.xlsx

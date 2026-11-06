@@ -1,0 +1,257 @@
+IMPRESSION — LOT 14 : RESTAURATION DE CONFIGURATION SANS DUMP SQL
+Sources corrigées ; aucun exécutable ou portable généré.
+
+DÉCISION UTILISATEUR ET PROTECTION
+
+Choix confirmé : conserver les chemins actuels du poste et le dossier partagé
+actif ; changer de dossier séparément par la bascule sécurisée du lot 13.
+Dans la restauration sans dump SQL, le profil MySQL actuel est également conservé
+afin de ne pas appliquer les paramètres sur une base puis reconnecter le poste
+à une autre. L'option de remplacement de connexion reste celle du flux avec SQL ;
+dans l'interface, sa conservation est imposée quand MySQL n'est pas sélectionné.
+
+Branche feature/mysql-migration et modifications préexistantes conservées.
+État Git, empreintes et copies avant édition sous build/corrections_20261030_lot14/.
+Aucun reset, commit, nettoyage ou modification des références sources/ du miroir.
+Les essais n'ont modifié aucune donnée réelle : profils et fichiers synthétiques,
+écritures confinées aux dossiers de test, MySQL limité à 127.0.0.1:64062 dont
+@@datadir est vérifié. Les fixtures créent et suppriment uniquement leurs bases UUID.
+Les anciens EXE et ZIP gardent leurs empreintes. Aucun secret réel n'est affiché.
+
+L14-01 — P1 CONFIRMÉ : RÉACTIVATION D'ANCIENS CHEMINS
+
+Emplacements :
+src/sme_gend/services/backup_restore_service.py:467 (_merged_paths_json)
+src/sme_gend/services/configuration_restore.py:249 (restore_configuration_components)
+
+Avant : les clés de chemins absentes du profil local pouvaient revenir depuis
+l'archive, notamment une ancienne lettre de lecteur ou un partage obsolète.
+Le JSON de app_config pouvait aussi remplacer shared_personnel_media sans
+transférer les images récentes vers ce vieux chemin. Deux tests locaux et un
+test natif ont reproduit ces comportements avant correction.
+
+Correction : conserver les chemins locaux et leur absence dans paths.json,
+y compris Access, gabarits, archives, racine médias et dérogation locale.
+Les paramètres MySQL présents et absents sont conservés également dans ce flux.
+Une configuration locale illisible ou non objet provoque un refus explicite,
+au lieu de se transformer en profil vide remplacé par celui de l'archive.
+Les autres préférences sélectionnées continuent d'être restaurées.
+
+La clé partagée shared_personnel_media n'est pas réimportée sans dump SQL ;
+son absence actuelle reste une absence. Aucun dossier archivé n'est créé pour
+la réactiver. client_instance.json reste celui du poste, afin de ne pas cloner
+l'identité de connexion d'un autre ordinateur. Les dérogations locales/env
+existantes gardent leur priorité.
+
+L14-02 — P1 CONFIRMÉ : CONFIGURATION SQL VALIDÉE MALGRÉ UN ÉCHEC DE FICHIERS
+
+Emplacements :
+src/sme_gend/services/backup_restore_service.py:820 (restore_backup)
+src/sme_gend/services/configuration_restore.py:137 (_apply)
+src/sme_gend/services/configuration_restore.py:38 (_sql_gate)
+
+Avant : import_config_rows validait sa transaction puis files.publish publiait
+les fichiers séparément. Une panne de cette publication conservait les nouveaux
+paramètres SQL alors que les fichiers revenaient à leur état précédent.
+Le scénario natif d'échec après publication l'a reproduit avant correction.
+
+Correction : le flux sans instructions SQL est délégué à un service coordonné.
+Les lignes de configuration, un marqueur d'opération et une nouvelle révision
+partagée font partie d'une seule transaction InnoDB. Les fichiers sont préparés
+et leurs originaux conservés avant les mutations SQL ; leur publication est
+achevée avant la validation de cette transaction. Une exception avant commit
+annule les lignes et compense les fichiers sous contrôle de leurs empreintes.
+
+Les paramètres SQL précédents des clés concernées sont conservés dans un fichier
+privé configuration_before.json ; les fichiers initiaux, préparés et l'archive
+stable sont conservés dans la session de récupération. Aucun contenu de ces
+copies potentiellement sensibles n'est recopié dans les messages ou le rapport.
+
+Un verrou de profil sérialise les restaurations de configuration du profil.
+Quand MySQL est nécessaire, le service prend le verrou des médias du lot 13
+et le verrou de maintenance utilisé par la restauration complète. Une autre
+restauration active provoque un refus avant publication. Le moteur app_config
+doit être InnoDB ; aucune conversion de table ou DDL n'est exécutée par ce flux.
+
+Les médias sélectionnés sont résolus sous cette coordination à partir du chemin
+actuellement actif, sans reprendre un cache ancien. Une bascule attend la fin
+de la restauration puis migre ses images restaurées. Un test vérifie la dérogation
+locale explicite, un autre vérifie la sérialisation avec une bascule simultanée.
+
+Les restaurations purement locales restent possibles sans MySQL. L'invalidation
+des caches ne lance plus indirectement une lecture de contexte ni l'initialisation
+de la configuration SQL dans ce cas. Les modules de journaux conservent leur
+domaine de verrouillage distinct.
+
+L14-03 — P1/P2 CONFIRMÉ : REJEU D'ÉTAT OPÉRATIONNEL ET COLLISIONS DE CLÉS
+
+Emplacements :
+src/sme_gend/services/configuration_restore.py:32 (operational_key)
+src/sme_gend/services/configuration_restore.py:61 (_filter_database_keys)
+
+Une restauration de préférences ne doit pas remettre d'anciennes livraisons de
+journaux ni une révision périmée. Les clés shared_data_revision,
+migration_v2_complete et les préfixes audit_mirror: et configuration_restore:
+archivés sont exclus de ce flux, tout comme shared_personnel_media.
+Les demandes de journaux déjà présentes en base restent en place. Une nouvelle
+révision configuration_restore est publiée uniquement avec la transaction réelle.
+
+La conservation des comptes protège aussi leur absence : une archive ne crée
+pas de comptes quand cette option impose de garder l'état actuel. Quand la
+conservation est décochée, le remplacement sélectionné garde son comportement.
+
+Deux tests natifs supplémentaires ont reproduit des collisions de collation :
+une variante accentuée de auth_config contournait la conservation, et deux clés
+différentes en Python désignaient la même ligne MySQL. Le service filtre les
+noms protégés puis les compare selon la collation effective de config_key.
+Des clés dupliquées selon cette collation sont refusées avant publication.
+Les valeurs SQL restent paramétrées ; le nom de collation provient du serveur
+et passe une validation fermée avant son utilisation comme identifiant.
+
+L14-04 — P1 : REPRISE APRÈS INTERRUPTION ET COMMIT INCERTAIN
+
+Emplacements :
+src/sme_gend/services/configuration_restore.py:103 (_committed)
+src/sme_gend/services/configuration_restore.py:215 (_recover_pending)
+src/sme_gend/services/configuration_restore.py:187 (_load_files)
+src/sme_gend/services/restore_files.py:44 (add)
+
+Chaque restauration coordonnée possède un marqueur configuration_restore:<UUID>,
+écrit dans la même transaction que les paramètres. Le journal local est
+synchronisé avant les phases de publication et de commit. Une lecture actuelle
+du marqueur, dans une transaction de lecture explicite avec FOR UPDATE, attend
+la résolution d'un INSERT/COMMIT/ROLLBACK en vol. Elle ne confond pas une ligne
+encore non validée avec une absence définitive. Un test vérifie cette attente.
+
+La preuve ne dépend pas du dernier jeton global : une autre saisie peut le
+remplacer sans effacer le marqueur de cette restauration. Un accusé de commit
+perdu confirmé par ce marqueur produit ConfigurationRestoreCommittedError,
+avec l'instruction de ne pas recommencer. Si l'état ne peut pas être établi,
+la session reste à vérifier, les copies sont conservées et le succès n'est
+pas annoncé.
+
+Avant une nouvelle restauration sans dump SQL, les sessions incomplètes du
+profil sont examinées. Sans commit, les fichiers publiés sont compensés ; avec
+commit, la session est finalisée. Cette reprise n'est pas lancée automatiquement
+au démarrage de l'application. Il faut conserver la connexion de coordination
+et les copies privées pour résoudre une session incomplète.
+
+Les chemins de récupération sont recalculés à partir des composants et des
+racines actuelles. Un dossier déplacé, une autre base, un original altéré,
+un fichier préparé corrompu ou une destination modifiée depuis la publication
+provoque un arrêt pour vérification. Aucun retour arrière ne remplace une
+modification externe dont l'empreinte ne correspond plus à la publication.
+
+Une course sur paths.json a également été reproduite : le fichier pouvait
+changer entre sa fusion et sa copie de sécurité. RestoreFiles.add accepte
+maintenant un cliché attendu ; le service l'utilise pour refuser ce changement
+concurrent au lieu de rétablir des chemins lus trop tôt.
+
+Les marqueurs confirmés sont conservés ; leur purge éventuelle est un travail
+de rétention distinct, à coordonner avec les journaux de récupération.
+
+L14-05 — P1/P2 CONFIRMÉ : FAUX MESSAGE DE SUCCÈS DANS L'INTERFACE
+
+Emplacement :
+src/sme_gend/ui/views/backup_restore_view.py:627 (_finish_restore)
+
+run_with_progress retourne None après avoir affiché une erreur du worker.
+L'appelant ignorait ce résultat et affichait ensuite « Restauration terminée ».
+Le test d'interface a reproduit ce faux succès avant correction.
+L'appelant exige maintenant un résultat réel ; aucun message de succès ni
+rechargement de configuration n'est lancé après None. Le succès avec un
+manifeste valide reste testé. La confirmation de restauration partielle
+explique que les chemins actifs sont conservés sans dump SQL.
+
+TESTS ET CONTRÔLES EXÉCUTÉS
+
+- Dix cas rouges ont été exécutés avant leurs corrections : sept cas initiaux,
+  deux collisions/préservations MySQL et la course de fusion de paths.json.
+- Passe finale hors MySQL : 913 réussis,
+  155 cas natifs différés, 8 avertissements déjà présents,
+  39.1 s.
+- Passe MySQL isolée ciblée : 50 réussis,
+  105 non sélectionnés, 41.63 s.
+  Elle inclut les 16 nouveaux cas natifs, les bascules et signaux précédents,
+  les restaurations complètes pertinentes, le schéma applicatif complet et
+  les scénarios de miroirs/reprise de journaux sélectionnés.
+- Total distinct de ces deux passes finales : 963 tests pytest réussis.
+  Ajouts : 10 cas unitaires et 16 cas natifs ; aucun test supprimé ou neutralisé.
+  Les 155 cas MySQL disponibles n'ont pas tous été réexécutés dans ce lot.
+- Essais supplémentaires avec de vrais processus : arrêt os._exit(91) après
+  publication des fichiers mais avant commit, puis os._exit(92) après commit
+  avant finalisation. Une reprise dans un nouveau processus rétablit BEFORE
+  dans le premier cas et conserve AFTER dans le second, avec chemins actifs
+  inchangés et aucune session restante en attente. MySQL réel et fichiers
+  locaux synthétiques, sans partage SMB réel.
+- Syntaxe de tous les Python, patch inverse en lecture seule, espaces ajoutés,
+  empreintes des sources testées et des anciens EXE/ZIP : validation_summary.json.
+
+Commandes depuis sme_python :
+..\.venv\Scripts\python.exe -B scripts/run_isolated_tests.py tests -q --tb=short --disable-warnings
+..\.venv\Scripts\python.exe -B scripts/run_isolated_tests.py --mysql-test-instance build/corrections_20261029/mysql_test_instance.json tests/integration/test_restore_mysql.py -k "config_lot14 or media_lot13 or sync_lot12 or test_prepared_full_restore_preserves_accounts_dependencies_and_rolls_back_file_failure or test_entire_application_schema_backup_and_restore_is_prepared or test_dump_restore_retains_multiline_unicode_and_binary or mirror or delivery or journal" -q --tb=short --disable-warnings
+
+Les durées sont celles des tests ; aucun gain de rapidité en production n'est
+revendiqué. Les comparaisons de clés ajoutent des lectures SQL sur le petit lot
+de configuration ; la publication et la récupération ajoutent des écritures
+de contrôle justifiées par la fiabilité.
+
+VALIDATION SUR UNE COPIE ET EXPLOITATION
+
+1. Utiliser les mêmes sources corrigées sur les postes. Restaurer une archive
+   contenant des chemins réseau anciens et des lettres différentes : chemins
+   du poste, dérogation locale, profil MySQL et dossier partagé actif restent
+   ceux de l'installation actuelle ; les préférences sélectionnées changent.
+2. Avec une copie de base et un partage de test, sélectionner aussi des photos,
+   lancer une bascule depuis un autre poste et vérifier qu'elle attend puis
+   reprend les images restaurées. Confirmer la mise à jour des autres vues
+   après le signal partagé, hors saisie/modale comme au lot 12.
+3. Tester les droits SMB et la coupure réseau sur ce partage de test. En cas
+   d'incertitude, ne pas répéter la restauration avant vérification. Conserver
+   backups/restore_sessions/<UUID> du profil : source.zip, copies .old/.new,
+   files_recovery.json, configuration_recovery.json et configuration_before.json.
+4. Une nouvelle tentative de restauration sans SQL examine les sessions en
+   attente. Si des fichiers ont été modifiés extérieurement, que le dossier
+   actif a changé ou que la connexion ne correspond plus, la reprise peut
+   exiger une intervention contrôlée. Ne pas forcer les empreintes ni supprimer
+   les marqueurs pour faire disparaître l'erreur.
+5. Les sessions de récupération résident dans les sauvegardes locales du profil.
+   Ne pas recopier automatiquement restore_sessions d'un autre poste/profil
+   pour en déclencher la reprise. Les copies peuvent contenir des paramètres
+   de connexion et comptes : garder leurs ACL privées, ne pas les publier.
+
+LIMITES ET PRIORITÉS RESTANTES
+
+- Ce mécanisme coordonne des transactions et compense des fichiers ; MySQL et
+  le système de fichiers ne constituent pas une transaction distribuée. Après
+  un arrêt brutal avant commit, des fichiers publiés peuvent rester en place
+  jusqu'à la reprise précédant une nouvelle restauration. Les chemins conservés
+  réduisent le risque de reconnecter le poste ailleurs pendant cet intervalle.
+- La panne électrique, la durabilité du stockage, les ACL et les verrous de deux
+  vrais postes SMB ne sont pas validés ici. Une copie de récupération corrompue
+  bloque le retour automatique ; elle ne provoque pas un écrasement aveugle.
+- Les verrous sont coopératifs. Les anciens exécutables, SQL externes et copies
+  manuelles ne sont pas automatiquement raccordés. La restauration complète
+  conserve sa fenêtre de maintenance, autres postes fermés. Son mécanisme
+  préparé et ses règles de remplacement restent ceux du lot 10.
+- Les marqueurs et copies de récupération doivent avoir une politique de
+  rétention contrôlée. Le service ne supprime pas massivement ces éléments.
+- TLS, les autres écritures non couvertes, les avertissements Qt/Pandas et le
+  profilage volumétrique/réseau général restent des chantiers distincts.
+
+CONTRÔLE ET RETOUR ARRIÈRE
+
+Aucune migration de schéma requise : les marqueurs utilisent app_config existant.
+Le format d'archive reste compatible ; les clés techniques anciennes sont
+ignorées dans le flux sans dump SQL plutôt que rejouées.
+Le manifeste et le patch isolent les changements de ce lot par rapport au dépôt
+déjà modifié : changes_manifest.json et corrections_only.patch dans le dossier
+du lot. Les copies baseline/ et les empreintes initiales sont conservées.
+Avant un retour de sources, terminer/vérifier toute restauration en attente et
+sauvegarder le travail ultérieur. Une ancienne version n'exploite pas les
+nouveaux marqueurs : conserver les sessions, sans purger les fichiers de reprise.
+L'applicabilité inverse du patch est vérifiée sans l'appliquer.
+Aucun exécutable généré ; les binaires précédents n'incluent pas ces corrections.
+
+Référence primaire consultée pour la lecture de confirmation verrouillée :
+https://dev.mysql.com/doc/refman/8.0/en/innodb-locking-reads.html

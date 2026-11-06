@@ -1,0 +1,267 @@
+IMPRESSION — LOT 9 : COMPATIBILITÉ ACCESS ET SAUVEGARDE DE CLÔTURE
+Sources corrigées et contrôlées ; aucun exécutable ni portable régénéré.
+
+PÉRIMÈTRE ET PROTECTION
+
+Travail dans sme_python, branche existante feature/mysql-migration conservée.
+Les modifications présentes avant ce lot ont été sauvegardées par fichier avant
+édition. Le patch du lot compare cet état de travail initial avec l'état final,
+sans réinitialisation, commit ni annulation des autres changements.
+
+Aucune base réelle, donnée de production ou configuration utilisateur n'a été
+modifiée par les essais. L'instance MySQL de test écoute uniquement sur loopback,
+port 64062 ; son @@datadir sous build/ a été vérifié. Chaque essai possède sa base
+impression_test_<UUID>, supprimée après utilisation. Les essais ACE utilisent
+uniquement des copies d'un gabarit certifié vide, contrôlé par empreinte SHA-256.
+Les scripts de validation bloquent les autres connexions et écritures externes.
+
+L9-01 — P1 CONFIRMÉ : IDENTITÉ DES NOUVEAUX AGENTS APRÈS ACCESS
+
+Emplacements :
+src/sme_gend/services/access_identity_map.py:62 (write_identity_map)
+src/sme_gend/services/access_identity_map.py:35 (read_identity_map)
+src/sme_gend/services/mysql_bundle_export_to_access.py:354 (_write_liste_generale)
+src/sme_gend/repositories/liste_generale_access_repository.py:63 (fetch_all)
+src/sme_gend/services/mysql_bundle_import.py:132 (copy_referentials_and_satellites_to_mysql)
+
+Cause : l'identité interne GEN-APP-... ne tient pas dans le champ LONG Id du
+gabarit Access. L'ancien export tentait ce texte puis réinsérait sur une autre
+connexion après toute erreur. Le gabarit officiel impose aussi un Id explicite,
+sans AutoNumber. Une identité numérique réimportée pouvait créer un deuxième
+agent, notamment sans matricule ; le test MySQL avant correction l'a reproduit.
+
+Correction : réserver les anciens Id, attribuer des numéros disponibles aux
+seuls nouveaux agents dans le fichier exporté, puis ajouter la table facultative
+locale SGI_AgentIdentity (AccessId, InternalKey). Les agents MySQL conservent leur
+clé durable ; les anciens Id Access ne sont ni renumérotés ni remplacés.
+L'import de la liste et des huit familles satellites traduit la même identité.
+Les correspondances invalides, ambiguës ou dupliquées et les tables dont le type
+ODBC annoncé n'est pas TABLE sont refusées.
+La liste et ses correspondances sont lues avant la purge du mois existant.
+Les archives anciennes sans cette table conservent leur lecture habituelle.
+
+Vérification : réimport sans matricule dans MySQL, huit familles de clés
+satellites en tests unitaires, et cycle réel MySQL → MDB ACE → MySQL. Aucun agent
+supplémentaire ; les fiches mission/maladie/stage restent rattachées à leur agent.
+Une correspondance corrompue est refusée avant la purge : carrière et mission
+du mois synthétique restent présentes. L'identité servant aux noms de photos
+reste stable ; ce dernier contrôle porte sur la clé, pas sur un affichage réseau.
+
+L9-02 — P1 CONFIRMÉ : EXPORT PARTIEL ET GAINS/PERTES D'AUTRES MOIS
+
+Emplacements :
+src/sme_gend/services/mysql_bundle_export_to_access.py:677 (export_mysql_bundle_to_access)
+src/sme_gend/services/mysql_bundle_export_to_access.py:601 (_write_gain_perte)
+src/sme_gend/repositories/gain_perte_access_repository.py:59 (insert_row)
+src/sme_gend/services/safe_paths.py:43 (atomic_destination)
+
+Cause : écriture directe du fichier final, autocommit ACE actif, connexions
+distinctes pour certains INSERT, sélection des mouvements sans filtre mensuel.
+Une interruption pouvait laisser une archive incomplète et des gains/pertes
+d'autres périodes pouvaient entrer dans le fichier exporté.
+
+Correction : copie temporaire .mdb, une transaction et un curseur Access pour
+l'écriture, fermeture explicite avant publication du fichier complet. Le fichier
+final existant est conservé, y compris s'il apparaît pendant l'export. Les
+gains/pertes utilisent la période demandée et les mêmes Id numériques que la
+liste. Une période MySQL absente provoque un refus explicite.
+
+Vérification : interruption injectée en export ACE, aucune archive finale ni
+temporaire publiée ; course sur le nom final, fichier concurrent intact ; export
+septembre contenant le seul mouvement de septembre, octobre préservé en MySQL.
+
+L9-03 — P1 CONFIRMÉ : STAGE D'UN AGENT À IDENTITÉ INTERNE LONGUE
+
+Emplacements :
+src/sme_gend/models/personnel_identity.py:13 (stage_source_access_id)
+src/sme_gend/repositories/mysql_numerique_repository.py (insertion parcours_stage)
+src/sme_gend/services/mysql_access_numerique_import.py (import des stages)
+
+Cause : clé interne de 40 caractères copiée dans une provenance Access limitée
+à 32 caractères. L'essai MySQL natif a échoué avec Data too long.
+Correction : cette provenance facultative reste NULL pour une identité interne ;
+la relation agent_id et la clé canonique de l'agent sont conservées intégralement.
+Aucune troncature et aucune évolution de schéma.
+Vérification : création d'un stage puis export/réimport avec la clé longue ;
+contrôle SQL de la provenance NULL et de l'identité canonique inchangée.
+
+L9-04 — P1 CONFIRMÉ : IDENTIFIANTS DU CLIENT ET ARCHIVES ÉCRASÉES
+
+Emplacements :
+src/sme_gend/services/mysql_private_options.py:49 (private_mysql_options)
+src/sme_gend/services/mysql_private_options.py:8 (_restrict_folder)
+src/sme_gend/services/mysql_backup_service.py:117 (backup_mysql_database)
+
+Cause : mot de passe dans --password=... ; lancement sans délai limite ; nom à
+la seconde réutilisé, puis fichier supprimé si le nouvel essai échouait.
+Ces défauts ont été reproduits par des tests avant correction.
+
+Correction : fichier d'options temporaire privé, ACL Windows appliquée AVANT
+d'y écrire les identifiants (propriétaire, SYSTEM, administrateurs), mode 700/600
+sur POSIX. Le fichier est supprimé après usage. Aucun identifiant de connexion
+dans les arguments ; MYSQL_PWD hérité est retiré de l'environnement du client et
+le fichier de login implicite est isolé. Options correctement échappées ; base
+après le séparateur --. Délai natif de 300 s et fenêtre Windows masquée.
+Les messages utilisateurs ne recopient pas stderr ni le mot de passe.
+
+Les archives portent microsecondes + suffixe aléatoire, sont écrites à côté dans
+un temporaire puis publiées sans écraser un fichier existant. Un échec conserve
+les anciennes sauvegardes et supprime la sortie partielle.
+
+Vérification : échec/timeout/sortie vide du client, erreur ACL avant toute écriture
+du secret, sauvegardes simultanées, conservation de l'ancienne archive. Client
+mysqldump 8.0.40 réel validé avec un compte synthétique et un mot de passe à
+espaces/guillemets/antislash ; restauration exacte par mysql.exe, fichiers privés
+supprimés, vue et procédure conservées. Aucun secret réel n'a été utilisé.
+
+L9-05 — P1 CONFIRMÉ : FIDÉLITÉ ET COHÉRENCE DU REPLI SQL
+
+Emplacements :
+src/sme_gend/services/mysql_backup_service.py:57 (_python_sql_dump)
+src/sme_gend/services/mysql_backup_service.py:42 (_literal)
+src/sme_gend/services/backup_sql.py:86 (validate_restore_statement)
+
+Cause : conversion de bytes via str() et accumulation du dump entier en mémoire.
+La cohérence des lectures dépendait implicitement de l'isolation de connexion,
+sans garantie explicite de cliché (risque si READ COMMITTED est configuré).
+Un Id auto-incrémenté égal à zéro
+pouvait aussi être réattribué pendant la restauration.
+
+Correction : une transaction REPEATABLE READ WITH CONSISTENT SNAPSHOT, lecture
+en flux avec SSCursor ; identifiants SQL protégés et sérialisation fidèle des
+octets, textes UTF-8, décimaux et dates. NO_AUTO_VALUE_ON_ZERO préserve les Id
+zéro. Le dialecte de restauration accepte ces seules nouvelles formes sûres ;
+les instructions SET GLOBAL et expressions étrangères restent refusées.
+Le mode de session du pool est restauré et le cliché de lecture est annulé.
+La sauvegarde refuse une transaction d'écriture active qu'elle pourrait valider.
+
+Le repli refuse les vues, routines, déclencheurs, événements et tables non InnoDB
+qu'il ne peut sauvegarder fidèlement. Le client natif est nécessaire pour les
+objets SQL avancés ; les tables non transactionnelles sont refusées aussi avant
+le dump natif, faute de garantie de cohérence. Ce refus bloque ensuite la clôture.
+
+Vérification native : restauration exacte de bytes 00ff, binaire vide, accents,
+sauts de ligne/guillemets/antislash, décimal, date et Id zéro. Une autre connexion
+modifie deux tables pendant l'écriture du dump : les deux tables restaurées
+présentent le même état antérieur. Le refus du repli sur vue/MyISAM est testé,
+sans publication SQL ni altération des données sources.
+
+Performance : la sauvegarde ne conserve plus toutes les lignes ni tout le texte
+SQL en mémoire. Aucun gain chiffré de temps ou de mémoire n'est revendiqué : ce
+lot n'a pas établi de benchmark volumétrique avant/après comparable.
+
+L9-06 — P1 CONFIRMÉ : CLÔTURE AUTORISÉE SANS SAUVEGARDE
+
+Emplacement :
+src/sme_gend/services/sme_month_closure.py:180 (run_piste_a_month_closure)
+
+Cause : un échec de backup était seulement ajouté aux avertissements, puis les
+mutations de période/session étaient exécutées. Test avant correction en échec.
+Correction : un chemin de sauvegarde existant, non vide et issu du succès du
+service est obligatoire avant _apply_tabsme_closure et la bascule du mois.
+L'échec donne une erreur de clôture explicite. Les copies facultatives Access et
+mise en page déjà créées ne sont pas supprimées ; les données métier ne changent
+pas lorsque la sauvegarde obligatoire échoue.
+Vérification : sauvegarde None, fichier absent et fichier vide ; aucun appel au
+premier traitement mutateur. Les autres tests du flux d'import restent valides.
+
+TESTS EXÉCUTÉS ET RÉSULTATS
+
+Avant correction : 1 test MySQL prouve le doublon au réimport ; 3 tests unitaires
+prouvent l'exposition en arguments, la suppression de l'archive précédente et
+la clôture poursuivie sans backup. Les essais natifs ont également révélé les
+contraintes Id LONG obligatoire et provenance stage 32 caractères ; corrigées.
+
+Après correction :
+- Suite hors MySQL : 825 réussis, 8 avertissements existants,
+  42.37 s ; 94 cas MySQL différés à la passe suivante.
+- Suite MySQL jetable : 94 réussis, aucun ignoré,
+  399.61 s.
+- Total pytest : 919 cas validés, dont 33 nouveaux par rapport au lot 8.
+- Deux validations natives supplémentaires : cycle ACE MDB complet et cycle
+  mysqldump/mysql, avec assertions sur les échecs, la fidélité et le nettoyage.
+- Les prérequis de sauvegarde de sécurité des essais de réimport/restauration
+  sont remplacés par un fichier synthétique pour isoler le scénario. La vraie
+  production et restauration de sauvegarde est vérifiée séparément ci-dessus.
+- Analyse AST des sources/tests/scripts et contrôle de patch décrits dans
+  build/corrections_20261030_lot9/validation_summary.json.
+
+Commandes depuis sme_python (uniquement avec instance jetable vérifiée) :
+..\.venv\Scripts\python.exe -B scripts/run_isolated_tests.py tests -q --tb=short --disable-warnings
+..\.venv\Scripts\python.exe -B scripts/run_isolated_tests.py --mysql-test-instance build/corrections_20261029/mysql_test_instance.json tests/integration/test_restore_mysql.py -q --tb=short --disable-warnings
+
+Les scripts natifs reproductibles sont conservés dans build/corrections_20261030_lot9/
+validate_native_access.py et validate_native_backup.py. Ils supposent l'instance
+jetable, le client MySQL local et le gabarit vide à l'empreinte contrôlée ; ils ne
+doivent pas être adaptés pour pointer vers une base réelle.
+
+CONTRÔLE GIT ET LIVRABLES
+
+build/corrections_20261030_lot9/baseline/ : copies avant modification.
+changes_manifest.json : fichiers, empreintes avant/après et lignes ajoutées/retirées.
+corrections_only.patch : uniquement le présent lot, comparé à l'état initial sale.
+validation_summary.json : résultats, contrôles et empreintes des binaires inchangés.
+git_status_before.bin / git_status_after.bin : inventaires Git sans impression
+des contenus de configuration. Aucun commit, reset ou nettoyage des autres travaux.
+
+Le lot touche 13 fichiers source, 3 fichiers de tests et ce rapport. Les trois
+nouveaux fichiers de code/tests sont access_identity_map.py,
+mysql_private_options.py et test_access_identity_roundtrip.py.
+
+COMPATIBILITÉ, VALIDATION ET RETOUR ARRIÈRE
+
+Aucune migration du schéma MySQL n'est requise et aucun identifiant existant
+n'est réécrit. La nouvelle table Access est créée uniquement dans la copie
+exportée. Les anciens outils peuvent ignorer cette table ; s'ils la suppriment,
+ils perdent la correspondance nécessaire au retour vers l'identité interne.
+Une archive ancienne qui avait déjà perdu cette information ne permet pas de
+reconstruire automatiquement l'identité sans ambiguïté, surtout sans matricule.
+
+Avant usage métier, valider en préproduction : créer un agent sans matricule,
+ajouter une mission/un stage, exporter le mois, réimporter ce même fichier et
+contrôler un seul dossier, ses détails et le mois adjacent. Refaire une clôture
+sur copie et vérifier l'archive SQL en restaurant dans une autre base jetable.
+Un dump natif se restaure avec le client MySQL ; il n'est pas une archive ZIP
+de restauration applicative. La restauration du dialecte interne est aussi
+testée via l'exécuteur dédié. Aucun outil n'est lancé sur la base réelle ici.
+
+Pour revenir sur les sources, conserver d'abord l'état courant et comparer le
+patch/baseline du lot. L'inversion du patch doit être vérifiée sur une copie ;
+ne pas écraser des changements postérieurs. Un retour au code ancien perd la
+lecture de SGI_AgentIdentity : ne pas y réimporter les nouvelles archives.
+
+LIMITES ET PROCHAINS LOTS
+
+1. La restauration complète DROP/CREATE reste non atomique, selon la décision
+   métier antérieure. La sauvegarde préalable et les erreurs explicites sont
+   maintenues ; une bascule de restauration sûre reste un chantier distinct.
+2. La clôture comprend encore plusieurs transactions de statut/session après
+   le backup. Ce lot sécurise son préalable, sans prétendre rendre toute la
+   transition atomique ni empêcher toutes les saisies après le début du cliché.
+3. Les sauvegardes transactionnelles supposent l'absence de DDL concurrente
+   (ALTER/CREATE/DROP/RENAME/TRUNCATE). Prévoir une fenêtre sans migrations ;
+   le cliché InnoDB protège les écritures de données concurrentes testées.
+4. L'archive SQL contient les données métier et comptes applicatifs sauvegardés.
+   Elle n'est pas chiffrée : les droits/rétention du dossier d'archives restent à
+   administrer. La correction ne promet pas une résistance aux administrateurs
+   de la machine ni une durabilité contre toute panne matérielle.
+5. À confirmer sur deux postes réels : visibilité des photos sur le partage UNC,
+   droits Windows et rafraîchissement multi-poste. Le test de ce lot vérifie la
+   stabilité des identités photo ; il ne simule pas un partage SMB distant réel.
+6. TLS MySQL avec validation de certificat reste à déployer. L'encodage de
+   certains mots de passe non ASCII échoue encore dans la connexion PyMySQL
+   existante (constat reproduit sur compte synthétique). Unifier cet encodage
+   exige une validation transversale de compatibilité des comptes ; non modifié.
+7. Le format Access ancien ne représente pas tous les champs/historiques du
+   dossier RH moderne. La correspondance d'identité ne rend pas cet export
+   équivalent à une sauvegarde complète MySQL, photos et paramètres.
+8. Aucun exécutable généré : les corrections présentes dans les sources ne sont
+   pas incorporées à l'ancien portable. Ses empreintes ont été contrôlées.
+
+Références primaires consultées pour les garanties et leurs limites :
+https://dev.mysql.com/doc/refman/8.0/en/mysqldump.html
+(cliché InnoDB, lecture --quick, limites DDL concurrente et restauration mysql).
+https://dev.mysql.com/doc/refman/8.0/en/mysql-config-editor.html
+(MYSQL_TEST_LOGIN_FILE pour isoler le fichier de connexion implicite).
+https://dev.mysql.com/doc/refman/8.0/en/option-files.html
+(fichiers d'options et échappement des valeurs).

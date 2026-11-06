@@ -1,0 +1,146 @@
+IMPRESSION — TRANSACTIONS INTERROMPUES ET POOL MYSQL — LOT 17 — 30/10/2026
+
+Périmètre et protection
+Racine : C:\Users\MONSTER\Desktop\GN\Impression\sme_python.
+Branche feature/mysql-migration conservée ; dépôt déjà modifié au début du lot.
+Aucun commit, reset, nettoyage massif, modification des données réelles ni accès
+à une base de production. Les fichiers sources et les travaux antérieurs sont
+comparés aux empreintes enregistrées avant ce lot ; seuls les ajouts ci-dessous
+sont inclus dans corrections_only.patch. Les anciens EXE/ZIP sont contrôlés par
+SHA-256 et ne sont pas régénérés. Aucune migration ni nouvelle dépendance.
+
+Fichiers concernés
+- src/sme_gend/repositories/mysql_pool.py : connexion persistante du thread
+  principal, pool borné des tâches de fond, validation/annulation et restitution.
+- tests/test_mysql_pool_interruptions.py : 41 nouveaux cas unitaires isolés.
+- tests/integration/test_restore_mysql.py : 7 nouveaux cas natifs MySQL.
+- Le présent rapport. Les copies avant modification sont dans baseline/ du lot.
+
+L17-01 — P1 confirmé — transaction interrompue validée par l'opération suivante
+Emplacement : mysql_pool.py:304 (pooled_connection).
+Cause racine : les gestionnaires except Exception ne traitaient pas les sorties
+KeyboardInterrupt, SystemExit et GeneratorExit. Le worker Qt intercepte pourtant
+BaseException et peut continuer à fonctionner après l'échec de la tâche.
+Sur le thread principal, la connexion conservait la transaction ouverte ; le
+commit de l'opération suivante validait aussi la saisie abandonnée. Dans un
+worker, la connexion empruntée restait hors file avec sa transaction ouverte.
+Reproduction native avant correction : INSERT 1, interruption, puis INSERT 2 ;
+SELECT retournait (1,2) au lieu de (2) sur le thread principal. Dans le worker,
+SERVER_STATUS_IN_TRANS restait positionné sur la connexion abandonnée.
+Correction : traitement de toutes les sorties exceptionnelles pour le seul
+nettoyage transactionnel ; rollback puis propagation de l'interruption originale.
+Les connexions de fond concernées sont retirées et fermées. Une connexion de
+lecture interrompue est également exclue de son cache/pool. Aucun corps métier
+ni commit n'est rejoué automatiquement.
+Tests : 6 cas unitaires écriture, 6 lecture, 6 interruptions de commit ; 6 cas
+MySQL natifs sur les deux modes de connexion. Les hooks après commit de l'opération
+annulée ne s'exécutent pas ; ceux de l'opération suivante s'exécutent une fois.
+
+L17-02 — P1 confirmé — réutilisation après échec d'annulation
+Emplacements : mysql_pool.py:304,
+mysql_pool.py:103 (_discard_main_connection).
+Cause : un échec de rollback était ignoré et la connexion principale restait
+dans son cache. Si elle restait utilisable, le commit suivant validait des
+changements qui auraient dû être abandonnés.
+Reproduction native : le rollback est défaillant après INSERT 1, la connexion
+est toujours ouverte ; une opération distincte INSERT 2 validait les deux lignes.
+Correction : retrait immédiat du cache et fermeture de cette connexion. La
+prochaine opération en crée une autre. Un avertissement explicite indique
+l'échec d'annulation, sans recopier le texte potentiellement sensible du pilote.
+L'erreur métier initiale reste l'erreur propagée, même si rollback et close
+échouent à leur tour. Une fermeture échouée n'autorise aucune remise dans le pool.
+Tests : identité de l'exception, nouveau client au prochain emprunt, absence de
+commit sur l'ancienne connexion, retrait même si close lève une autre interruption,
+journal sans détail sensible ; un cas natif prouve que seule la ligne 2 subsiste.
+
+L17-03 — P2 confirmé — places de pool et connexions perdues pendant l'acquisition
+Emplacements : mysql_pool.py:111 (_BoundedPool),
+mysql_pool.py:80 (_new_connection),
+mysql_pool.py:234 (_main_thread_connection).
+Cause : une interruption durant la création réservait une place sans la rendre ;
+une interruption lors du réglage READ ONLY ne fermait pas le nouveau client.
+Les contrôles de santé interrompus pouvaient également retirer une connexion de
+la file d'attente sans la fermer ni rendre sa place.
+Conséquence : après plusieurs occurrences, saturation artificielle du pool,
+attentes pouvant atteindre le délai d'emprunt existant et transactions retenues.
+Correction : libération de la réservation, fermeture du client en initialisation
+échouée, retrait et comptage correct après interruption du contrôle de santé,
+y compris après attente d'une connexion rendue par un autre thread.
+Tests : création et réglage lecture seule interrompus, contrôles principal/fond,
+file déjà disponible ou attente réelle entre deux threads, nouvel emprunt possible.
+
+Vérifications exécutées
+- Avant correction : 13 cas unitaires échoués en 0,50 s et 7 cas MySQL échoués
+  en 3,36 s. Les lignes validées à tort et transactions abandonnées ont été observées.
+- Après correction, tests ciblés : 47 réussis (41 nouveaux et 6 contrôles du
+  cache/pool existants), puis 7 cas MySQL réussis.
+- Suite unitaire complète finale : 980 réussis en 63,47 s ; 8 avertissements déjà
+  présents au lot précédent (dépréciations, non masquées par le code).
+- Suite MySQL native complète finale : 164 réussis en 655.88 s,
+  aucun cas ignoré ou désélectionné. Elle inclut imports/réimports, historiques,
+  écritures concurrentes, exports, clôture, sauvegardes, restauration, journaux,
+  synchronisation et coordination du dossier partagé déjà couverts par le dépôt.
+- Total pytest final : 1144 cas réussis ; 48 nouveaux cas dans ce lot.
+- Essai supplémentaire dans un processus isolé avec le vrai FunctionWorker Qt :
+  une écriture lève KeyboardInterrupt ; le signal failed est reçu, la ligne est
+  absente et la place de pool récupérée. Une seconde tâche réussit, sa ligne et
+  son hook après commit apparaissent une seule fois. Qt hors écran et MySQL réels,
+  pas de serveur ou dossier SMB distant.
+- Les tests bloquent le réseau hors 127.0.0.1:64062 et les écritures hors profils
+  temporaires. La fixture vérifie le datadir sous build et crée/supprime ses seules
+  bases UUID de test. L'instance jetable est arrêtée après les contrôles.
+
+Les commandes exactes, durées, profils, preuve du worker Qt et contrôles sont
+consignés dans build/corrections_20261030_lot17/validation_summary.json.
+validate_qt_pool_worker.py permet de relire/rejouer l'essai avec l'instance jetable
+contrôlée ; ne pas modifier ses protections pour viser une base réelle.
+changes_manifest.json et corrections_only.patch isolent les modifications du lot.
+
+Performances, compatibilité et limites
+La correction rend les places réservées et évite leur saturation artificielle.
+Aucun gain de vitesse globale ni benchmark avant/après comparable revendiqué.
+Les 30 secondes de délai d'emprunt, la taille maximale, les options de lecture,
+les paramètres d'authentification et les règles métier restent les mêmes.
+Une annulation réussie conserve la réutilisation normale de la connexion principale.
+Les signatures publiques, le schéma et les formats de données sont compatibles.
+Le nettoyage n'absorbe pas l'interruption de l'opération : elle est propagée.
+
+Ces gestionnaires s'exécutent quand Python peut dérouler ses contextes. Ils ne
+garantissent pas un nettoyage local après panne électrique, arrêt forcé du
+processus, corruption mémoire ou terminate() d'un thread. Une connexion fermée
+ne peut pas défaire un commit que le serveur aurait déjà validé avant perte de
+l'acquittement. Aucun nouvel automatisme de relance n'est ajouté ; les marqueurs
+de reprise métier existants restent nécessaires pour les opérations concernées.
+Si le pilote refuse aussi la fermeture, la connexion est exclue du pool mais
+sa fermeture distante et la libération de ses verrous dépendent du serveur et
+de ses délais ; l'avertissement doit être examiné.
+La suite existante n'est pas une preuve de couverture exhaustive des modules.
+
+Priorités encore ouvertes, sans confondre les lots déjà terminés
+1. Validation terrain SMB/lettres de lecteurs, coupures et droits entre les vrais
+   postes : impossible actuellement, les PC ne sont pas accessibles. Le kit du
+   lot 15 et docs/VALIDATION_SMB_POSTES_20261030.txt restent prêts pour cette étape.
+2. TLS MySQL avec CA et nom de serveur vérifiés : nécessite la préparation du
+   déploiement ; aucun certificat ni option imposés à la connexion existante.
+3. Compatibilité de certains mots de passe MySQL non ASCII : le comportement
+   Latin-1 du pilote et les clients natifs doivent être conciliés sans rendre
+   inutilisables d'anciens comptes. Aucun secret réel lu, modifié ou journalisé.
+4. Poursuivre l'inventaire et les tests des écritures directes hors chemins déjà
+   couverts, ainsi que du cycle de vie des autres workers Qt et des gros exports.
+   Leur absence de bug n'est pas déduite de ce lot consacré au pool.
+5. Profilage volumétrique local/réseau, dépréciations Qt/Pandas et simplification
+   progressive des grandes fonctions ; pas de refonte ni optimisation non mesurée.
+La restauration complète préparée, la clôture transactionnelle, la reprise des
+miroirs, les chemins partagés, la restauration de configuration seule et les
+contentions de renommage possèdent leurs corrections antérieures : leurs
+limitations de déploiement ne signifient pas que ces corrections sont absentes.
+
+Validation et retour arrière
+En préproduction, interrompre une tâche sur données synthétiques puis effectuer
+une saisie distincte ; seule la seconde doit être enregistrée et notifiée.
+Sur erreur d'annulation, contrôler le diagnostic plutôt que relancer aveuglément
+l'opération métier ; vérifier les journaux centraux si le commit est incertain.
+Aucun déploiement ni exécutable dans ce lot. Pour un éventuel retour sur les
+sources, sauvegarder l'état courant, comparer le manifeste et vérifier le patch
+inversé sur une copie. Ne pas réinitialiser le dépôt ni écraser des modifications
+postérieures. Aucune migration de données ou restauration réelle à exécuter.

@@ -1,0 +1,114 @@
+IMPRESSION — ÉCRITURES MYSQL AVEC FILTRE MENSUEL — LOT 18 — 30/10/2026
+
+Périmètre et protections
+Branche feature/mysql-migration, après clôture validée du lot 17.
+Aucun fichier utilisateur ou base réelle modifié ; MySQL 8.0.40 jetable vérifié
+sur 127.0.0.1:64062. Aucune migration, nouvelle dépendance, compilation ou archive
+portable produite. Modifications préexistantes conservées et contrôlées par empreinte.
+
+Fichiers concernés
+src/sme_gend/config/liste_generale_scope.py : filtre dédié aux UPDATE.
+src/sme_gend/repositories/mysql_organigram_repository.py : déplacement,
+  rattachement et renommage des subdivisions.
+src/sme_gend/repositories/mysql_agent_repository.py : rattrapage de structure_id,
+  modification du code structure et renommage des subdivisions, y compris vides.
+src/sme_gend/repositories/mysql_bundle_repositories.py : renommage du référentiel
+  des positions administratives, libellé et clé étrangère dans les carrières.
+tests/integration/test_restore_mysql.py : 26 nouveaux scénarios natifs.
+Le présent rapport. Les autres écrans et règles métier ne sont pas remaniés.
+
+L18-01 — P1 confirmé — ordre des paramètres dans les écritures mensuelles
+Emplacements : MySQLOrganigramRepository.move_subdivision_to_structure,
+attach_subdivision_from_data, rename_subdivision ;
+MySQLAgentRepository.backfill_structure_id_for_code, update_structure_column,
+rename_subarme_for_structure ; MySQLPadminRepository.update.
+Cause : les paramètres du filtre de mois étaient placés en tête du tuple,
+avant ceux du SET ou du JOIN, contrairement à l'ordre des marqueurs SQL.
+Sans filtre, le tuple vide masquait l'erreur. Avec un mois, des dates et codes
+étaient liés aux mauvais marqueurs : erreur MySQL 1292 observée dans les tests.
+Correction : ordre JOIN, SET, WHERE conforme à chaque requête, sans modifier les
+valeurs, les conditions fonctionnelles, les identifiants ou le paramétrage SQL.
+Vérification : périodes septembre et octobre synthétiques ; seul le segment
+sélectionné est modifié et les valeurs de carrière du mois voisin sont conservées.
+Les cas sans filtre continuent de cibler est_actuelle=1.
+
+L18-02 — P1 confirmé — alias absent pour le renommage des positions
+Emplacement : MySQLPadminRepository.update, les deux UPDATE carriere_situation.
+Cause : le filtre employait c.est_actuelle / c.sme_periode_id, mais la table cible
+ne déclarait pas l'alias c. Erreur MySQL 1054 reproduite, avec et sans filtre.
+Correction : déclaration de l'alias sur les deux requêtes ; maintien de la
+transaction existante entre les carrières et le référentiel.
+Tests : nouveau libellé, options du référentiel et FK corrects ; panne déclenchée
+au deuxième UPDATE après modification du libellé et du référentiel : tout est annulé.
+
+L18-03 — P1 confirmé — restriction MySQL 1093 masquée par les erreurs précédentes
+Emplacement : config/liste_generale_scope.py, nouveau
+carriere_write_scope_for_settings ; adoption dans les seules écritures précitées.
+Après correction des paramètres, MySQL refusait encore les requêtes filtrées :
+le filtre de lecture contient des sous-requêtes relisant carriere_situation,
+qui est aussi la table cible de l'UPDATE. Erreur 1093 reproduite sur 13 scénarios.
+Correction : calcul du même filtre dans une table dérivée de clés, matérialisée
+par SELECT DISTINCT, puis c.id IN (...). Cette matérialisation empêche la fusion
+du bloc dérivé, y compris lorsque derived_merge est activé. Références :
+https://docs.oracle.com/cd/E17952_01/mysql-8.0-en/derived-table-optimization.html
+https://docs.oracle.com/cd/E17952_01/mysql-8.0-en/update.html
+Le filtre de lecture original reste identique. Aucun changement d'optimizer_switch
+dans le code applicatif, aucune lecture préalable séparée d'IDs, aucun grand tableau
+d'IDs chargé en Python, aucune table ou colonne persistante créée.
+Sans filtre mensuel, le prédicat simple existant reste utilisé.
+
+Tests et preuves
+Avant correction, 19 cas exécutés sur les sources initiales : 11 échouaient et
+8 passaient. Après le seul réordonnancement/alias, 13 échecs 1093 sur 22 cas ont
+révélé la troisième cause ; aucun test affaibli pour la contourner.
+Après la correction du filtre, les 22 premiers cas ont passé ; 4 cas supplémentaires
+comparent les IDs de lecture et d'écriture sur dates absentes, segments voisins,
+segments hors période et données legacy, avec derived_merge activé puis désactivé.
+Les paramètres d'optimisation sont inchangés par l'application et restaurés par
+le test. Les essais de rattachement isolent une référence existante déjà résolue ;
+ils ne remplacent pas les tests de toute la hiérarchie ETL.
+
+Validation finale de ce lot, sur les mêmes sources sans changement ultérieur :
+- 980 tests unitaires réussis en 56.49 s ; 8 avertissements préexistants.
+- 33 tests MySQL ciblés réussis en 19.29 s : les 26 nouveaux cas
+  et les 7 cas d'interruption/rollback du lot 17. 157 autres cas non rejoués ici.
+- Le lot 17 avait auparavant validé toute la suite MySQL : 164 réussis en
+  655,88 s. Son pool n'a pas changé depuis ; cette validation complète concerne
+  l'état du lot 17, elle n'est pas présentée comme une passe complète des 190
+  cas natifs disponibles après les ajouts du lot 18.
+- Syntaxe de tous les fichiers Python et validité du patch contrôlées ; sources,
+  tests, scripts et documentation préexistants protégés par empreintes.
+- Les bases UUID de test sont supprimées par leurs fixtures ; le serveur jetable
+  est arrêté à la fin. Aucun MySQL, fichier Access ou photo réel n'est utilisé.
+
+Performances et limites
+Il s'agit de corrections de justesse, pas d'un gain de vitesse mesuré. La table
+dérivée a un coût de matérialisation côté MySQL ; pas de benchmark volumétrique
+comparable ni d'index/migration ajouté. MySQL 8.0.40 est testé ; les autres versions
+et MariaDB ne sont pas déclarés validés par ces essais.
+Les référentiels restent globaux comme auparavant. Protéger les lignes de carrière
+du mois voisin ne crée pas une version historique indépendante des référentiels.
+Les comportements de concurrence des autres éditeurs, les droits d'interface et
+les notifications de toutes les écritures directes ne sont pas certifiés par ce lot.
+
+Chantiers encore ouverts
+- Validation SMB réelle, lettres de lecteurs, permissions et interruptions réseau :
+  impossible tant que les PC de travail ne sont pas accessibles ; kit existant prêt.
+- TLS MySQL avec CA/nom serveur et compatibilité des mots de passe non ASCII :
+  préparation du déploiement et validation des comptes existants encore nécessaires.
+- Poursuivre la couverture des autres écritures directes, notifications de révision,
+  conflits de saisie et cycle de vie des workers ; ce lot ne les déclare pas corrigés.
+- Profilage volumétrique, gros exports, dépréciations Qt/Pandas et maintenance
+  progressive des grandes fonctions, sans refonte ni gains inventés.
+
+Contrôle et validation métier
+build/corrections_20261030_lot18/changes_manifest.json et corrections_only.patch
+isolent ce lot. validation_summary.json contient commandes, résultats, contrôles
+et empreintes des anciens exécutables inchangés. baseline/ conserve les originaux.
+En préproduction, vérifier un déplacement/rattachement/renommage sur une copie
+du mois puis contrôler les lignes du mois voisin ; vérifier aussi le renommage
+d'une position dans le référentiel. Ne pas utiliser ces essais pour modifier
+une archive réelle pendant cet audit de corrections.
+Avant tout retour de sources, sauvegarder l'état courant et vérifier le patch
+inversé sur une copie ; ne pas réinitialiser le dépôt ou écraser un travail
+postérieur. Aucune migration de données à annuler. Aucun exécutable généré.
