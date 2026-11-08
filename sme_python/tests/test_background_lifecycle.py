@@ -118,8 +118,10 @@ def test_specialized_read_workers_outlive_their_view_safely(app,monkeypatch,kind
     entered=Event();release=Event();done=Event();received=[];parent=QWidget()
     def slow(*args,**kwargs):entered.set();release.wait(2);done.set();return 'synthetic'
     if kind=='preview':
-        from sme_gend.ui.views.liste_present_view import _ListePresentPreviewWorker
-        worker=_ListePresentPreviewWorker(SimpleNamespace(build_preview_html=slow),None,1,parent)
+        from sme_gend.ui.views import liste_present_view
+        monkeypatch.setattr(liste_present_view,'capture_outline',slow)
+        monkeypatch.setattr(liste_present_view,'render_outline',lambda snapshot,search_filter=None:snapshot)
+        worker=liste_present_view._ListePresentPreviewWorker(SimpleNamespace(),None,1,parent)
         signal=worker.succeeded
     else:
         from sme_gend.ui.views.personnel_list_view import _CareerAlertsScanWorker

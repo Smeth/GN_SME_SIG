@@ -14,15 +14,20 @@ def app():
 
 
 @pytest.mark.parametrize('legacy_mode',['stage_interne','les_deux'])
-def test_preview_worker_ignores_legacy_stage_configuration(app,legacy_mode):
+def test_preview_worker_ignores_legacy_stage_configuration(app,monkeypatch,legacy_mode):
     requested=[]
-    def build(search,mode,**kwargs):
-        requested.append((search,mode));return '<p>SYNTHETIC PRESENTS</p>'
-    service=SimpleNamespace(build_preview_html=build,presences_mode=legacy_mode,
+    def capture(service,**kwargs):
+        requested.append(('capture',service));return SimpleNamespace(html='<p>SYNTHETIC RUBRICS</p>')
+    def render(snapshot,search_filter=None):
+        requested.append(('render',search_filter));return snapshot.html
+    monkeypatch.setattr(ui,'capture_outline',capture)
+    monkeypatch.setattr(ui,'render_outline',render)
+    service=SimpleNamespace(build_preview_html=Mock(side_effect=AssertionError('No personnel preview')),presences_mode=legacy_mode,
                             config=SimpleNamespace(presences_mode=legacy_mode))
     worker=ui._ListePresentPreviewWorker(service,'SYNTHETIC FILTER',1)
     worker.run()
-    assert requested==[('SYNTHETIC FILTER','present')]
+    assert requested==[('capture',service),('render','SYNTHETIC FILTER')]
+    service.build_preview_html.assert_not_called()
 
 
 def test_pdf_does_not_accept_the_mode_from_an_old_stage_snapshot(app,monkeypatch,tmp_path):
@@ -31,12 +36,14 @@ def test_pdf_does_not_accept_the_mode_from_an_old_stage_snapshot(app,monkeypatch
     def validate(value,*,search_filter,presences_mode):
         modes.append(presences_mode)
         if value.presence!=presences_mode:raise ValueError('Ancien mode de présence : actualisez.')
-    service=SimpleNamespace(validate_snapshot=validate,render_snapshot_html=Mock())
-    view=SimpleNamespace(_loaded=True,_refresh_busy=False,_preview_snapshot=snapshot,
+    service=SimpleNamespace(validate_snapshot=validate,render_snapshot_html=Mock(),capture_snapshot=Mock(return_value=snapshot))
+    view=SimpleNamespace(_loaded=True,_refresh_busy=False,_preview_snapshot=SimpleNamespace(),
+                         _preview_generation=1,_render_generation=1,
                          _last_html='<p>OLD STAGE PREVIEW</p>',_service=service,_set_status=Mock())
     monkeypatch.setattr('sme_gend.services.auth_guard.require_permission',lambda *a:True)
     monkeypatch.setattr(ui.QFileDialog,'getSaveFileName',lambda *a,**kw:(str(tmp_path/'present.pdf'),''))
     monkeypatch.setattr(ui,'confirm_overwrite_file',lambda *a:True)
+    monkeypatch.setattr(ui,'run_with_progress',lambda parent,title,text,work:work())
     errors=[];monkeypatch.setattr(ui.QMessageBox,'critical',lambda *a:errors.append(a[-1]))
     ui.ListePresentView._export_pdf(view)
     assert modes==['present'] and errors
@@ -44,10 +51,11 @@ def test_pdf_does_not_accept_the_mode_from_an_old_stage_snapshot(app,monkeypatch
 
 
 def test_excel_keeps_its_fixed_mode_instead_of_an_old_snapshot_mode(app,monkeypatch,tmp_path):
-    snapshot=SimpleNamespace(search='',presence='les_deux')
+    snapshot=SimpleNamespace(search='RUBRIC SEARCH',presence='les_deux')
     requested=[]
     service=SimpleNamespace(export_excel=lambda destination,**kw:requested.append(kw))
     view=SimpleNamespace(_loaded=True,_refresh_busy=False,_preview_snapshot=snapshot,
+                         _preview_generation=1,_render_generation=1,
                          _service=service,_set_status=Mock())
     monkeypatch.setattr('sme_gend.services.auth_guard.require_permission',lambda *a:True)
     monkeypatch.setattr(ui.QFileDialog,'getSaveFileName',lambda *a,**kw:(str(tmp_path/'present.xlsx'),''))
@@ -56,6 +64,8 @@ def test_excel_keeps_its_fixed_mode_instead_of_an_old_snapshot_mode(app,monkeypa
     monkeypatch.setattr(ui.QMessageBox,'information',lambda *a:None)
     ui.ListePresentView._export_excel(view)
     assert requested[0]['presences_mode']=='present'
+    assert requested[0].get('snapshot') is None
+    assert requested[0].get('search_filter') is None
 
 
 def test_subdivision_sort_uses_the_single_strict_present_count(app):

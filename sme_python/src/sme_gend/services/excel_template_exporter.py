@@ -10,7 +10,7 @@ from pathlib import Path
 
 from sme_gend.services.excel_style_helpers import write_cell_value, write_literal_cell_value, writable_cell, fit_wrapped_row, configure_table_print
 from openpyxl import Workbook, load_workbook
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import column_index_from_string, get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from sme_gend.models.liste_generale import ListeGeneraleRow
@@ -64,10 +64,21 @@ def _copy_merges_for_rows(tpl_ws: Worksheet, dst_ws: Worksheet, max_src_row: int
 
 
 def _copy_column_widths(tpl_ws: Worksheet, dst_ws: Worksheet, ncol: int) -> None:
-    for c in range(1, ncol + 1):
-        col_letter = get_column_letter(c)
-        if col_letter in tpl_ws.column_dimensions:
-            dst_ws.column_dimensions[col_letter].width = tpl_ws.column_dimensions[col_letter].width
+    # Excel may store one dimension for several columns (e.g. A:B). Copying
+    # only the keyed column loses the width of the remaining columns.
+    for col_letter, source in tpl_ws.column_dimensions.items():
+        first = source.min or column_index_from_string(col_letter)
+        last = source.max or first
+        if first > ncol:
+            continue
+        dimension = copy(source)
+        dimension.parent = dst_ws
+        dimension.min, dimension.max = first, min(last, ncol)
+        # Style IDs belong to the source workbook. Register the actual style
+        # components in the destination instead of retaining those IDs.
+        dimension._style = None
+        _apply_cell_style(source, dimension)
+        dst_ws.column_dimensions[col_letter] = dimension
 
 
 def _write_merged_rubric_row(
@@ -123,6 +134,16 @@ def export_liste_fidele(
         out_ws.row_dimensions[r].height = tpl_ws.row_dimensions[r].height
     _copy_merges_for_rows(tpl_ws, out_ws, layout.header_row)
     _copy_column_widths(tpl_ws, out_ws, ncol)
+    out_ws.sheet_format = copy(tpl_ws.sheet_format)
+    view = copy(tpl_ws.sheet_view)
+    # Retain the model's display mode and zoom, but open the newly generated
+    # document at its beginning rather than the model's old personnel row.
+    view.topLeftCell = None
+    view.selection = out_ws.sheet_view.selection
+    view.pane = None
+    view.tabSelected = None
+    view.workbookViewId = 0
+    out_ws.views.sheetView = [view]
     out_ws.page_setup = copy(tpl_ws.page_setup)
     out_ws.page_setup._parent = out_ws
     # Printer-driver binary relationships belong to the source package. The

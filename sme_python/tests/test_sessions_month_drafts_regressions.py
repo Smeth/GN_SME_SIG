@@ -34,7 +34,7 @@ def test_quick_panel_draft_is_protected_from_runtime_reload(app):
     from sme_gend.ui.views.liste_present_view import _QuickEditPanel, ListePresentView
     from sme_gend.ui.shell_window import ShellWindow
     fresh=layout()
-    svc=SimpleNamespace(load=lambda:deepcopy(fresh), all_structure_designations=lambda:{},
+    svc=SimpleNamespace(load=lambda **kwargs:deepcopy(fresh), all_structure_designations=lambda:{},
                         present_counts_by_structure=lambda:{},database_structure_codes=lambda:set())
     view=ListePresentView(SimpleNamespace(), layout_cfg=svc)
     panel=_QuickEditPanel(svc, lambda:None); panel._populate()

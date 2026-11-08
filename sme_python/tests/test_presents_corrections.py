@@ -22,7 +22,7 @@ def config():
 def test_title_and_checkbox_draft_survive_switch_before_autosave(app):
     from sme_gend.ui.views.liste_present_view import _QuickEditPanel
     cfg = config()
-    panel = _QuickEditPanel(SimpleNamespace(load=lambda: cfg), lambda: None)
+    panel = _QuickEditPanel(SimpleNamespace(load=lambda **kwargs: cfg), lambda: None)
     panel._populate()
     panel._le_titre1.setText('New A')
     panel._chk_sub.setChecked(False)
@@ -39,7 +39,7 @@ def test_save_conflict_preserves_draft_and_reports_failure(app):
     from sme_gend.repositories.reference_write_guard import ReferenceConflictError
     cfg = config(); saved = []
     def fail(cfg): raise ReferenceConflictError('Reload required')
-    panel = _QuickEditPanel(SimpleNamespace(load=lambda: cfg, save=fail), lambda: saved.append(True))
+    panel = _QuickEditPanel(SimpleNamespace(load=lambda **kwargs: cfg, save=fail), lambda: saved.append(True))
     panel._populate(); panel._le_titre1.setText('Draft')
     assert panel._do_save() is False
     assert cfg.sections[0].title_main_override == 'Draft' and not saved
@@ -106,14 +106,16 @@ def test_database_rename_requires_both_layout_and_personnel_rights(monkeypatch):
         service.merge_subarmes_in_database(config(), 'A', ['SOURCE'], 'TARGET')
 
 
-def test_pdf_uses_detailed_html_when_preview_is_summary(tmp_path, app, monkeypatch):
+def test_pdf_loads_and_renders_all_personnel_when_preview_contains_only_rubrics(tmp_path, app, monkeypatch):
     from sme_gend.ui.views import liste_present_view as ui
     from sme_gend.services.liste_present_service import ListePresentService
     snap = snapshot(tmp_path)
     service = ListePresentService.__new__(ListePresentService); service.PREVIEW_MAX_DETAIL_ROWS = 2
     service._settings = snap.settings
-    view = SimpleNamespace(_loaded=True, _refresh_busy=False, _last_html='SYNTHETIC SUMMARY',
-        _preview_snapshot=snap, _service=service, _set_status=lambda *a: None)
+    service._layout_config = SimpleNamespace()
+    service.capture_snapshot = lambda **kwargs: snap
+    view = SimpleNamespace(_loaded=True, _refresh_busy=False, _last_html='SYNTHETIC RUBRICS',
+        _preview_snapshot=SimpleNamespace(), _service=service, _set_status=lambda *a: None)
     monkeypatch.setattr('sme_gend.services.auth_guard.require_permission', lambda *a: True)
     monkeypatch.setattr(ui.QFileDialog, 'getSaveFileName', lambda *a: (str(tmp_path/'present.pdf'), ''))
     monkeypatch.setattr(ui, 'run_with_progress', lambda parent, title, text, fn: fn())
@@ -123,6 +125,6 @@ def test_pdf_uses_detailed_html_when_preview_is_summary(tmp_path, app, monkeypat
     monkeypatch.setattr('sme_gend.services.document_pdf_output.save_document_pdf',
                         lambda doc, path, **kw: published.append((doc.toPlainText(), kw)))
     ui.ListePresentView._export_pdf(view)
-    assert len(published) == 1 and 'SYNTHETIC SUMMARY' not in published[0][0]
+    assert len(published) == 1 and 'SYNTHETIC RUBRICS' not in published[0][0]
     assert all(f'UNIQUE AGENT {n}' in published[0][0] for n in range(3))
     assert published[0][1]['meta']['personnel_ids'] == ['0', '1', '2']

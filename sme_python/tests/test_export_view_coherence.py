@@ -77,11 +77,15 @@ def test_mission_export_preserves_actual_sorted_table_order(app,tmp_path,monkeyp
     ui.MissionsView._on_export(view)
     assert [r.noms for r in seen]==['ALPHA','ZULU']
 
-def test_present_filter_change_invalidates_exportable_html():
+def test_rubric_search_does_not_invalidate_the_complete_personnel_export():
     from sme_gend.ui.views.liste_present_view import ListePresentView
-    view=SimpleNamespace(_loaded=True,_last_html='OLD',_search_timer=MagicMock(),_refresh_busy=False)
+    snapshot=SimpleNamespace()
+    view=SimpleNamespace(_loaded=True,_last_html='SYNTHETIC RUBRICS',_search_timer=MagicMock(),
+                         _refresh_busy=False,_preview_snapshot=snapshot)
     ListePresentView._on_search_changed(view)
-    assert not view._loaded and not view._last_html
+    assert view._loaded and view._preview_snapshot is snapshot
+    assert view._last_html=='SYNTHETIC RUBRICS'
+    view._search_timer.start.assert_called_once_with()
 
 def test_present_error_is_not_an_exportable_document():
     from sme_gend.ui.views.liste_present_view import ListePresentView
@@ -135,11 +139,12 @@ def test_present_success_after_filter_invalidation_is_ignored():
     ListePresentView._on_refresh_done(view,'OLD RESULT',1)
     assert not view._loaded and not view._last_html
 
-def test_present_rapid_typing_keeps_the_debounced_refresh_requested():
+def test_rubric_rapid_typing_keeps_the_local_debounced_render_requested():
     from sme_gend.ui.views.liste_present_view import ListePresentView
-    view=SimpleNamespace(_loaded=True,_last_html='OLD',_search_timer=MagicMock(),_refresh_busy=False)
+    view=SimpleNamespace(_loaded=True,_last_html='SYNTHETIC RUBRICS',_search_timer=MagicMock(),
+                         _refresh_busy=False,_preview_snapshot=SimpleNamespace())
     ListePresentView._on_search_changed(view);ListePresentView._on_search_changed(view)
-    assert view._auto_refresh_requested and view._search_timer.start.call_count==2
+    assert view._loaded and view._search_timer.start.call_count==2
 
 def test_present_export_uses_preview_snapshot_without_any_source_reread(tmp_path,monkeypatch,app):
     from sme_gend.services import liste_present_service as mod

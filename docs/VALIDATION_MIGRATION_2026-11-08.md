@@ -1,5 +1,15 @@
 # Vérification du lot de migration — 8 novembre 2026
 
+## Liste des présents : aperçu des rubriques
+
+L’écran charge maintenant uniquement la mise en page, les structures et les subdivisions. L’ouverture et F5 ne demandent plus de confirmation de chargement du personnel. La recherche filtre ces rubriques localement. Un clic sur une rubrique sélectionne sa section ou subdivision dans le panneau d’édition existant ; titres, regroupement et ordre restent enregistrés avec les droits et contrôles de concurrence existants. Les compteurs et la synchronisation ne sont plus exécutés automatiquement à l’ouverture du panneau.
+
+PDF et Excel chargent les présents du mois après le choix et la confirmation du fichier. Le filtre de recherche des rubriques ne filtre pas les agents exportés. Un brouillon de mise en page doit être enregistré avant export. Le rendu détaillé n’est plus installé dans la fenêtre.
+
+L’audit du modèle `liste_des_presents_mai.xlsx` a reproduit la perte des plages de dimensions A:B, M:N et O:P et de `sheet_format`. Le correctif conserve leurs largeurs, styles et propriétés, ainsi que le mode d’affichage et le zoom Excel. L’ancienne position de défilement du modèle est réinitialisée en haut du document généré. Les noms de feuille, la feuille de contrôles, le mois d’impression et le comportement de secours sans modèle restent ceux du contrat existant ; la sortie n’est donc pas une copie intégrale du fichier source.
+
+Vérification avec openpyxl 3.1.5 et PySide6 6.11.2 : **199 tests ciblés hors intégration réussis**, puis 7 cas de rendu/organisation relancés après l’ajustement final de largeur. **14 tests MySQL ciblés réussis**, dont 2 vérifient l’absence totale de lectures du personnel et d’écritures SQL pour l’aperçu, avec ou sans configuration préexistante. Les captures Qt à 1 280×800 et 900×720 ont été inspectées. Le modèle original reste intact ; aucune base réelle modifiée, aucun exécutable généré. L’instance MySQL jetable a été arrêtée après vérification de son dossier et de ses transactions.
+
 ## Export courant simplifié
 
 Le parcours « Situation numérique → Exporter le classeur Excel complet » demande uniquement le mois puis le fichier de destination. Il remplit le modèle officiel `SME_GEND_model.xlsx` avec les états du mois : liste générale, présents, missions, stages, malades, autres indisponibilités, mouvements et détachés. Toutes les feuilles du modèle, y compris celles masquées, conservent leur ordre et leur état. Les formules, résultats mis en cache, fusions et paramètres d’impression suivent le moteur fidèle existant.

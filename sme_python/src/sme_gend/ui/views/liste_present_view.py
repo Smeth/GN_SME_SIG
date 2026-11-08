@@ -1,4 +1,4 @@
-"""Liste des présents — aperçu HTML configurable + personnalisation intégrée."""
+"""Liste des présents — organisation éditable des rubriques et exports détaillés."""
 
 from __future__ import annotations
 
@@ -50,6 +50,7 @@ from sme_gend.services.liste_present_subdiv_tools import (
     sort_subdiv_labels_by_count,
 )
 from sme_gend.services.liste_present_service import ListePresentService
+from sme_gend.services.liste_present_outline import capture_outline, render_outline
 from sme_gend.ui.bg_task import run_with_progress
 from sme_gend.ui.confirm_dialogs import confirm_overwrite_file, confirm_yes_no
 from sme_gend.ui.theme import apply_paper_preview_palette, status_semantic_color, theme_palette
@@ -119,8 +120,8 @@ def _idle_page() -> str:
         "</style></head><body>"
         "<div class='box'>"
         "<h2>Liste des présents</h2>"
-        "<p>Cliquez sur <b>&#8635; Actualiser</b> (ou <b>F5</b>) pour afficher la liste.<br>"
-        "Le chargement peut prendre quelques secondes selon l'effectif du mois.</p>"
+        "<p>Actualisez les rubriques avec <b>F5</b>.<br>"
+        "L’aperçu présente uniquement les structures et subdivisions.</p>"
         "</div></body></html>"
     )
 
@@ -164,9 +165,6 @@ class _QuickEditPanel(QWidget):
         super().showEvent(event)
         if self.isVisible():
             self._ensure_data_caches()
-            if not self._auto_synced:
-                self._auto_synced = True
-                self._sync_from_db(silent=True)
 
     # ── API publique ──────────────────────────────────────────────────────────
 
@@ -182,7 +180,7 @@ class _QuickEditPanel(QWidget):
         ):
             return
         try:
-            candidate = self._svc.load()
+            candidate = self._svc.load(read_only=True)
         except Exception as exc:
             self._set_status(f"Chargement impossible ; brouillon conservé : {exc}", "error")
             return
@@ -191,18 +189,19 @@ class _QuickEditPanel(QWidget):
         self._draft_dirty = False
         self._count_cache.clear()
         self._desig_cache.clear()
+        self._reference_cache_loaded = False
         self._populate()
         self._set_status("Mise en page rechargée", "success")
 
     def _load_config_only(self) -> None:
         try:
-            self._cfg = self._svc.load()
+            self._cfg = self._svc.load(read_only=True)
         except Exception as exc:
             self._set_status(f"❌ Erreur chargement : {exc}", "error")
             self._cfg = None
 
     def _ensure_data_caches(self) -> None:
-        if self._count_cache:
+        if getattr(self, '_reference_cache_loaded', False):
             return
         self._reload_caches()
         self._populate(select_id=self._current_id())
@@ -220,6 +219,7 @@ class _QuickEditPanel(QWidget):
             return
         self._count_cache.clear()
         self._desig_cache.clear()
+        self._reference_cache_loaded = False
         self._ensure_data_caches()
         self._populate(select_id=sel_id)
 
@@ -439,16 +439,13 @@ class _QuickEditPanel(QWidget):
         except Exception:
             self._desig_cache = {}
             self._cache_errors.append("désignations")
-        try:
-            self._count_cache = self._svc.present_counts_by_structure()
-        except Exception:
-            self._count_cache = {}
-            self._cache_errors.append("effectifs")
+        self._count_cache = {}
         try:
             self._db_codes = self._svc.database_structure_codes()
         except Exception:
             self._db_codes = set()
             self._cache_errors.append("structures")
+        self._reference_cache_loaded = not self._cache_errors
 
     def _sync_from_db(self, *, silent: bool = False) -> None:
         if silent and self.has_unsaved_changes():
@@ -558,7 +555,13 @@ class _QuickEditPanel(QWidget):
             self._le_titre2.setText(sec.title_sub_override or "")
             self._chk_sub.setChecked(sec.group_by_subdivision)
             self._sub_filter.clear()
-            self._set_sub_list_labels(list(sec.subdivision_order or []))
+            labels = sec.subdivision_order
+            if not labels:
+                try:
+                    labels = self._svc.resolve_subdivision_order_labels(sec)
+                except Exception as exc:
+                    self._set_status(f"Lecture des subdivisions impossible : {exc}", "error")
+            self._set_sub_list_labels(list(labels or []))
         else:
             self._lbl_code.clear()
             self._le_titre1.clear()
@@ -1057,6 +1060,7 @@ class ListePresentView(QWidget):
         self._preview.setObjectName("listePresentPreview")
         self._preview.setOpenLinks(False)
         self._preview.setOpenExternalLinks(False)
+        self._preview.anchorClicked.connect(self._on_rubric_clicked)
         self._preview.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self._preview.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._preview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -1072,8 +1076,7 @@ class ListePresentView(QWidget):
         self._btn_refresh.setObjectName("listePresentRefreshBtn")
         self._btn_refresh.setDefault(True)
         self._btn_refresh.setToolTip(
-            "Affiche uniquement les agents dont la position administrative est Présent (F5). "
-            "À utiliser après ouverture de l'écran ou changement de mois."
+            "Actualiser l’organisation des rubriques, sans charger les agents (F5)."
         )
         self._btn_refresh.clicked.connect(self._do_refresh)
         # F5 is owned by ShellWindow, shared with the status-bar refresh action.
@@ -1085,7 +1088,7 @@ class ListePresentView(QWidget):
         self._btn_toggle.toggled.connect(self._on_toggle_panel)
 
         self._btn_pdf = QPushButton("🖨  PDF")
-        self._btn_pdf.setToolTip("Exporter la liste détaillée correspondant aux filtres de l’aperçu (Ctrl+P)")
+        self._btn_pdf.setToolTip("Charger et exporter tous les présents du mois (Ctrl+P)")
         self._btn_pdf.clicked.connect(self._export_pdf)
         QShortcut(QKeySequence("Ctrl+P"), self).activated.connect(self._export_pdf)
 
@@ -1135,7 +1138,7 @@ class ListePresentView(QWidget):
 
         # Recherche
         self._search = QLineEdit()
-        self._search.setPlaceholderText("Filtrer (nom, grade, matricule, structure…)")
+        self._search.setPlaceholderText("Rechercher une structure ou une subdivision…")
         self._search.setClearButtonEnabled(True)
         self._search.setMinimumWidth(220)
         self._search_timer = QTimer(self)
@@ -1235,6 +1238,9 @@ class ListePresentView(QWidget):
     # ── Recherche / actualisation ─────────────────────────────────────────────
 
     def _on_search_changed(self) -> None:
+        if self._loaded and self._preview_snapshot is not None and not self._refresh_busy:
+            self._search_timer.start()
+            return
         refresh = self._loaded or self._refresh_busy or getattr(self, "_auto_refresh_requested", False)
         self._preview_generation = getattr(self, "_preview_generation", 0) + 1
         self._loaded = False
@@ -1247,6 +1253,10 @@ class ListePresentView(QWidget):
                 self._refresh_pending = True
 
     def _refresh_if_loaded(self) -> None:
+        if self._loaded and self._preview_snapshot is not None and not self._refresh_busy:
+            self._last_html = render_outline(self._preview_snapshot, search_filter=self._search.text())
+            self._set_preview_html(self._last_html)
+            return
         if self._loaded or self._auto_refresh_requested:
             self._auto_refresh_requested = False
             self._do_refresh(skip_confirm=True)
@@ -1293,29 +1303,12 @@ class ListePresentView(QWidget):
         self.mark_dirty()
 
     def on_page_activated(self) -> None:
-        """Ouverture de l'onglet : proposition de chargement avec avertissement."""
+        """Load only the organization, without personnel or a load confirmation."""
         if not self._loaded and not self._refresh_busy:
-            self._prompt_load_on_open()
+            self._do_refresh(skip_confirm=True)
 
     def _prompt_load_on_open(self) -> None:
-        if getattr(self, "_load_prompt_open", False):
-            return
-        self._load_prompt_open = True
-        try:
-            accepted = confirm_yes_no(
-                self,
-                "Charger la liste des présents",
-                "Voulez-vous charger la liste des présents maintenant ?\n\n"
-                "Le chargement peut prendre quelques secondes selon l'effectif du mois.\n"
-                "Si vous choisissez Non, vous pourrez lancer le chargement avec Actualiser.",
-                default_no=True,
-            )
-            if accepted:
-                self._do_refresh(skip_confirm=True)
-            else:
-                self._show_idle_state()
-        finally:
-            self._load_prompt_open = False
+        self._do_refresh(skip_confirm=True)
 
     def apply_runtime_after_config_change(self) -> None:
         """Appelé quand la config ou la source de données change."""
@@ -1368,6 +1361,41 @@ class ListePresentView(QWidget):
             if require_permission(self, 'effectifs.layout'):
                 self._open_layout()
 
+    def _on_rubric_clicked(self, url) -> None:
+        """Select a rubric in the existing editor; never load personnel here."""
+        from urllib.parse import unquote
+        from sme_gend.services.auth_guard import require_permission
+        if not require_permission(self, 'effectifs.layout'):
+            return
+        parts = url.toString().split(':')
+        if len(parts) not in (2, 3) or parts[0] not in ('section', 'subdivision'):
+            return
+        section_id = unquote(parts[1])
+        snapshot = self._preview_snapshot
+        if snapshot is None:
+            return
+        if not any(section.id == section_id for section in snapshot.layout.sections):
+            return
+        self._btn_toggle.setChecked(True)
+        panel = self._panel
+        if panel is None:
+            return
+        for row in range(panel._sec_list.count()):
+            if panel._sec_list.item(row).data(Qt.ItemDataRole.UserRole) == section_id:
+                panel._sec_list.setCurrentRow(row)
+                break
+        if parts[0] == 'subdivision' and len(parts) == 3 and parts[2].isdigit():
+            index = int(parts[2])
+            labels = snapshot.subdivisions.get(section_id, [])
+            if index < len(labels):
+                for row in range(panel._sub_list.count()):
+                    if panel._sub_list.item(row).text() == labels[index]:
+                        panel._sub_list.setCurrentRow(row)
+                        panel._sub_list.scrollToItem(panel._sub_list.item(row))
+                        break
+        else:
+            panel._le_titre1.setFocus()
+
     # ── Actualisation (MySQL : thread secondaire ; HTML appliqué sur le thread UI) ──
 
     def _do_refresh(self, *, skip_confirm: bool = False) -> None:
@@ -1391,7 +1419,7 @@ class ListePresentView(QWidget):
         self._preview_snapshot = None
         needle = self._search.text().strip() or None
 
-        self._set_status("⏳ Chargement…", "muted")
+        self._set_status("Chargement des rubriques…", "muted")
         self._btn_refresh.setEnabled(False)
         self._refresh_progress.setVisible(True)
         self._refresh_progress.setValue(0)
@@ -1462,7 +1490,7 @@ class ListePresentView(QWidget):
         self._last_html = html_content
         self._set_preview_html(html_content)
         self._loaded = True
-        self._set_status("✓ Mis à jour", "success")
+        self._set_status("Rubriques à jour", "success")
 
     def _on_refresh_error(self, err: str, token: int) -> None:
         if token != self._refresh_token:
@@ -1531,22 +1559,27 @@ class ListePresentView(QWidget):
     # ── Export PDF ────────────────────────────────────────────────────────────
 
     def _export_snapshot_current(self, snapshot):
-        return self._loaded and not self._refresh_busy and self._preview_snapshot is snapshot
+        return (self._loaded and not self._refresh_busy and self._preview_snapshot is snapshot
+                and not ListePresentView.has_unsaved_changes(self))
 
     def _export_pdf(self) -> None:
         from sme_gend.services.auth_guard import require_permission
 
-        if not require_permission(self, "effectifs.export"):
+        if not require_permission(self, "effectifs.presents") or not require_permission(self, "effectifs.export"):
+            return
+        if ListePresentView.has_unsaved_changes(self):
+            QMessageBox.information(self, "PDF", "Enregistrez les modifications des rubriques avant l’export.")
             return
         if not self._loaded or self._refresh_busy:
-            QMessageBox.information(self, "PDF", "Générez d'abord l'aperçu (Actualiser).")
+            QMessageBox.information(self, "PDF", "Actualisez d’abord les rubriques.")
             return
-        html_content = self._last_html
-        snapshot = self._preview_snapshot
-        if snapshot is None:
-            QMessageBox.information(self, "PDF", "Actualisez d’abord l’aperçu.")
+        outline = self._preview_snapshot
+        if outline is None:
+            QMessageBox.information(self, "PDF", "Actualisez d’abord les rubriques.")
             return
-        count = sum(len(people) for _, _, _, blocks in snapshot.sections for _, people in blocks)
+        service = copy(self._service)
+        if isinstance(service, ListePresentService):
+            service._layout_config = copy(service._layout_config)
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Enregistrer en PDF",
@@ -1559,10 +1592,10 @@ class ListePresentView(QWidget):
             path += '.pdf'
         if not confirm_overwrite_file(self, path):
             return
-        if not require_permission(self, 'effectifs.export'):
+        if not require_permission(self, 'effectifs.presents') or not require_permission(self, 'effectifs.export'):
             return
-        if not ListePresentView._export_snapshot_current(self, snapshot):
-            QMessageBox.information(self, 'PDF', 'Le contexte a changé. Actualisez la liste avant de l’exporter.')
+        if not ListePresentView._export_snapshot_current(self, outline):
+            QMessageBox.information(self, 'PDF', 'Le contexte a changé. Actualisez les rubriques avant de l’exporter.')
             return
         self._set_status("⏳ Génération PDF…", "muted")
         try:
@@ -1581,20 +1614,25 @@ class ListePresentView(QWidget):
             )
             return
         try:
-            self._service.validate_snapshot(snapshot, search_filter=snapshot.search,
-                                            presences_mode=_PRESENCES_MODE)
-            html_content = run_with_progress(
+            def prepare_pdf():
+                snapshot = service.capture_snapshot(presences_mode=_PRESENCES_MODE)
+                service.validate_snapshot(snapshot, search_filter=None, presences_mode=_PRESENCES_MODE)
+                html_content = service.render_snapshot_html(snapshot, detailed=True, for_print=True)
+                return snapshot, html_content
+            prepared = run_with_progress(
                 self, "PDF détaillé", "Préparation de la liste complète…",
-                lambda: self._service.render_snapshot_html(snapshot, detailed=True, for_print=True))
-            if html_content is None:
+                prepare_pdf)
+            if prepared is None:
                 return
-            if not require_permission(self, 'effectifs.export'):
+            snapshot, html_content = prepared
+            if not require_permission(self, 'effectifs.presents') or not require_permission(self, 'effectifs.export'):
                 return
-            if not ListePresentView._export_snapshot_current(self, snapshot):
-                QMessageBox.information(self, 'PDF', 'Le contexte a changé. Actualisez la liste avant de l’exporter.')
+            if not ListePresentView._export_snapshot_current(self, outline):
+                QMessageBox.information(self, 'PDF', 'Le contexte a changé. Actualisez les rubriques avant de l’exporter.')
                 return
-            self._service.validate_snapshot(snapshot, search_filter=snapshot.search,
+            service.validate_snapshot(snapshot, search_filter=None,
                                             presences_mode=_PRESENCES_MODE)
+            count = sum(len(people) for _, _, _, blocks in snapshot.sections for _, people in blocks)
             doc = QTextDocument()
             doc.setHtml(html_content)
             from sme_gend.services.liste_generale_print import sync_document_to_printer
@@ -1614,15 +1652,18 @@ class ListePresentView(QWidget):
     def _export_excel(self) -> None:
         from sme_gend.services.auth_guard import require_permission
 
-        if not require_permission(self, "effectifs.export"):
+        if not require_permission(self, "effectifs.presents") or not require_permission(self, "effectifs.export"):
             return
-        from copy import deepcopy
-        source_snapshot = self._preview_snapshot
-        snapshot = deepcopy(source_snapshot)
-        if not self._loaded or self._refresh_busy or snapshot is None:
-            QMessageBox.information(self, "Export Excel", "Actualisez d’abord l’aperçu avec les filtres souhaités.")
+        if ListePresentView.has_unsaved_changes(self):
+            QMessageBox.information(self, "Export Excel", "Enregistrez les modifications des rubriques avant l’export.")
             return
-        service = self._service
+        outline = self._preview_snapshot
+        if not self._loaded or self._refresh_busy or outline is None:
+            QMessageBox.information(self, "Export Excel", "Actualisez d’abord les rubriques.")
+            return
+        service = copy(self._service)
+        if isinstance(service, ListePresentService):
+            service._layout_config = copy(service._layout_config)
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Enregistrer la liste des présents",
@@ -1635,17 +1676,16 @@ class ListePresentView(QWidget):
             path += '.xlsx'
         if not confirm_overwrite_file(self, path):
             return
-        if not require_permission(self, 'effectifs.export'):
+        if not require_permission(self, 'effectifs.presents') or not require_permission(self, 'effectifs.export'):
             return
-        if not ListePresentView._export_snapshot_current(self, source_snapshot):
-            QMessageBox.information(self, 'Export Excel', 'Le contexte a changé. Actualisez la liste avant de l’exporter.')
+        if not ListePresentView._export_snapshot_current(self, outline):
+            QMessageBox.information(self, 'Export Excel', 'Le contexte a changé. Actualisez les rubriques avant de l’exporter.')
             return
-        needle = snapshot.search or None
         dest   = Path(path)
 
         def _run() -> bool:
             service.export_excel(
-                dest, search_filter=needle, presences_mode=_PRESENCES_MODE, snapshot=snapshot
+                dest, presences_mode=_PRESENCES_MODE
             )
             return True
 
@@ -1694,10 +1734,8 @@ class _ListePresentPreviewWorker(QThread):
             self.progress.emit(min(99, p))
 
         try:
-            options = {"on_progress": _on_progress}
-            if isinstance(self._service, ListePresentService):
-                options["on_snapshot"] = lambda snapshot: setattr(self, "_export_snapshot", snapshot)
-            html = self._service.build_preview_html(self._search, _PRESENCES_MODE, **options)
+            self._export_snapshot = capture_outline(self._service, on_progress=_on_progress)
+            html = render_outline(self._export_snapshot, search_filter=self._search)
         except _PreviewInterrupted:
             return
         except BaseException as exc:  # noqa: BLE001

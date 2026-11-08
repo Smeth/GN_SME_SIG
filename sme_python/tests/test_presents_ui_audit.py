@@ -19,6 +19,14 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(autouse=True)
+def lightweight_outline(monkeypatch):
+    def capture(service, *, on_progress=None):
+        return SimpleNamespace(html=service.capture_outline(on_progress=on_progress))
+    monkeypatch.setattr(ui, 'capture_outline', capture)
+    monkeypatch.setattr(ui, 'render_outline', lambda snapshot, search_filter=None: snapshot.html)
+
+
 def pump(app, predicate):
     deadline=time.monotonic()+3
     while not predicate() and time.monotonic()<deadline:
@@ -36,7 +44,8 @@ def test_worker_keeps_its_original_database_and_layout_during_a_rebind(app,monke
     def build(frozen,*a,**kw):
         observations.append((frozen._settings,frozen._layout_config._settings,frozen._liste))
         return 'SYNTHETIC HTML'
-    monkeypatch.setattr(ListePresentService,'build_preview_html',build)
+    monkeypatch.setattr(ui,'capture_outline',build)
+    monkeypatch.setattr(ui,'render_outline',lambda snapshot,search_filter=None:snapshot)
     worker=ui._ListePresentPreviewWorker(service,None,1)
     service.rebind_settings(second);service._layout_config.rebind_settings(second)
     worker.run()
@@ -52,7 +61,7 @@ def test_preview_waits_for_the_real_thread_end_and_does_not_reach_100_early(app,
             super().run();emitted.set();release.wait(2)
     monkeypatch.setattr(ui,'_ListePresentPreviewWorker',Delayed)
     def build(*a,**kw):kw['on_progress'](100);return '<p>SYNTHETIC PRESENTS</p>'
-    view=ui.ListePresentView(SimpleNamespace(build_preview_html=build))
+    view=ui.ListePresentView(SimpleNamespace(capture_outline=build))
     try:
         view._do_refresh(skip_confirm=True)
         assert emitted.wait(2)
@@ -70,7 +79,7 @@ def test_old_generation_error_cannot_replace_the_new_context(app):
     release=Event();entered=Event()
     def build(*a,**kw):
         entered.set();release.wait(2);raise OSError('OLD DATABASE ERROR')
-    view=ui.ListePresentView(SimpleNamespace(build_preview_html=build))
+    view=ui.ListePresentView(SimpleNamespace(capture_outline=build))
     view.show();app.processEvents()
     try:
         view._do_refresh(skip_confirm=True);assert entered.wait(2)
@@ -79,7 +88,7 @@ def test_old_generation_error_cannot_replace_the_new_context(app):
     pump(app,lambda:not view._refresh_busy)
     assert not view._loaded and view._preview_snapshot is None
     assert 'OLD DATABASE ERROR' not in view._preview.toPlainText()
-    assert 'Actualiser' in view._preview.toPlainText()
+    assert 'F5' in view._preview.toPlainText()
     view.close();view.deleteLater();app.processEvents()
 
 
@@ -87,7 +96,7 @@ def test_permission_revoked_during_loading_discards_the_result(app,monkeypatch):
     release=Event();entered=Event();allowed=[True]
     monkeypatch.setattr('sme_gend.services.auth_guard.session_has_permission',lambda key:allowed[0])
     def build(*a,**kw):entered.set();release.wait(2);return '<p>SYNTHETIC CONFIDENTIAL LIST</p>'
-    view=ui.ListePresentView(SimpleNamespace(build_preview_html=build))
+    view=ui.ListePresentView(SimpleNamespace(capture_outline=build))
     try:
         view._do_refresh(skip_confirm=True);assert entered.wait(2);allowed[0]=False
     finally:release.set()
@@ -113,7 +122,7 @@ def test_denied_refresh_clears_a_previously_loaded_list(app,monkeypatch):
 def test_repeated_actualiser_does_not_reuse_a_deleted_qthread(app):
     loads=[]
     def build(*a,**kw):loads.append(True);return f'<p>SYNTHETIC LOAD {len(loads)}</p>'
-    view=ui.ListePresentView(SimpleNamespace(build_preview_html=build))
+    view=ui.ListePresentView(SimpleNamespace(capture_outline=build))
     for number in (1,2):
         view.refresh_from_database()
         pump(app,lambda:not view._refresh_busy)
@@ -148,9 +157,12 @@ def test_refused_customization_does_not_load_a_hidden_editor(app,monkeypatch):
 
 def export_view(tmp_path):
     settings=Settings(database_path=tmp_path/'unused',mysql_view_mois='2026-09')
-    snapshot=SimpleNamespace(sections=[],settings=settings,month='2026-09',search='',presence='present')
-    service=SimpleNamespace(PREVIEW_MAX_DETAIL_ROWS=2000,validate_snapshot=Mock(),export_excel=Mock())
+    snapshot=SimpleNamespace(settings=settings,month='2026-09')
+    personnel=SimpleNamespace(sections=[],settings=settings,month='2026-09',search='',presence='present')
+    service=SimpleNamespace(_settings=settings,validate_snapshot=Mock(),export_excel=Mock(),
+        capture_snapshot=Mock(return_value=personnel),render_snapshot_html=Mock(return_value='<p>SYNTHETIC PRINT</p>'))
     return SimpleNamespace(_loaded=True,_refresh_busy=False,_preview_snapshot=snapshot,
+        _preview_generation=1,_render_generation=1,
         _last_html='<p>SYNTHETIC PRESENTS</p>',_service=service,_set_status=Mock())
 
 
@@ -174,6 +186,7 @@ def test_export_dialogs_cannot_bypass_revocation_context_change_or_overwrite(app
     getattr(ui.ListePresentView,'_export_'+kind)(view)
     assert path.read_bytes()==b'ORIGINAL'
     view._service.export_excel.assert_not_called()
+    view._service.capture_snapshot.assert_not_called()
     view._service.validate_snapshot.assert_not_called()
     forbidden.assert_not_called()
 
