@@ -7,7 +7,7 @@ import html
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field as dc_field, replace
-from copy import deepcopy
+from copy import deepcopy, copy
 from pathlib import Path
 
 from sme_gend.config.settings import Settings
@@ -19,6 +19,7 @@ from sme_gend.repositories.grade_repository import GradeRepository
 from sme_gend.repositories.liste_generale_repository import ListeGeneraleRepository
 from sme_gend.repositories.structure_repository import StructureRepository
 from sme_gend.repositories.subdivision_repository import SubdivisionRepository
+from sme_gend.repositories.mysql_connection import mysql_read_snapshot, mysql_database_key
 from sme_gend.services.excel_template_exporter import (
     export_liste_fidele,
     export_simple_fallback,
@@ -175,6 +176,44 @@ class ListePresentService:
         self._liste = ListeGeneraleRepository(settings)
         self._structures = StructureRepository(settings)
         self._subdivisions = SubdivisionRepository(settings)
+
+    def validate_snapshot(self, snapshot, *, search_filter=None, presences_mode='present'):
+        from sme_gend.config.liste_generale_scope import resolve_export_mois
+        if (snapshot.database != mysql_database_key(self._settings)
+                or snapshot.month != resolve_export_mois(self._settings)
+                or snapshot.search != (search_filter or '').strip()
+                or snapshot.presence != presences_mode):
+            raise ValueError("L’aperçu ne correspond plus à cette source, à ce mois ou à ces filtres. Actualisez-le.")
+
+    def capture_snapshot(self, search_filter=None, presences_mode='present', *, on_progress=None):
+        """Capture rows, layout and references in one read-only database instant."""
+        from sme_gend.config.liste_generale_scope import resolve_export_mois
+        settings = self._settings
+        month = resolve_export_mois(settings)
+        pinned = replace(settings, mysql_view_mois=month)
+        reader = copy(self)
+        reader._settings = pinned
+        reader._layout_config = copy(self._layout_config)
+        if isinstance(reader._layout_config, LayoutConfigService):
+            reader._layout_config.rebind_settings(pinned)
+        _call_progress(on_progress, 2)
+        with mysql_read_snapshot(pinned):
+            layout = reader._layout_config.load(read_only=True)
+            _call_progress(on_progress, 5)
+            def fetch_pct(local):
+                _call_progress(on_progress, 5 + local*67//100)
+            fetched = reader._fetch_all_data(search_filter=search_filter,
+                presences_mode=presences_mode, on_progress=fetch_pct if on_progress else None)
+            _call_progress(on_progress, 74)
+            sections = reader.build_sections_data(layout, search_filter=search_filter,
+                include_orphans=True, presences_mode=presences_mode, fetched=fetched)
+            _call_progress(on_progress, 80)
+            anomalies = reader.collect_anomalies(layout, fetched=fetched, presences_mode=presences_mode)
+            grades = GradeRepository(pinned).fetch_all()
+            snapshot = PresentsExportSnapshot(pinned, mysql_database_key(pinned),
+                (search_filter or '').strip(), presences_mode, deepcopy(layout), deepcopy(sections),
+                deepcopy(fetched.flat), deepcopy(grades), month, deepcopy(anomalies))
+        return snapshot
 
     def _subdivisions_flat(self) -> list[SubdivisionFlatRow]:
         # Fresh hierarchy for each fetch; all render stages share the fetched snapshot.
@@ -349,6 +388,7 @@ class ListePresentService:
         total_rows: int,
         ncols: int,
         anomalies: Any,
+        month: str | None = None,
     ) -> str:
         import html
 
@@ -372,7 +412,7 @@ class ListePresentService:
             "<p class='note'><b>Aperçu synthétique</b> — ",
             f"{total_rows} présent(s) dépassent le seuil d'affichage détaillé "
             f"({self.PREVIEW_MAX_DETAIL_ROWS}). Les exports <b>PDF et Excel</b> contiennent la liste détaillée complète.</p>",
-            self._presence_note(anomalies),
+            self._presence_note(anomalies, month=month),
             "<table class='maquette'>",
             (
                 f"<tr><td class='title' colspan='3'>"
@@ -409,52 +449,14 @@ class ListePresentService:
 
         ``on_progress`` : pourcentage global 0–100 pour feedback UI (optionnel).
         """
-        def pct(p: int) -> None:
-            _call_progress(on_progress, p)
-
-        from sme_gend.config.liste_generale_scope import resolve_export_mois
-        export_month = resolve_export_mois(self._settings)
-        pct(2)
-        layout = self._layout_config.load()
-        pct(5)
-
-        def fetch_pct(local: int) -> None:
-            """Mappe la phase lecture (0–100 locale) vers la plage 5–72 % globale."""
-            pct(5 + (local * 67 // 100))
-
-        fetched = self._fetch_all_data(
-            search_filter=search_filter,
-            presences_mode=presences_mode,
-            on_progress=fetch_pct if on_progress else None,
-        )
-        pct(74)
-
-        sections = self.build_sections_data(
-            layout,
-            search_filter=search_filter,
-            include_orphans=True,
-            presences_mode=presences_mode,
-            fetched=fetched,
-        )
-        pct(80)
-        anomalies = self.collect_anomalies(layout, fetched=fetched, presences_mode=presences_mode)
-        flat = fetched.flat  # déjà chargé, pas de 3e requête
-        try:
-            grade_rows = GradeRepository(self._settings).fetch_all()
-        except Exception:
-            grade_rows = []
-        from sme_gend.repositories.mysql_connection import mysql_database_key
-        snapshot = PresentsExportSnapshot(
-            replace(self._settings, mysql_view_mois=export_month), mysql_database_key(self._settings),
-            (search_filter or "").strip(), presences_mode, deepcopy(layout), deepcopy(sections),
-            deepcopy(flat), deepcopy(grade_rows), export_month, deepcopy(anomalies))
+        snapshot = self.capture_snapshot(search_filter, presences_mode, on_progress=on_progress)
         if on_snapshot is not None:
             on_snapshot(snapshot)
         export_phase('render', detail='Construction de l’aperçu de la liste des présents')
         return self.render_snapshot_html(snapshot, on_progress=on_progress)
 
     @tracked_export(steps=HTML_STEPS)
-    def render_snapshot_html(self, snapshot, *, detailed=False, on_progress=None):
+    def render_snapshot_html(self, snapshot, *, detailed=False, on_progress=None, for_print=False):
         """Render the captured personnel without reading the database again."""
         sections, flat, grade_rows = snapshot.sections, snapshot.flat, snapshot.grades
         presences_mode = snapshot.presence
@@ -470,7 +472,7 @@ class ListePresentService:
         mode_label = _mode_labels.get(presences_mode, presences_mode)
         total_rows = self._count_section_rows(sections)
         export_phase('render', total=total_rows, detail='Lignes de la liste des présents')
-        if not detailed and total_rows > self.PREVIEW_MAX_DETAIL_ROWS:
+        if not detailed and not for_print and total_rows > self.PREVIEW_MAX_DETAIL_ROWS:
             pct(100)
             return self._build_preview_summary_html(
                 sections=sections,
@@ -478,6 +480,7 @@ class ListePresentService:
                 total_rows=total_rows,
                 ncols=ncols,
                 anomalies=anomalies,
+                month=snapshot.month,
             )
         pct(82)
 
@@ -512,20 +515,47 @@ class ListePresentService:
             .sec2 td {{ background: #eee !important; }}
         }}
         """
+        print_widths = (2, 3, 12, 7, 6, 4, 5, 5, 5, 7, 6, 5, 6, 6, 5, 5, 4, 7)
+        if for_print:
+            # Keep print CSS separate: Qt's rich-text parser can ignore rules
+            # following the preview's unsupported @media block.
+            css = _PREVIEW_BASE_RULES + """
+            body { margin: 0; font-family: Tahoma, Arial, sans-serif; font-size: 7pt; }
+            table.maquette { border-collapse: collapse; width: 100%; }
+            .title { font-size: 12pt; font-weight: bold; text-align: center; margin: 3px 0 6px; }
+            .note { font-size: 7pt; margin: 0 0 4px; }
+            .hdr th { font-size: 7pt; padding: 2px; background: #d9e2f3;
+                      font-weight: bold; border: 1px solid #000; text-align: center; }
+            .data-even td { background: #ffffff; }
+            .data-odd td { background: #f5f8ff; }
+            .data-even td, .data-odd td { font-size: 7pt; padding: 2px;
+                border: 1px solid #9e9e9e; vertical-align: top; }
+            .sec1 td, .sec1-orphan td { background: #bdd7ee; font-weight: bold;
+                font-size: 9pt; padding: 3px; border: 1px solid #000; }
+            .sec1-orphan td { background: #f8d7da; }
+            .sec2 td, .subdiv td, .subdiv-warn td { background: #dce6f1; font-weight: bold;
+                text-align: center; border: 1px solid #000; font-size: 7pt; padding: 2px; }
+            .subdiv-warn td { background: #fff3cd; }
+            .total-row td { background: #d9e2f3; font-size: 9pt; font-weight: bold;
+                text-align: center; border: 1px solid #000; padding: 4px; }
+            .anomaly-box td { background: #fff3cd; font-size: 7pt; padding: 4px; border: 1px solid #000; }
+            """
 
         parts: list[str] = [
             "<!DOCTYPE html><html><head><meta charset='utf-8'><style>",
             css,
             "</style></head><body>",
-            self._presence_note(anomalies),
-            "<table class='maquette'>",
-            (
+            self._presence_note(anomalies, month=snapshot.month),
+        ]
+        if for_print:
+            parts.append(f"<p class='title'>{html.escape(RESULTAT_DOCUMENT_TITLE)}</p>")
+        parts.append("<table class='maquette'>")
+        if not for_print:
+            parts.extend((
                 f"<tr><td class='title' colspan='{ncols}'>"
                 f"{html.escape(RESULTAT_DOCUMENT_TITLE)}"
-                f"</td></tr>"
-            ),
-            f"<tr><td colspan='{ncols}' style='height:8px;border:none;'></td></tr>",
-        ]
+                f"</td></tr>",
+                f"<tr><td colspan='{ncols}' style='height:8px;border:none;'></td></tr>"))
 
         if anomalies.has_issues:
             parts.append(f"<tr class='anomaly-box'><td colspan='{ncols}'>")
@@ -566,11 +596,25 @@ class ListePresentService:
                 )
             parts.append("</td></tr>")
             parts.append(f"<tr><td colspan='{ncols}' style='height:4px;border:none;'></td></tr>")
+            if for_print:
+                parts.append("</table><table class='maquette'>")
 
+        if for_print:
+            parts.append('<thead>')
         parts += ["<tr class='hdr'>"]
+        header_column = 0
         for label, cspan in RESULTAT_HEADER_HTML:
-            parts.append(f"<th colspan='{cspan}'>{html.escape(label)}</th>")
+            if for_print:
+                label = {'N° interne': 'N° int.', 'Date de nomination au grade': 'Date grade',
+                    "Date d'entrée en service": 'Date service', "N° decision d'engagement": 'Réf. eng.',
+                    'Position administrative': 'Position admin.', "Subdivision d'arme": "Subdiv. d'arme", 'Structure': 'Struct.',
+                    "Date et lieu d'obtention": 'Date / lieu diplôme'}.get(label,label)
+            width = f" width='{sum(print_widths[header_column:header_column+cspan])}%'" if for_print else ''
+            parts.append(f"<th colspan='{cspan}'{width}>{html.escape(label)}</th>")
+            header_column += cspan
         parts.append("</tr>")
+        if for_print:
+            parts.append('</thead><tbody>')
 
         n_global = 0
         n_sections = len(sections)
@@ -588,6 +632,8 @@ class ListePresentService:
                 f"background:rgba(0,0,0,.10);padding:1px 7px;border-radius:3px;'>"
                 f"{n_section}&nbsp;présent(s)</span>"
             )
+            if for_print:
+                count_badge = f' — {n_section} présent(s)'
             rubrics = iter_section_rubrics(title_main, title_sub, blocks)
             for kind, payload in rubrics:
                 if kind == "sec1":
@@ -611,14 +657,15 @@ class ListePresentService:
                         row_cls = "data-odd" if n_global % 2 else "data-even"
                         parts.append(f"<tr class='{row_cls}'>")
                         sub_cell = format_subdivision_arme_display(r.subdivision_arme, flat)
-                        for cell in row_to_resultat_cells(
+                        for column, cell in enumerate(row_to_resultat_cells(
                             r,
                             n_global,
                             n_interne,
                             subdivision_arme_display=sub_cell,
                             grades=grade_rows,
-                        ):
-                            parts.append(f"<td>{html.escape(cell)}</td>")
+                        )):
+                            width = f" width='{print_widths[column]}%'" if for_print else ''
+                            parts.append(f"<td{width}>{html.escape(cell)}</td>")
                         parts.append("</tr>")
 
             if on_progress is not None and n_sections > 0:
@@ -639,14 +686,16 @@ class ListePresentService:
                 f"</td></tr>"
             )
 
-        parts.append("</table></body></html>")
+        parts.append(('</tbody>' if for_print else '')+"</table></body></html>")
         pct(100)
         return "".join(parts)
 
     @staticmethod
-    def _presence_note(anomalies):
+    def _presence_note(anomalies, *, month=None):
         import html
         note = "Personnel compté présent selon la situation administrative du mois ; ce document ne constitue pas un pointage quotidien."
+        if month:
+            note = f"Mois SME : {month}. " + note
         if anomalies.positions_vides:
             names = ", ".join(r.noms or str(r.id) for r in anomalies.positions_vides[:8])
             extra = "…" if len(anomalies.positions_vides) > 8 else ""
@@ -663,25 +712,11 @@ class ListePresentService:
     ) -> None:
         """Export : fidèle à la maquette si `resultat.xlsx` + `liste_present_layout.json` disponibles."""
         dest = Path(destination)
-        if snapshot is not None:
-            from sme_gend.repositories.mysql_connection import mysql_database_key
-            if (snapshot.database != mysql_database_key(self._settings)
-                    or snapshot.search != (search_filter or "").strip()
-                    or snapshot.presence != presences_mode):
-                raise ValueError("L’aperçu ne correspond plus à cette source ou à ces filtres. Actualisez-le.")
-            layout, sections, flat, grade_rows = deepcopy((snapshot.layout, snapshot.sections, snapshot.flat, snapshot.grades))
-            tpl = snapshot.settings.template_liste_present_path
-        else:
-            layout = self._layout_config.load()
-            fetched = self._fetch_all_data(search_filter=search_filter, presences_mode=presences_mode)
-            sections = self.build_sections_data(layout, search_filter=search_filter,
-                include_orphans=True, presences_mode=presences_mode, fetched=fetched)
-            tpl = self._settings.template_liste_present_path
-            flat = fetched.flat
-            try:
-                grade_rows = GradeRepository(self._settings).fetch_all()
-            except Exception:
-                grade_rows = []
+        if snapshot is None:
+            snapshot = self.capture_snapshot(search_filter, presences_mode)
+        self.validate_snapshot(snapshot, search_filter=search_filter, presences_mode=presences_mode)
+        layout, sections, flat, grade_rows = deepcopy((snapshot.layout, snapshot.sections, snapshot.flat, snapshot.grades))
+        tpl = snapshot.settings.template_liste_present_path
         sections_disp = [
             (
                 title_main,
@@ -722,8 +757,15 @@ class ListePresentService:
             from openpyxl import load_workbook
             export_phase('write', detail='Ajout des contrôles de présence et enregistrement du classeur')
             workbook = load_workbook(staged)
+            main_sheet = workbook[layout.output_sheet] if layout.output_sheet in workbook.sheetnames else workbook.worksheets[0]
+            if snapshot.month:
+                # Keep the model's title/styles; make its monthly scope visible
+                # in print without overwriting its user-defined header text.
+                header = main_sheet.oddHeader.center
+                header.text = (header.text+'\n' if header.text else '') + f'Mois SME : {snapshot.month}'
             checks = workbook.create_sheet("Contrôles de présence")
-            checks.append(["Présence administrative du mois ; ce document ne constitue pas un pointage quotidien."])
+            checks.append([(f'Mois SME : {snapshot.month}. ' if snapshot.month else '')+
+                "Présence administrative du mois ; ce document ne constitue pas un pointage quotidien."])
             checks.append(["Les positions administratives vides restent comptées comme présence au corps."])
             checks.append(["N° carrière", "Nom", "Structure", "Avertissement"])
             for _, _, _, blocks in sections:

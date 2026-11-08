@@ -110,6 +110,7 @@ def test_pdf_uses_detailed_html_when_preview_is_summary(tmp_path, app, monkeypat
     from sme_gend.services.liste_present_service import ListePresentService
     snap = snapshot(tmp_path)
     service = ListePresentService.__new__(ListePresentService); service.PREVIEW_MAX_DETAIL_ROWS = 2
+    service._settings = snap.settings
     view = SimpleNamespace(_loaded=True, _refresh_busy=False, _last_html='SYNTHETIC SUMMARY',
         _preview_snapshot=snap, _service=service, _set_status=lambda *a: None)
     monkeypatch.setattr('sme_gend.services.auth_guard.require_permission', lambda *a: True)

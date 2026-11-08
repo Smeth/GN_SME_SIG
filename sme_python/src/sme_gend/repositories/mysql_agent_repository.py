@@ -126,7 +126,9 @@ def _padmin_where_clause(mode: str) -> tuple[str, tuple]:
     from sme_gend.padmin_present import _non_present_exact_codes
 
     norm = _norm_padmin_sql()
-    norm = f"REGEXP_REPLACE({norm}, '[[:space:]]+', ' ')"
+    # Collapse pasted tabs/newlines/NBSP before trimming their replacement
+    # spaces, just like Python's strip/split normalization.
+    norm = f"TRIM(REGEXP_REPLACE({norm}, '[[:space:]]+', ' '))"
     stage = f"({norm} IN ('stageinterne', 'stage interne'))"
     codes = ', '.join("'" + code.replace("'", "''") + "'" for code in sorted(_non_present_exact_codes()))
     excluded = (f"({norm} REGEXP '(^|[^a-z])(non[ -]*present|pas[ -]+present|absent)([^a-z]|$)' "
@@ -135,8 +137,8 @@ def _padmin_where_clause(mode: str) -> tuple[str, tuple]:
     reference_flag = ("(rpa.id IS NOT NULL AND rpa.compte_comme_present = 1) OR "
                       "(c.position_admin_id IS NULL AND EXISTS (SELECT 1 FROM ref_position_admin rp "
                       "WHERE rp.compte_comme_present=1 AND "
-                      "REGEXP_REPLACE(TRIM(rp.libelle),'[[:space:]]+',' ') COLLATE utf8mb4_unicode_ci = "
-                      "REGEXP_REPLACE(TRIM(c.position_admin_libelle),'[[:space:]]+',' ') COLLATE utf8mb4_unicode_ci))")
+                      "TRIM(REGEXP_REPLACE(rp.libelle,'[[:space:]]+',' ')) COLLATE utf8mb4_unicode_ci = "
+                      "TRIM(REGEXP_REPLACE(c.position_admin_libelle,'[[:space:]]+',' ')) COLLATE utf8mb4_unicode_ci))")
     present = (f"({norm} = '' OR (NOT {stage} AND NOT {excluded} "
                f"AND ({text} OR ({reference_flag}))))")
     if mode == "present":

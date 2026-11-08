@@ -179,6 +179,15 @@ def populate_liste_sections(
     """
     groups = group_personnel(rows)
     assigned: set[str] = set()
+
+    def take_unassigned(people):
+        unique = []
+        for person in people:
+            key = person_key(person)
+            if key not in assigned:
+                assigned.add(key)
+                unique.append(person)
+        return unique
     missing: list[tuple[str, str, int]] = []
     out: list[tuple[str, str, str, list[tuple[str, list[ListeGeneraleRow]]]]] = []
     covered_codes: set[str] = set()
@@ -189,7 +198,7 @@ def populate_liste_sections(
             continue
         covered_codes.add(code)
         subs = _resolve_subdivision_labels(sec, resolve_subdivision_labels)
-        if not subs and code not in NO_SUBDIVISION_STRUCTURES:
+        if sec.group_by_subdivision and not subs and code not in NO_SUBDIVISION_STRUCTURES:
             continue
 
         if code in st_idx:
@@ -203,15 +212,10 @@ def populate_liste_sections(
         blocks: list[tuple[str, list[ListeGeneraleRow]]] = []
 
         if code in NO_SUBDIVISION_STRUCTURES:
-            merged: list[ListeGeneraleRow] = []
-            for sub in subs:
-                for p in find_people(groups, code, sub):
-                    pk = person_key(p)
-                    if pk not in assigned:
-                        merged.append(p)
+            merged = take_unassigned(
+                person for (group_code, _), people in groups.items()
+                if group_code == code for person in people)
             merged.sort(key=grade_sort_key)
-            for p in merged:
-                assigned.add(person_key(p))
             if merged:
                 blocks.append((MERGED_SUBDIVISIONS_KEY, merged))
             if blocks:
@@ -219,18 +223,10 @@ def populate_liste_sections(
             continue
 
         if not sec.group_by_subdivision:
-            people = [
-                p for p in groups.get((code, ""), [])
-                if person_key(p) not in assigned
-            ]
-            for sub in subs:
-                for p in find_people(groups, code, sub):
-                    pk = person_key(p)
-                    if pk not in assigned:
-                        people.append(p)
+            people = take_unassigned(
+                person for (group_code, _), group in groups.items()
+                if group_code == code for person in group)
             people = _sort_people(code, "", people)
-            for p in people:
-                assigned.add(person_key(p))
             if people:
                 blocks.append(("(Effectif)", people))
             if blocks:
@@ -243,18 +239,13 @@ def populate_liste_sections(
             if code.startswith("RG-") and is_rg_compagnie(sub):
                 block_labels.append(RG_COMMANDEMENT_MARKER)
 
-            people = [
-                p for p in find_people(groups, code, sub)
-                if person_key(p) not in assigned
-            ]
+            people = take_unassigned(find_people(groups, code, sub))
             people = _sort_people(code, sub, people)
 
             for lbl in block_labels:
                 if lbl == RG_COMMANDEMENT_MARKER:
                     blocks.append((RG_COMMANDEMENT_MARKER, []))
                 elif lbl == sub_label:
-                    for p in people:
-                        assigned.add(person_key(p))
                     blocks.append((sub_label, people))
 
         if blocks:
@@ -262,7 +253,7 @@ def populate_liste_sections(
 
     if include_orphans:
         for (code, sub), people in sorted(groups.items()):
-            remaining = [p for p in people if person_key(p) not in assigned]
+            remaining = take_unassigned(people)
             if not remaining:
                 continue
             missing.append((code, sub, len(remaining)))

@@ -5,6 +5,8 @@ from __future__ import annotations
 from sme_gend.services.search_text import normalize_search_text
 
 import html as html_lib
+from copy import copy
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -58,6 +60,19 @@ _ZOOM_STEPS = [0.5, 0.67, 0.75, 0.80, 0.90, 1.0, 1.10, 1.25, 1.50, 1.75, 2.0, 2.
 
 # Mode fixe : cette vue ne gère que les présents (Padmin « compte comme présent »).
 _PRESENCES_MODE = "present"
+
+
+def _zoomed_preview_html(source, factor):
+    """Scale explicit preview fonts without editing personnel text or export HTML."""
+    if factor == 1:
+        return source
+    def css(value):
+        return re.sub(r'(?i)(font-size\s*:\s*)(\d+(?:\.\d+)?)(pt|px)\b',
+            lambda match:match[1]+f'{float(match[2])*factor:g}'+match[3], value)
+    source = re.sub(r'(?is)(<style\b[^>]*>)(.*?)(</style\s*>)',
+                    lambda match:match[1]+css(match[2])+match[3], source)
+    return re.sub(r'''(?is)(\bstyle\s*=\s*)(["'])(.*?)\2''',
+                  lambda match:match[1]+match[2]+css(match[3])+match[2], source)
 
 
 # ─── Pages HTML d'état ─────────────────────────────────────────────────────────
@@ -1027,8 +1042,7 @@ class ListePresentView(QWidget):
         self._open_layout: Callable[[], None] | None = None
         self._loaded = False
 
-        # Actualisation sur le thread UI uniquement : le pilote ODBC Access/Jet
-        # échoue souvent hors thread principal (ex. « The driver did not supply an error! »).
+        # MySQL reads/rendering run in a retained worker; Qt receives only results.
         self._refresh_busy: bool = False
         self._refresh_token: int = 0
         self._refresh_pending: bool = False
@@ -1069,6 +1083,7 @@ class ListePresentView(QWidget):
 
         self._btn_toggle = QPushButton("⚙  Personnaliser ▶")
         self._btn_toggle.setCheckable(True)
+        self._btn_toggle.setToolTip('Personnaliser la mise en page de la liste')
         self._btn_toggle.setVisible(layout_cfg is not None)
         self._btn_toggle.toggled.connect(self._on_toggle_panel)
 
@@ -1152,14 +1167,17 @@ class ListePresentView(QWidget):
         toolbar.addWidget(self._btn_pdf)
         toolbar.addWidget(self._btn_export)
         toolbar.addWidget(self._btn_layout)
+        toolbar.addWidget(self._btn_export_menu)
         toolbar.addWidget(_vsep())
         toolbar.addWidget(self._btn_zoom_out)
         toolbar.addWidget(self._lbl_zoom)
         toolbar.addWidget(self._btn_zoom_in)
         toolbar.addWidget(_vsep())
-        toolbar.addWidget(QLabel("Recherche :"))
+        self._search_label = QLabel("Recherche :")
+        toolbar.addWidget(self._search_label)
         toolbar.addWidget(self._search, stretch=1)
         toolbar.addWidget(self._status_lbl)
+        self._toolbar_layout = toolbar
 
         # ── Zone de contenu (panneau gauche + aperçu HTML droite) ────────────
         self._content_row = QHBoxLayout()
@@ -1176,6 +1194,30 @@ class ListePresentView(QWidget):
         self._apply_preview_font()
         self._apply_preview_chrome()
         self._show_idle_state()
+        self._update_toolbar_density()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, '_toolbar_layout'):
+            self._update_toolbar_density()
+
+    def _update_toolbar_density(self):
+        compact = self.width() < 1100
+        self._btn_pdf.setVisible(not compact)
+        self._btn_export.setVisible(not compact)
+        self._btn_layout.setVisible(not compact and self._open_layout is not None)
+        self._btn_export_menu.setVisible(compact)
+        self._act_export_layout.setVisible(self._open_layout is not None)
+        self._search_label.setVisible(not compact)
+        self._search.setMinimumWidth(140 if compact else 220)
+        self._status_lbl.setMinimumWidth(120 if compact else 150)
+        self._status_lbl.setMaximumWidth(120 if compact else 220)
+        self._btn_toggle.setMaximumWidth(44 if compact else 16777215)
+        self._btn_toggle.setText('⚙' if compact else
+            ('⚙  Personnaliser ◀' if self._btn_toggle.isChecked() else '⚙  Personnaliser ▶'))
+        message = self._status_lbl.toolTip()
+        if message:
+            self._status_lbl.setText(message.split(' — ')[0] if compact else message)
 
     def refresh_theme_styles(self) -> None:
         """Rafraîchit l'aperçu papier et le panneau latéral après changement de thème."""
@@ -1189,7 +1231,7 @@ class ListePresentView(QWidget):
         apply_paper_preview_palette(self._preview)
 
     def _set_preview_html(self, html_content: str) -> None:
-        self._preview.setHtml(html_content)
+        self._display_html_source = html_content
         self._apply_preview_font()
         self._apply_preview_chrome()
 
@@ -1238,6 +1280,11 @@ class ListePresentView(QWidget):
 
     def mark_dirty(self) -> None:
         """Invalide l'aperçu : regénération manuelle via Actualiser."""
+        self._search_timer.stop()
+        self._auto_refresh_requested = False
+        self._refresh_pending = False
+        if self._preview_worker is not None and self._preview_worker.isRunning():
+            self._preview_worker.requestInterruption()
         self._preview_generation = getattr(self, "_preview_generation", 0) + 1
         self._preview_snapshot = None
         self._last_html = ""
@@ -1281,7 +1328,7 @@ class ListePresentView(QWidget):
 
     def set_open_layout_editor(self, fn: Callable[[], None] | None) -> None:
         self._open_layout = fn
-        self._btn_layout.setVisible(fn is not None)
+        self._update_toolbar_density()
 
     # ── Bascule panneau ───────────────────────────────────────────────────────
 
@@ -1310,21 +1357,28 @@ class ListePresentView(QWidget):
             if not require_permission(self, 'effectifs.layout'):
                 self._btn_toggle.setChecked(False)
                 return
-        panel = self._ensure_panel()
+        panel = self._ensure_panel() if checked else self._panel
         if panel is None:
             return
         panel.setVisible(checked)
         if checked:
             panel._ensure_data_caches()
-        self._btn_toggle.setText("⚙  Personnaliser ◀" if checked else "⚙  Personnaliser ▶")
+        self._update_toolbar_density()
 
     def _on_open_layout(self) -> None:
         if self._open_layout:
-            self._open_layout()
+            from sme_gend.services.auth_guard import require_permission
+            if require_permission(self, 'effectifs.layout'):
+                self._open_layout()
 
     # ── Actualisation (MySQL : thread secondaire ; HTML appliqué sur le thread UI) ──
 
     def _do_refresh(self, *, skip_confirm: bool = False) -> None:
+        from sme_gend.services.auth_guard import require_permission
+        if not require_permission(self, 'effectifs.presents'):
+            self.mark_dirty()
+            self._set_status('Accès refusé — droit de consultation des présents requis.', 'error')
+            return
         if self._refresh_busy:
             self._refresh_pending = True
             return
@@ -1356,12 +1410,16 @@ class ListePresentView(QWidget):
         from sme_gend.ui.bg_task import start_managed_thread
 
         self._preview_worker = worker
+        outcome = {}
+        def finished():
+            self._finish_refresh(outcome.get('html', ''), outcome.get('error') if outcome
+                else RuntimeError('Le chargement a été interrompu. Actualisez la liste.'), token)
         start_managed_thread(worker, self, signals=(
             (worker.progress, lambda p, t=token: self._refresh_progress.setValue(p)
                 if t == self._refresh_token else None),
-            (worker.succeeded, lambda html, t=token: self._finish_refresh(html, None, t)),
-            (worker.failed, lambda err, t=token: self._finish_refresh("", err, t)),
-        ))
+            (worker.succeeded, lambda html: outcome.update(html=html)),
+            (worker.failed, lambda err: outcome.update(error=err)),
+        ), on_finished=finished)
 
     def refresh_from_database(self) -> None:
         self._do_refresh(skip_confirm=True)
@@ -1377,11 +1435,23 @@ class ListePresentView(QWidget):
         self._refresh_busy = False
         self._refresh_progress.setVisible(False)
         self._btn_refresh.setEnabled(True)
-        if err is not None:
-            msg = str(err)
-            self._on_refresh_error(msg, token)
-        else:
-            self._on_refresh_done(html, token)
+        from sme_gend.services.auth_guard import session_has_permission
+        if not session_has_permission('effectifs.presents'):
+            self._loaded = False
+            self._last_html = ''
+            self._preview_snapshot = None
+            self._refresh_pending = False
+            self._preview_worker = None
+            self._set_preview_html(_idle_page())
+            self._set_status('Accès refusé — droit de consultation des présents requis.', 'error')
+            return
+        if getattr(self, '_render_generation', 0) == getattr(self, '_preview_generation', 0):
+            if err is not None:
+                self._on_refresh_error(str(err), token)
+            else:
+                self._refresh_progress.setValue(100)
+                self._on_refresh_done(html, token)
+        self._preview_worker = None
         if self._refresh_pending:
             self._refresh_pending = False
             QTimer.singleShot(0, lambda: self._do_refresh(skip_confirm=True))
@@ -1415,7 +1485,8 @@ class ListePresentView(QWidget):
         lbl.setStyleSheet(
             f"color:{fg};font-size:11px;" if fg else "font-size:11px;"
         )
-        lbl.setText(msg)
+        lbl.setText(msg.split(' — ')[0] if self.width()<1100 else msg)
+        lbl.setToolTip(msg)
 
     def _apply_preview_font(self) -> None:
         """Zoom = taille de police (QTextBrowser n’a pas zoomFactor comme WebEngine)."""
@@ -1423,6 +1494,14 @@ class ListePresentView(QWidget):
         f.setFamily("Calibri")
         f.setPointSizeF(10.0 * self._zoom_factor)
         self._preview.setFont(f)
+        source = getattr(self, '_display_html_source', None)
+        if source is not None:
+            vertical, horizontal = self._preview.verticalScrollBar(), self._preview.horizontalScrollBar()
+            relative_y = vertical.value()/max(1, vertical.maximum())
+            relative_x = horizontal.value()/max(1, horizontal.maximum())
+            self._preview.setHtml(_zoomed_preview_html(source, self._zoom_factor))
+            vertical.setValue(round(relative_y*vertical.maximum()))
+            horizontal.setValue(round(relative_x*horizontal.maximum()))
 
     # ── Zoom ──────────────────────────────────────────────────────────────────
 
@@ -1454,6 +1533,9 @@ class ListePresentView(QWidget):
 
     # ── Export PDF ────────────────────────────────────────────────────────────
 
+    def _export_snapshot_current(self, snapshot):
+        return self._loaded and not self._refresh_busy and self._preview_snapshot is snapshot
+
     def _export_pdf(self) -> None:
         from sme_gend.services.auth_guard import require_permission
 
@@ -1476,6 +1558,15 @@ class ListePresentView(QWidget):
         )
         if not path:
             return
+        if not path.lower().endswith('.pdf'):
+            path += '.pdf'
+        if not confirm_overwrite_file(self, path):
+            return
+        if not require_permission(self, 'effectifs.export'):
+            return
+        if not ListePresentView._export_snapshot_current(self, snapshot):
+            QMessageBox.information(self, 'PDF', 'Le contexte a changé. Actualisez la liste avant de l’exporter.')
+            return
         self._set_status("⏳ Génération PDF…", "muted")
         try:
             # Import tardif : sur certaines installs / bundles, QtPrintSupport peut
@@ -1493,12 +1584,20 @@ class ListePresentView(QWidget):
             )
             return
         try:
-            if count > self._service.PREVIEW_MAX_DETAIL_ROWS:
-                html_content = run_with_progress(
-                    self, "PDF détaillé", "Préparation de la liste complète…",
-                    lambda: self._service.render_snapshot_html(snapshot, detailed=True))
-                if html_content is None:
-                    return
+            self._service.validate_snapshot(snapshot, search_filter=snapshot.search,
+                                            presences_mode=snapshot.presence)
+            html_content = run_with_progress(
+                self, "PDF détaillé", "Préparation de la liste complète…",
+                lambda: self._service.render_snapshot_html(snapshot, detailed=True, for_print=True))
+            if html_content is None:
+                return
+            if not require_permission(self, 'effectifs.export'):
+                return
+            if not ListePresentView._export_snapshot_current(self, snapshot):
+                QMessageBox.information(self, 'PDF', 'Le contexte a changé. Actualisez la liste avant de l’exporter.')
+                return
+            self._service.validate_snapshot(snapshot, search_filter=snapshot.search,
+                                            presences_mode=snapshot.presence)
             doc = QTextDocument()
             doc.setHtml(html_content)
             from sme_gend.services.liste_generale_print import sync_document_to_printer
@@ -1521,7 +1620,8 @@ class ListePresentView(QWidget):
         if not require_permission(self, "effectifs.export"):
             return
         from copy import deepcopy
-        snapshot = deepcopy(self._preview_snapshot)
+        source_snapshot = self._preview_snapshot
+        snapshot = deepcopy(source_snapshot)
         if not self._loaded or self._refresh_busy or snapshot is None:
             QMessageBox.information(self, "Export Excel", "Actualisez d’abord l’aperçu avec les filtres souhaités.")
             return
@@ -1534,7 +1634,14 @@ class ListePresentView(QWidget):
         )
         if not path:
             return
+        if not path.lower().endswith('.xlsx'):
+            path += '.xlsx'
         if not confirm_overwrite_file(self, path):
+            return
+        if not require_permission(self, 'effectifs.export'):
+            return
+        if not ListePresentView._export_snapshot_current(self, source_snapshot):
+            QMessageBox.information(self, 'Export Excel', 'Le contexte a changé. Actualisez la liste avant de l’exporter.')
             return
         needle = snapshot.search or None
         dest   = Path(path)
@@ -1571,7 +1678,9 @@ class _ListePresentPreviewWorker(QThread):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self._service = service
+        self._service = copy(service) if isinstance(service, ListePresentService) else service
+        if isinstance(service, ListePresentService):
+            self._service._layout_config = copy(service._layout_config)
         self._search = search
         self._token = token
         self._export_snapshot = None
@@ -1585,7 +1694,7 @@ class _ListePresentPreviewWorker(QThread):
             # lancement d'un nouveau rafraîchissement.
             if self.isInterruptionRequested():
                 raise _PreviewInterrupted()
-            self.progress.emit(p)
+            self.progress.emit(min(99, p))
 
         try:
             options = {"on_progress": _on_progress}

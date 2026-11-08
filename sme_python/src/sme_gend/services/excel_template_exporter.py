@@ -123,6 +123,18 @@ def export_liste_fidele(
         out_ws.row_dimensions[r].height = tpl_ws.row_dimensions[r].height
     _copy_merges_for_rows(tpl_ws, out_ws, layout.header_row)
     _copy_column_widths(tpl_ws, out_ws, ncol)
+    out_ws.page_setup = copy(tpl_ws.page_setup)
+    out_ws.page_setup._parent = out_ws
+    # Printer-driver binary relationships belong to the source package. The
+    # portable page settings are copied, but its relationship must not dangle.
+    out_ws.page_setup.id = None
+    out_ws.page_margins = copy(tpl_ws.page_margins)
+    out_ws.print_options = copy(tpl_ws.print_options)
+    out_ws.sheet_properties.pageSetUpPr = copy(tpl_ws.sheet_properties.pageSetUpPr)
+    out_ws.HeaderFooter = copy(tpl_ws.HeaderFooter)
+    out_ws.print_title_rows = tpl_ws.print_title_rows or f'1:{layout.header_row}'
+    out_ws.print_title_cols = tpl_ws.print_title_cols
+    out_ws.freeze_panes = tpl_ws.freeze_panes
 
     r_sec = layout.style_row_section
     r_sub = layout.style_row_sub
@@ -183,6 +195,7 @@ def export_liste_fidele(
                     fit_wrapped_row(out_ws, cur, ncol, min_height=h_dat)
                     cur += 1
 
+    out_ws.print_area = f'A1:{get_column_letter(ncol)}{max(layout.header_row, cur - 1)}'
     tpl_wb.close()
     dest = Path(destination)
     dest.parent.mkdir(parents=True, exist_ok=True)

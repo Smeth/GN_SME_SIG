@@ -35,11 +35,12 @@ class LayoutConfigService:
     def path(self) -> Path:
         return liste_layout_config_path()
 
-    def load(self) -> ListeLayoutConfig:
+    def load(self, *, read_only: bool = False) -> ListeLayoutConfig:
         from sme_gend.services.layout_write_guard import load_layout_payload
         from sme_gend.repositories.reference_collection_guard import fingerprint
         from sme_gend.repositories.reference_write_guard import ReferenceConflictError
         from sme_gend.repositories.mysql_connection import has_import_transaction
+        from sme_gend.services.shared_config_write import may_write_config
 
         raw=load_layout_payload(self._settings)
         if raw is not None:
@@ -47,7 +48,7 @@ class LayoutConfigService:
             return cfg
         cfg=self.build_default_from_database();cfg.write_token=fingerprint(None)
         # A writer already owning a transaction will save its final layout once.
-        if not has_import_transaction(self._settings):
+        if not read_only and may_write_config('liste_present_layout') and not has_import_transaction(self._settings):
             try:self.save(cfg)
             except ReferenceConflictError:
                 raw=load_layout_payload(self._settings)
@@ -158,13 +159,13 @@ class LayoutConfigService:
 
     def present_counts_by_structure(self) -> dict[str, int]:
         """Nombre de présents par code structure (pour affichage dans l'éditeur de mise en page)."""
-        from sme_gend.padmin_present import padmin_counts_as_present
+        from sme_gend.config.liste_generale_scope import resolve_export_mois
         counts: dict[str, int] = {}
-        for r in self._liste_generale.fetch_all():
-            if padmin_counts_as_present(r.position_admin, "present"):
-                code = (r.structure or "").strip()
-                if code:
-                    counts[code] = counts.get(code, 0) + 1
+        for r in self._liste_generale.fetch_for_presence_mode(
+                'present', mois_ym=resolve_export_mois(self._settings)):
+            code = (r.structure or "").strip()
+            if code:
+                counts[code] = counts.get(code, 0) + 1
         return counts
 
     def count_subarme_occurrences(

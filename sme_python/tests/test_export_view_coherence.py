@@ -147,7 +147,9 @@ def test_present_export_uses_preview_snapshot_without_any_source_reread(tmp_path
     from sme_gend.config.settings import Settings
     service=mod.ListePresentService.__new__(mod.ListePresentService)
     service._settings=Settings(database_path=tmp_path/'unused.mdb',mysql_view_mois='2026-09')
-    layout=ListeLayoutConfig();service._layout_config=SimpleNamespace(load=lambda:layout)
+    layout=ListeLayoutConfig();service._layout_config=SimpleNamespace(load=lambda **kw:layout)
+    from contextlib import nullcontext
+    monkeypatch.setattr(mod,'mysql_read_snapshot',lambda settings:nullcontext())
     row=person(noms='ORIGINAL PREVIEW')
     service._fetch_all_data=lambda **kw:SimpleNamespace(flat=[],st_idx={},presents=[row],rows_all=[row])
     service.build_sections_data=lambda *a,**kw:[('SYN TITLE','','SYN',[('SYN UNIT',[row])])]
