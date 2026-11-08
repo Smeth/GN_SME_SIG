@@ -98,6 +98,26 @@ def _release(connection, name):
         raise RuntimeError("Verrou d'écriture perdu ; connexion fermée, vérifiez le résultat avant de réessayer.")
 
 
+def _finish_control_operation(connection, *, failed, cleanup, lease=None):
+    """Keep the original failure; lost maintenance ownership never becomes success."""
+    from sme_gend.repositories.mysql_connection import _close_control_connection
+    cleanup_failed = False
+    try:
+        if getattr(connection, 'open', None) is False:
+            raise MaintenanceActiveError('Connexion de maintenance perdue ; vérifiez la récupération avant toute reprise.')
+        cleanup()
+    except BaseException:
+        cleanup_failed = True
+        if lease is not None:
+            lease.keep_blocked()
+        if not failed:
+            raise
+        __import__('logging').getLogger(__name__).warning(
+            'Nettoyage de maintenance impossible ; erreur initiale conservée, état à vérifier.')
+    finally:
+        _close_control_connection(connection, failed=failed or cleanup_failed)
+
+
 @contextmanager
 def coordinated_write(settings, connection):
     """Register one writer, without serializing its business transaction."""
@@ -189,7 +209,8 @@ def coordinated_write(settings, connection):
                 try:
                     _release(connection, name)
                 except Exception:
-                    connection.close()
+                    from sme_gend.repositories.mysql_connection import _close_control_connection
+                    _close_control_connection(connection, failed=True)
                     if not failed:
                         raise
         if unfinished and not failed:
@@ -246,6 +267,7 @@ def centralized_maintenance(settings, *, reason="Restauration de la base", recov
     lease = None
     token = None
     recovering = False
+    failed = False
     try:
         if _scalar(connection, "SELECT GET_LOCK(%s,0)", (request,)) != 1:
             raise MaintenanceActiveError("Une maintenance est déjà en cours sur cette base.")
@@ -275,12 +297,15 @@ def centralized_maintenance(settings, *, reason="Restauration de la base", recov
         _wait_for_writers(connection, deadline=deadline)
         token = _owner.set(lease)
         yield lease
+    except BaseException:
+        failed = True
+        raise
     finally:
-        if recovering and lease is not None and __import__('sys').exc_info()[0] is not None:
+        if recovering and lease is not None and failed:
             lease.keep_blocked()
         if token is not None:
             _owner.reset(token)
-        try:
+        def cleanup():
             if marked and not lease.retained:
                 with connection.cursor() as cursor:
                     cursor.execute(f"UPDATE `{TABLE}` SET active=0,reason='',owner_connection=NULL WHERE id=1 AND token=%s", (lease.token,))
@@ -288,8 +313,7 @@ def centralized_maintenance(settings, *, reason="Restauration de la base", recov
                 _release(connection, lock_name(settings))
             if requested:
                 _release(connection, request)
-        finally:
-            connection.close()
+        _finish_control_operation(connection, failed=failed, cleanup=cleanup, lease=lease)
 
 
 def maintenance_status(settings):
@@ -313,6 +337,7 @@ def end_interrupted_maintenance(settings, *, expected_token, recovery_verified=F
     request = _request_lock(settings)
     requested = locked = worker_locked = False
     scope = None
+    failed = False
     try:
         if _scalar(connection, "SELECT GET_LOCK(%s,0)", (request,)) != 1:
             raise MaintenanceActiveError("La restauration est encore active ; reprise refusée.")
@@ -334,15 +359,17 @@ def end_interrupted_maintenance(settings, *, expected_token, recovery_verified=F
             actor=resolve_audit_actor(), payload={"detail": "Reprise des écritures après vérification de la récupération", "maintenance_token": expected_token})
         with connection.cursor() as cursor:
             cursor.execute(f"UPDATE `{TABLE}` SET active=0,reason='',owner_connection=NULL WHERE id=1 AND token=%s", (expected_token,))
+    except BaseException:
+        failed = True
+        raise
     finally:
         if scope is not None:
             _owner.reset(scope)
-        try:
+        def cleanup():
             if worker_locked:
                 _release(connection, worker_lock_name(settings))
             if locked:
                 _release(connection, lock_name(settings))
             if requested:
                 _release(connection, request)
-        finally:
-            connection.close()
+        _finish_control_operation(connection, failed=failed, cleanup=cleanup)

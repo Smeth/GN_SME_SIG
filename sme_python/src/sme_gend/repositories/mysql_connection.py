@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -12,6 +13,20 @@ import pymysql
 from pymysql.connections import Connection
 
 from sme_gend.config.settings import Settings
+
+_log = logging.getLogger(__name__)
+
+
+def _close_control_connection(connection, *, failed):
+    """Never replace a query/body failure with an error from socket cleanup."""
+    if getattr(connection, 'open', None) is False:
+        return
+    try:
+        connection.close()
+    except BaseException:
+        if not failed:
+            raise
+        _log.warning('Fermeture de la connexion de contrôle impossible ; erreur initiale conservée.')
 
 
 _initialization_scope = threading.local()
@@ -186,6 +201,7 @@ def schema_metadata_lock(settings: Settings):
     params.update(autocommit=True, read_timeout=65)
     connection = pymysql.connect(**params)
     acquired = False
+    failed = False
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT GET_LOCK(%s,%s)", (name, 60))
@@ -193,16 +209,30 @@ def schema_metadata_lock(settings: Settings):
         if not acquired:
             raise TimeoutError("Le schéma est déjà utilisé par une migration ou une sauvegarde.")
         held.add(key)
+        body_failed = False
         try:
             yield
+        except BaseException:
+            body_failed = True
+            raise
         finally:
             held.discard(key)
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT RELEASE_LOCK(%s)", (name,))
-                if cursor.fetchone()[0] != 1:
-                    raise RuntimeError("Verrou de schéma perdu ; vérifiez la fin de l'opération.")
+            try:
+                if getattr(connection, 'open', None) is False:
+                    raise RuntimeError("Connexion du verrou de schéma perdue ; vérifiez la fin de l'opération.")
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT RELEASE_LOCK(%s)", (name,))
+                    if cursor.fetchone()[0] != 1:
+                        raise RuntimeError("Verrou de schéma perdu ; vérifiez la fin de l'opération.")
+            except BaseException:
+                if not body_failed:
+                    raise
+                _log.warning('Libération du verrou de schéma impossible ; erreur initiale conservée.')
+    except BaseException:
+        failed = True
+        raise
     finally:
-        connection.close()
+        _close_control_connection(connection, failed=failed)
 
 
 @contextmanager
@@ -231,6 +261,7 @@ def _mysql_initialization_lock(settings: Settings) -> Generator[None, None, None
     params["autocommit"] = True
     params["read_timeout"] = 65  # GET_LOCK may legitimately wait up to 60 s.
     conn = pymysql.connect(**params)
+    failed = False
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT GET_LOCK(%s, %s)", (lock_name, 60))
@@ -241,22 +272,36 @@ def _mysql_initialization_lock(settings: Settings) -> Generator[None, None, None
                 f"pour {settings.mysql_database!r} en 60 secondes."
             )
         held.add(key)
+        body_failed = False
         try:
             from sme_gend.services.database_maintenance import coordinated_write
             with coordinated_write(settings, conn):
                 yield
+        except BaseException:
+            body_failed = True
+            raise
         finally:
             held.discard(key)
-            with conn.cursor() as cur:
-                cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
-                released = cur.fetchone()
-            if not released or released[0] != 1:
-                raise RuntimeError(
-                    f"Le verrou d'initialisation MySQL de "
-                    f"{settings.mysql_database!r} n'a pas été libéré."
-                )
+            try:
+                if getattr(conn, 'open', None) is False:
+                    raise RuntimeError("Connexion d'initialisation perdue ; vérifiez la fin de l'opération.")
+                with conn.cursor() as cur:
+                    cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+                    released = cur.fetchone()
+                if not released or released[0] != 1:
+                    raise RuntimeError(
+                        f"Le verrou d'initialisation MySQL de "
+                        f"{settings.mysql_database!r} n'a pas été libéré."
+                    )
+            except BaseException:
+                if not body_failed:
+                    raise
+                _log.warning("Libération du verrou d'initialisation impossible ; erreur initiale conservée.")
+    except BaseException:
+        failed = True
+        raise
     finally:
-        conn.close()
+        _close_control_connection(conn, failed=failed)
 
 
 class MySQLConnection:

@@ -1,6 +1,7 @@
 """Consistent closure backups, published only after a complete dump."""
 from __future__ import annotations
 import math
+import logging
 import os
 import shutil
 import subprocess
@@ -12,6 +13,8 @@ from sme_gend.config.settings import Settings
 from sme_gend.repositories.mysql_connection import MySQLConnection, has_import_transaction, schema_metadata_lock
 from sme_gend.services.safe_paths import atomic_destination, file_key
 from sme_gend.services.mysql_private_options import private_mysql_options
+
+_log = logging.getLogger(__name__)
 
 def _find_mysqldump() -> str | None:
     explicit = (os.environ.get("SME_MYSQLDUMP_PATH") or "").strip()
@@ -96,6 +99,7 @@ def _python_sql_dump_locked(settings: Settings, dest: Path, *, selected_tables=N
         with conn.cursor() as cur:
             cur.execute("SET SESSION sql_mode='NO_AUTO_VALUE_ON_ZERO'")
         counts = {}
+        failed = False
         try:
             with conn.cursor() as cur:
                 cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
@@ -120,10 +124,20 @@ def _python_sql_dump_locked(settings: Settings, dest: Path, *, selected_tables=N
                             counts[table] += 1
                             file.write(f"INSERT INTO {quoted} ({columns}) VALUES ("+",".join(_literal(value) for value in row)+");\n")
                 file.write("SET FOREIGN_KEY_CHECKS=1;\n-- SME dump complete\n")
+        except BaseException:
+            failed = True
+            raise
         finally:
-            conn.rollback()  # Read snapshot only; never validate a caller's write.
-            with conn.cursor() as cur:
-                cur.execute("SET SESSION sql_mode=%s",(original_mode,))
+            try:
+                if getattr(conn, 'open', None) is False:
+                    raise RuntimeError('Connexion MySQL perdue pendant la sauvegarde.')
+                conn.rollback()  # Read snapshot only; never validate a caller's write.
+                with conn.cursor() as cur:
+                    cur.execute("SET SESSION sql_mode=%s",(original_mode,))
+            except BaseException:
+                if not failed:
+                    raise
+                _log.warning('Nettoyage de la connexion de sauvegarde impossible ; erreur initiale conservée.')
     return counts
 
 
