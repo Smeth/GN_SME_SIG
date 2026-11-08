@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sme_gend.services.export_progress import tracked_export, export_phase, export_rows
+
 from pathlib import Path
 
 from sme_gend.services.excel_style_helpers import write_literal_cell_value, writable_cell
@@ -13,6 +15,7 @@ from sme_gend.models.gain_perte import GainPerteRow
 from sme_gend.services.grade_label_format import format_grade_display
 
 
+@tracked_export
 def export_gain_perte_workbook(
     dest: Path,
     *,
@@ -38,7 +41,7 @@ def export_gain_perte_workbook(
         write_literal_cell_value(ws, 2, col, h)
         writable_cell(ws, 2, col).font = Font(bold=True)
 
-    for i, r in enumerate(rows, start=3):
+    for i, r in enumerate(export_rows(rows), start=3):
         write_literal_cell_value(ws, i, 1, str(r.id or ""))
         write_literal_cell_value(ws, i, 2, format_grade_display(r.grade, grades))
         write_literal_cell_value(ws, i, 3, r.nom or "")
@@ -62,6 +65,8 @@ def export_gain_perte_workbook(
 
     from sme_gend.services.excel_style_helpers import configure_table_print
     configure_table_print(ws, header_row=2, last_row=last_row, columns=len(headers))
+    export_phase("write", total=1, detail="Écriture du document final")
     wb.save(dest)
+    export_phase("finalize", detail="Confirmation du fichier et historique")
     from sme_gend.services.doc_gen_log import log_saved_list
     log_saved_list(dest, rows, doc_type="gains_pertes", settings=settings, mois=mois_ym or "")

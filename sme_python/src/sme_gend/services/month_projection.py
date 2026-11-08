@@ -5,6 +5,7 @@ from datetime import date
 from sme_gend.repositories.mysql_connection import MySQLConnection
 from sme_gend.services.access_date_parse import parse_access_date
 from sme_gend.services.mysql_import_period import first_day_of_month, last_day_of_month
+from sme_gend.services.operation_progress import operation_progress
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,15 @@ def _project_rows(settings, rows, components_by_agent, *, after=None, effective_
     """Load each history family in batches, then apply changed fields in CASE batches."""
     if not rows:
         return 0
+    with operation_progress((('histories', 'Lecture des historiques par lots'),
+                             ('compute', 'Calcul des situations des agents'),
+                             ('write', 'Application des situations modifiées'))) as operation:
+        return _project_rows_with_progress(settings, rows, components_by_agent,
+            after=after, effective_bounds=effective_bounds, operation=operation)
+
+
+def _project_rows_with_progress(settings, rows, components_by_agent, *, after, effective_bounds, operation):
+    operation.start('histories')
     from sme_gend.models.liste_generale import ListeGeneraleRow
     from sme_gend.services.mysql_ref_etl import load_ref_cache_from_db, load_subdiv_flat_rows, prepare_carriere_write_fields
     wanted = set().union(*(components_by_agent.values()))
@@ -54,22 +64,31 @@ def _project_rows(settings, rows, components_by_agent, *, after=None, effective_
              'diplome': ('agent_diplome', 'date_obtention'),
              'affectation': ('agent_affectation', 'date_affectation')}
     aids = sorted(components_by_agent)
+    families = sorted(wanted.intersection(specs))
+    total_batches = len(families) * ((len(aids) + 499) // 500)
+    read_batches = 0
+    operation.update('histories', current=0, total=total_batches)
     with MySQLConnection(settings).connect() as conn:
         with conn.cursor() as cur:
             cache, flat = load_ref_cache_from_db(cur), load_subdiv_flat_rows(cur)
-            for component in wanted.intersection(specs):
+            for component in families:
                 table, stamp = specs[component]
                 for offset in range(0, len(aids), 500):
                     chunk = aids[offset:offset + 500]
                     found = _records(cur, f'SELECT * FROM {table} WHERE agent_id IN (' +
                                      ','.join(['%s'] * len(chunk)) + f') ORDER BY {stamp} DESC,id DESC', tuple(chunk))
+                    read_batches += 1
+                    operation.update('histories', current=read_batches, total=total_batches,
+                        detail=f'{component} : {min(offset + len(chunk), len(aids)):,}/{len(aids):,} agent(s) lus')
                     for event in found:
                         effective = parse_access_date(event[stamp])
                         if effective is None or (after is not None and effective <= after):
                             continue  # An unknown Access date is not an inferred transition.
                         histories[component].setdefault(int(event['agent_id']), []).append((effective, event))
+            operation.finish('histories')
+            operation.start('compute', total=len(rows))
             changes = []
-            for row in rows:
+            for index, row in enumerate(rows, 1):
                 aid = int(row['agent_id'])
                 cutoff = min(last_day_of_month(_month(row['annee_mois'])),
                              parse_access_date(row.get('date_fin')) or date.max)
@@ -106,6 +125,10 @@ def _project_rows(settings, rows, components_by_agent, *, after=None, effective_
                 changed = {column: value for column, value in fields.items() if row.get(column) != value}
                 if changed:
                     changes.append((int(row['id']), changed))
+                if index % 100 == 0 or index == len(rows):
+                    operation.update('compute', current=index, total=len(rows), detail=f'{index:,}/{len(rows):,} situation(s) calculée(s)')
+            operation.finish('compute')
+            operation.start('write', total=len(changes))
             for offset in range(0, len(changes), 200):
                 batch = changes[offset:offset + 200]
                 columns = sorted(set().union(*(set(values) for _, values in batch)))
@@ -120,6 +143,9 @@ def _project_rows(settings, rows, components_by_agent, *, after=None, effective_
                 ids = [cid for cid, _ in batch]
                 cur.execute('UPDATE carriere_situation SET ' + ','.join(assignments) + ' WHERE id IN (' +
                             ','.join(['%s'] * len(ids)) + ')', (*params, *ids))
+                operation.update('write', current=offset + len(batch), total=len(changes),
+                    detail=f'{offset + len(batch):,}/{len(changes):,} situation(s) mise(s) à jour')
+    operation.finish('write')
     return len(changes)
 
 
@@ -172,6 +198,17 @@ def refresh_month_projection(settings, month):
 
 
 def prepare_month_projection(settings, target_month, source_month, *, expected_source_revision=None):
+    with operation_progress((('context', 'Contrôle de la source et du mois cible'),
+                             ('baseline', 'Création de la situation mensuelle de référence'),
+                             ('membership', 'Projection des entrées et sorties réelles'),
+                             ('projection', 'Application des historiques aux agents'),
+                             ('audit', 'Enregistrement du bilan de projection'))) as operation:
+        return _prepare_month_projection_with_progress(settings, target_month, source_month,
+            expected_source_revision=expected_source_revision, operation=operation)
+
+
+def _prepare_month_projection_with_progress(settings, target_month, source_month, *, expected_source_revision, operation):
+    operation.start('context')
     from sme_gend.services.publication_write_barrier import assert_exclusive_publication_barrier
     from sme_gend.services.schema_migrations import require_capability
     from sme_gend.services.active_month_guard import require_period_scope
@@ -215,6 +252,8 @@ def prepare_month_projection(settings, target_month, source_month, *, expected_s
                     raise ValueError('Le mois cible contient déjà des données ; aucune projection remplacée.')
             else:
                 pid = ensure_sme_periode(conn, target, statut='Préparé')
+            operation.finish('context')
+            operation.start('baseline', detail='Copie de la référence mensuelle ; attente du serveur')
             cur.execute('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() '
                         "AND TABLE_NAME='carriere_situation' ORDER BY ORDINAL_POSITION")
             columns = [str(row[0]) for row in cur.fetchall() if row[0] not in
@@ -229,16 +268,26 @@ def prepare_month_projection(settings, target_month, source_month, *, expected_s
             created = int(cur.rowcount)
             cur.execute('SELECT DISTINCT agent_id FROM carriere_situation WHERE sme_periode_id=%s', (source_id,))
             source_agents = {int(row[0]) for row in cur.fetchall()}
+            operation.finish('baseline', detail=f'{created:,} situation(s) créée(s)')
+            operation.start('membership')
             from sme_gend.services.membership_projection import refresh_membership_projection
             refresh_membership_projection(settings, target, source_period_id=source_id, target_period_id=pid)
             rows = _records(cur, 'SELECT c.*,p.annee_mois FROM carriere_situation c JOIN sme_periode p '
                             'ON p.id=c.sme_periode_id WHERE c.sme_periode_id=%s', (pid,))
             created = len(rows)
+            operation.finish('membership', detail=f'{created:,} agent(s) dans le mois cible')
+    operation.start('projection', total=2)
     components = {int(row['agent_id']): set(COMPONENT_COLUMNS) for row in rows}
-    changed = _project_rows(settings, [row for row in rows if int(row['agent_id']) in source_agents],
-                            components, after=last_day_of_month(source))
-    changed += _project_rows(settings, [row for row in rows if int(row['agent_id']) not in source_agents], components)
+    with operation.subtask('projection', current=0, total=2, detail='Historique des agents du mois source'):
+        changed = _project_rows(settings, [row for row in rows if int(row['agent_id']) in source_agents],
+                                components, after=last_day_of_month(source))
+    with operation.subtask('projection', current=1, total=2, detail='Historique des nouveaux agents'):
+        changed += _project_rows(settings, [row for row in rows if int(row['agent_id']) not in source_agents], components)
+    operation.finish('projection')
+    operation.start('audit')
     record_business_action(settings, action='month_projection_prepared', module='workflow', entity_id=pid,
         after={'source_month': source, 'target_month': target, 'created_rows': created,
                'projected_agents': len(components), 'changed_rows': changed, 'source_revision': revision}, mois=target)
+    from sme_gend.services.operation_commit_progress import finish_after_commit
+    finish_after_commit(settings, operation, 'audit', detail='Projection enregistrée dans MySQL')
     return MonthProjectionResult(target, int(pid), created, len(components), revision, changed)

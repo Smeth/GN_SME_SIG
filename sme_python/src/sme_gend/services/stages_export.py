@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sme_gend.services.export_progress import tracked_export, export_phase, export_rows
+
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -29,6 +31,7 @@ def _autosize(ws, headers: tuple[str, ...], first_row: int, last_row: int) -> No
     configure_table_print(ws, header_row=first_row - 1, last_row=last_row, columns=len(headers))
 
 
+@tracked_export
 def export_stages_workbook(
     dest: Path,
     *,
@@ -60,7 +63,7 @@ def export_stages_workbook(
         write_literal_cell_value(ws, 2, col, h)
         writable_cell(ws, 2, col).font = Font(bold=True)
 
-    for i, r in enumerate(rows, start=3):
+    for i, r in enumerate(export_rows(rows), start=3):
         key = r.satellite_join_key()
         d = stage_detail_for_row(r, details)
         write_literal_cell_value(ws, i, 1, key)
@@ -75,11 +78,14 @@ def export_stages_workbook(
         write_literal_cell_value(ws, i, 10, (d.session if d else '') or '')
 
     _autosize(ws, headers, 3, max(3, len(rows) + 2))
+    export_phase("write", total=1, detail="Écriture du document final")
     wb.save(dest)
+    export_phase("finalize", detail="Confirmation du fichier et historique")
     from sme_gend.services.doc_gen_log import log_saved_list
     log_saved_list(dest, rows, doc_type="stages", settings=settings, meta={"categorie": title})
 
 
+@tracked_export
 def export_stage_interne_workbook(
     dest: Path,
     *,

@@ -2,6 +2,7 @@
 from collections import Counter
 from datetime import date, datetime, timezone
 from pathlib import Path
+from sme_gend.services.operation_progress import operation_progress
 
 
 # Fixed SQL identifiers only. Repeated identical Access observations are folded.
@@ -49,6 +50,17 @@ def fold_interval_facts(facts):
 
 
 def capture_period_activity(settings,start,end):
+    with operation_progress((('reference', 'Lecture de l’effectif mensuel de référence'),
+                             ('sources', 'Lecture des registres datés'),
+                             ('fold', 'Regroupement des observations identiques'),
+                             ('validate', 'Finalisation de la lecture cohérente'))) as progress:
+        progress.start('reference', detail='Vérification de la période et lecture des mois disponibles…')
+        result = _capture_period_activity(settings,start,end,progress)
+        progress.finish('validate', detail=f'{len(result["events"])} événement(s) daté(s) retenu(s).')
+        return result
+
+
+def _capture_period_activity(settings,start,end,progress):
     _permissions()
     start,end=_date(start),_date(end)
     if start>end:raise ValueError('La date de début doit précéder la date de fin.')
@@ -78,6 +90,7 @@ def capture_period_activity(settings,start,end):
                 reference=max(candidates) if candidates else None
                 if migrated and reference:refresh_month_projection(settings,reference)
                 snapshot=capture_month_reconciliation(settings,reference) if reference else None
+                progress.finish('reference', detail=f'Effectif de référence : {reference or "aucun mois disponible"}.')
                 facts=[];undated={}
                 # Old Access movement dates were often generated as month boundaries.
                 # Preserve their observations without asserting a real effective day.
@@ -87,7 +100,10 @@ def capture_period_activity(settings,start,end):
                 if capability_available(settings,'dated_movements'):
                     sources.append(('agent_effectif_movement','effective_date','Mouvement effectif',
                                     ('category','movement_kind','reference_note')))
-                for table,stamp,label,details in sources:
+                progress.start('sources', total=len(sources)+1, detail='Lecture des événements datés par registre…')
+                for source_index,(table,stamp,label,details) in enumerate(sources,1):
+                    progress.update('sources', current=source_index-1, total=len(sources)+1,
+                                    detail=f'Registre {source_index}/{len(sources)+1} : {table}…')
                     cursor.execute(f'SELECT COUNT(*) FROM `{table}` WHERE `{stamp}` IS NULL')
                     undated[table]=int(cursor.fetchone()[0])
                     columns=','.join('e.`'+field+'`' for field in details)
@@ -102,6 +118,10 @@ def capture_period_activity(settings,start,end):
                         facts.append(dict(source=table,source_id=int(record[0]),agent_id=int(record[1]),
                             date=_date(record[2]).isoformat(),name=record[3] or '',kind=label,
                             detail=' · '.join(str(value) for value in record[4:] if value is not None and str(value).strip())))
+                    progress.update('sources', current=source_index, total=len(sources)+1,
+                                    detail=f'{table} : {len(records)} observation(s) datée(s) lue(s).')
+                progress.update('sources', current=len(sources), total=len(sources)+1,
+                                detail='Lecture des retours explicitement enregistrés…')
                 cursor.execute("SELECT e.id,e.agent_id,e.date_debut,e.position_admin,e.reference_decision,a.noms "
                     "FROM agent_position_event e JOIN agent a ON a.id=e.agent_id "
                     "WHERE e.date_debut BETWEEN %s AND %s AND (e.reference_decision LIKE 'sgi:auto:activity_return:%%' "
@@ -112,7 +132,11 @@ def capture_period_activity(settings,start,end):
                         date=_date(stamp).isoformat(),name=name or '',kind='Retour enregistré',detail=str(position or '')))
                 if len(facts)>MAX_SOURCE_ROWS:
                     raise ValueError('La période dépasse 50 000 observations ; choisissez une période plus courte.')
+                progress.finish('sources', detail=f'{len(facts)} observation(s) lue(s) dans {len(sources)+1} registre(s).')
+        progress.start('fold', total=len(facts), detail='Regroupement des observations historiques identiques…')
         rows=fold_interval_facts(facts)
+        progress.finish('fold', detail=f'{len(facts)} observation(s) regroupée(s) en {len(rows)} événement(s).')
+        progress.start('validate', detail='Clôture de la lecture cohérente de la période…')
     return {'start':start.isoformat(),'end':end.isoformat(),'reference_month':reference,
         'reference_date':last_day_of_month(reference).isoformat() if reference else None,
         'reference_headcount':len(snapshot.rows) if snapshot else None,
@@ -122,7 +146,20 @@ def capture_period_activity(settings,start,end):
 
 
 def export_period_activity(settings,start,end,destination):
+    with operation_progress((('capture', 'Collecte cohérente des données de la période'),
+                             ('workbook', 'Remplissage des trois feuilles Excel'),
+                             ('save', 'Enregistrement du classeur Excel'),
+                             ('journal', 'Journalisation du rapport enregistré'))) as progress:
+        progress.start('capture', detail='Lecture de l’effectif de référence et des événements…')
+        result = _export_period_activity(settings,start,end,destination,progress)
+        progress.finish('journal', detail='Rapport enregistré ; historique à vérifier.' if result.get('journal_warning')
+                        else 'Rapport enregistré et journalisé.')
+        return result
+
+
+def _export_period_activity(settings,start,end,destination,progress):
     data=capture_period_activity(settings,start,end)
+    progress.finish('capture', detail=f'{len(data["events"])} événement(s) à exporter.')
     _permissions()
     from openpyxl import Workbook
     from openpyxl.styles import Font,PatternFill
@@ -135,6 +172,7 @@ def export_period_activity(settings,start,end,destination):
     if destination.suffix.lower()!='.xlsx':raise ValueError('Le rapport doit être enregistré en .xlsx.')
     for template in (settings.template_liste_present_path,settings.template_numerique_path,settings.template_detaches_path):
         if template and destination==Path(template).resolve():raise ValueError('Le modèle ne peut pas être remplacé.')
+    progress.start('workbook', total=len(data['events']), detail='Création des feuilles de synthèse, événements et dates absentes…')
     book=Workbook();summary=book.active;summary.title='Synthèse période'
     summary.append(['Période',date.fromisoformat(data['start']),date.fromisoformat(data['end'])])
     summary['B1'].number_format=summary['C1'].number_format='dd/mm/yyyy'
@@ -148,11 +186,14 @@ def export_period_activity(settings,start,end,destination):
     for kind,count in sorted(Counter(row['kind'] for row in data['events']).items()):summary.append([kind,count])
     events=book.create_sheet('Événements datés')
     events.append(['Date enregistrée','Agent ID','Nom','Événement','Détail','Observations sources','Plusieurs valeurs','Source','IDs sources'])
-    for row in data['events']:
+    for index,row in enumerate(data['events'],1):
         events.append([date.fromisoformat(row['date']),str(row['agent_id']),spreadsheet_cell(row['name']),
             row['kind'],spreadsheet_cell(row['detail']),row['observations'],'À vérifier' if row['multiple_values'] else '',
             row['source'],','.join(map(str,row['source_ids']))])
         events.cell(events.max_row,1).number_format='dd/mm/yyyy'
+        if index%500==0 or index==len(data['events']):
+            progress.update('workbook', current=index, total=len(data['events']),
+                            detail=f'{index}/{len(data["events"])} événement(s) écrit(s) dans le classeur.')
     missing=book.create_sheet('Dates absentes')
     missing.append(['Registre','Nombre de fiches sans date (toutes périodes)'])
     for source,count in data['undated_records'].items():missing.append([source,count])
@@ -160,9 +201,13 @@ def export_period_activity(settings,start,end,destination):
         sheet.freeze_panes='A2';sheet.auto_filter.ref=sheet.dimensions
         for cell in sheet[1]:cell.font=Font(bold=True,color='FFFFFF');cell.fill=PatternFill('solid',fgColor='1E287D')
         for column,width in {'A':24,'B':24,'C':42,'D':31,'E':70,'F':24,'G':23,'H':27,'I':27}.items():sheet.column_dimensions[column].width=width
+    progress.finish('workbook', detail='Trois feuilles remplies et mises en forme.')
+    progress.start('save', detail='Écriture et publication atomique du fichier Excel…')
     with atomic_destination(destination,temporary_suffix='.xlsx') as staged:
         book.save(staged);_permissions()
     book.close()
+    progress.finish('save', detail='Classeur enregistré sur disque.')
+    progress.start('journal', detail='Enregistrement du rapport dans l’historique central…')
     try:
         from sme_gend.services.doc_gen_log import log_doc_generation
         log_doc_generation(doc_type='period_activity',format='xlsx',count=len(data['events']),

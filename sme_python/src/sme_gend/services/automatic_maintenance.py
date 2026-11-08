@@ -9,6 +9,7 @@ from sme_gend.repositories.mysql_connection import MySQLConnection,mysql_databas
 from sme_gend.repositories.reference_collection_guard import fingerprint
 from sme_gend.repositories.reference_write_guard import ReferenceConflictError
 from sme_gend.services.shared_reference_write import shared_reference_write,mark_reference_write
+from sme_gend.services.operation_progress import operation_progress
 
 TABLES=('ref_structure','ref_grade','ref_position_admin','ref_fonction','ref_fonction_structure',
     'ref_subdivision_noeud','ref_subdivision_arme','ref_diplome','agent','sme_periode',
@@ -60,13 +61,24 @@ def active_month(settings):
 
 
 def _capture(cur,*,locking):
+    with operation_progress((('metadata','Contrôle du schéma des tables partagées'),
+                             ('tables','Lecture des tables et calcul des empreintes'))) as progress:
+        progress.start('metadata', detail='Lecture des tables présentes dans la base…')
+        return _capture_tables(cur,locking=locking,progress=progress)
+
+
+def _capture_tables(cur,*,locking,progress):
     cur.execute('SELECT TABLE_NAME,ENGINE,TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()')
     available={name:(str(engine).upper(),kind) for name,engine,kind in cur.fetchall() if name in TABLES}
     if not {'agent','carriere_situation','sme_periode','app_config'}<=available.keys():
         raise RuntimeError('Schema incomplet : initialisez cette base avec l application avant la maintenance.')
     state=[]
-    for table in TABLES:
-        if table not in available:continue
+    tables=[table for table in TABLES if table in available]
+    progress.finish('metadata', detail=f'{len(tables)} table(s) partagée(s) à contrôler.')
+    progress.start('tables', total=len(tables), detail='Lecture des tables pour préparer la maintenance…')
+    for table_index,table in enumerate(tables,1):
+        progress.update('tables', current=table_index-1, total=len(tables),
+                        detail=f'Table {table_index}/{len(tables)} : {table} — lecture en cours…')
         if available[table]!=('INNODB','BASE TABLE'):raise RuntimeError('Maintenance transactionnelle : tables InnoDB requises.')
         cur.execute('SELECT COLUMN_NAME,COLUMN_TYPE,IS_NULLABLE,COLUMN_DEFAULT,EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s ORDER BY ORDINAL_POSITION',(table,))
         columns=cur.fetchall();names=[row[0] for row in columns]
@@ -92,7 +104,12 @@ def _capture(cur,*,locking):
                 value=json.loads(row[0]) if isinstance(row[0],(str,bytes)) else row[0]
                 encoded=json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False).encode('utf-8')
                 digest.update(len(encoded).to_bytes(8,'big'));digest.update(encoded);count+=1
+            progress.update('tables', current=table_index-1, total=len(tables),
+                            detail=f'Table {table_index}/{len(tables)} : {table} — {count} ligne(s) lue(s).')
         state.append((table,schema,count,digest.hexdigest()))
+        progress.update('tables', current=table_index, total=len(tables),
+                        detail=f'Table {table_index}/{len(tables)} : {table} — {count} ligne(s) contrôlée(s).')
+    progress.finish('tables', detail=f'Empreintes calculées pour {len(tables)} table(s).')
     return tuple(state)
 
 

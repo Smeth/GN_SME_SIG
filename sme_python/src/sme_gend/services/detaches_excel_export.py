@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from sme_gend.services.export_progress import tracked_export, export_phase, export_rows
 
 from sme_gend.services.excel_style_helpers import write_literal_cell_value, writable_cell
 from openpyxl import Workbook, load_workbook
@@ -47,7 +48,7 @@ def _write_sme_detaches_sheet(ws, rows, cfg: DetachesFileConfig, grades=None) ->
     headers = _sme_detaches_headers()
     for col, h in enumerate(headers, start=1):
         write_literal_cell_value(ws, 1, col, h)
-    for i, r in enumerate(rows, start=1):
+    for i, r in enumerate(export_rows(rows, label=ws.title), start=1):
         sig = sigle_ou_subdivision(r)
         write_literal_cell_value(ws, i + 1, 1, i)
         write_literal_cell_value(ws, i + 1, 2, r.noms)
@@ -90,6 +91,7 @@ def count_official_detache_lignes(template_path: Path | None) -> int | None:
         wb.close()
 
 
+@tracked_export
 def export_detaches_workbook(
     settings: Settings,
     destination: Path,
@@ -127,12 +129,15 @@ def export_detaches_workbook(
         grades_ref = GradeRepository(settings).fetch_all()
     except Exception:
         grades_ref = []
+    export_phase("render", total=len(rows))
     _write_sme_detaches_sheet(ws, rows, cfg, grades_ref)
 
     dest = Path(destination)
     dest.parent.mkdir(parents=True, exist_ok=True)
+    export_phase("write", total=1, detail="Enregistrement du classeur des détachés")
     wb.save(dest)
     wb.close()
+    export_phase("finalize", detail="Historique du document")
 
     from sme_gend.config.liste_generale_scope import resolve_export_mois
     from sme_gend.services.doc_gen_log import log_doc_generation
@@ -151,6 +156,7 @@ def export_detaches_workbook(
     )
 
 
+@tracked_export
 def export_detaches_workbook_full(
     settings: Settings,
     destination: Path,
@@ -172,6 +178,7 @@ def export_detaches_workbook_full(
     )
     grades = GradeRepository(settings).fetch_all()
     tpl = settings.template_detaches_path
+    export_phase("render", total=2*len(rows), detail="Remplissage de DETACHE et SME_Detaches")
 
     if use_template and tpl is not None and tpl.is_file():
         wb = load_workbook(tpl, data_only=False, keep_vba=False)
@@ -192,8 +199,10 @@ def export_detaches_workbook_full(
 
     dest = Path(destination)
     dest.parent.mkdir(parents=True, exist_ok=True)
+    export_phase("write", total=1, detail="Enregistrement du classeur complet des détachés")
     wb.save(dest)
     wb.close()
+    export_phase("finalize", detail="Historique du document")
 
     from sme_gend.config.liste_generale_scope import resolve_export_mois
     from sme_gend.services.doc_gen_log import log_doc_generation

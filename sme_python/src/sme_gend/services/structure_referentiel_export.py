@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sme_gend.services.export_progress import tracked_export, export_phase, export_rows
+
 from sme_gend.services.excel_style_helpers import write_literal_cell_value, writable_cell
 
 from collections.abc import Mapping
@@ -20,6 +22,7 @@ def _literal_cell(ws, row, col, value):
     return writable_cell(ws, row, col)
 
 
+@tracked_export
 def export_structures_referentiel(
     path: Path,
     structures: list[StructureRow],
@@ -83,7 +86,9 @@ def export_structures_referentiel(
     ws.auto_filter.ref = f"A{hdr_row}:G{last}"
     ws.freeze_panes = f"A{data_start}"
 
+    export_phase("write", total=1, detail="Écriture du document final")
     wb.save(str(path))
+    export_phase("finalize", detail="Confirmation du fichier et historique")
     from sme_gend.services.doc_gen_log import log_doc_generation
 
     log_doc_generation(

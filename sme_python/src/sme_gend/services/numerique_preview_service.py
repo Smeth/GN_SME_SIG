@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sme_gend.services.export_progress import tracked_export, HTML_STEPS, export_phase, export_rows
+
 import html
 from pathlib import Path
 
@@ -199,6 +201,7 @@ class NumeriquePreviewService:
         parts.append("</tbody></table>")
         return "".join(parts)
 
+    @tracked_export(steps=HTML_STEPS)
     def build_html_matrice(self) -> str:
         rows = self._liste_rows()
         tpl = self._settings.template_numerique_path
@@ -373,6 +376,7 @@ class NumeriquePreviewService:
         parts.append("</body></html>")
         return "".join(parts)
 
+    @tracked_export(steps=HTML_STEPS)
     def build_html_indispo(self) -> str:
         rows = self._liste_rows()
         tpl = self._settings.template_numerique_path
@@ -432,6 +436,7 @@ class NumeriquePreviewService:
         parts.append("</tbody></table></body></html>")
         return "".join(parts)
 
+    @tracked_export(steps=HTML_STEPS)
     def build_html_satellite_etats(self) -> str:
         """Aperçu des feuilles MISSION, MALADE, DESERTEUR, STAGE-LOC, STAGE-EXT (comme l’export Excel)."""
         rows = self._liste_rows()
@@ -487,7 +492,7 @@ class NumeriquePreviewService:
         ):
             parts.append(f"<th>{html.escape(h)}</th>")
         parts.append("</tr></thead><tbody>")
-        for i, row in enumerate(mission_rows):
+        for i, row in enumerate(export_rows(mission_rows)):
             d = missions.get(row.satellite_join_key())
             parts.append("<tr>")
             parts.append(f"<td>{i + 1}</td>")
@@ -525,7 +530,7 @@ class NumeriquePreviewService:
         for h in ("N°", "Grade", "Nom", "Structure", "Date constat", "Pathologie", "Obs."):
             parts.append(f"<th>{html.escape(h)}</th>")
         parts.append("</tr></thead><tbody>")
-        for i, row in enumerate(malade_rows):
+        for i, row in enumerate(export_rows(malade_rows)):
             d = malades.get(row.satellite_join_key())
             parts.append("<tr>")
             parts.append(f"<td>{i + 1}</td>")
@@ -547,7 +552,7 @@ class NumeriquePreviewService:
         for h in ("N°", "Grade", "Nom", "Structure", "Date désertion"):
             parts.append(f"<th>{html.escape(h)}</th>")
         parts.append("</tr></thead><tbody>")
-        for i, row in enumerate(desert_rows):
+        for i, row in enumerate(export_rows(desert_rows)):
             d = deserteurs.get(row.satellite_join_key())
             parts.append("<tr>")
             parts.append(f"<td>{i + 1}</td>")
@@ -567,7 +572,7 @@ class NumeriquePreviewService:
         for h in ("N°", "Grade", "Nom", "Structure", "Nature stage", "Lieu", "Dates début / fin"):
             parts.append(f"<th>{html.escape(h)}</th>")
         parts.append("</tr></thead><tbody>")
-        for i, row in enumerate(sl_rows):
+        for i, row in enumerate(export_rows(sl_rows)):
             d = stages_loc.get(row.satellite_join_key())
             parts.append("<tr>")
             parts.append(f"<td>{i + 1}</td>")
@@ -589,7 +594,7 @@ class NumeriquePreviewService:
         for h in ("N°", "Grade", "Nom", "Structure", "Nature stage", "Lieu", "Dates début / fin"):
             parts.append(f"<th>{html.escape(h)}</th>")
         parts.append("</tr></thead><tbody>")
-        for i, row in enumerate(se_rows):
+        for i, row in enumerate(export_rows(se_rows)):
             d = stages_ex.get(row.satellite_join_key())
             parts.append("<tr>")
             parts.append(f"<td>{i + 1}</td>")

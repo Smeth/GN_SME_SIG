@@ -148,6 +148,14 @@ def _lock_period(connection, month):
 
 
 def _verified_artifacts(connection, publication, *, content=()):
+    from sme_gend.services.operation_progress import operation_progress
+    with operation_progress((('metadata', 'Contrôle du manifeste et des composants'),
+                             ('files', 'Lecture des fragments et vérification des empreintes'))) as operation:
+        return _verified_artifacts_with_progress(connection, publication, content=content, operation=operation)
+
+
+def _verified_artifacts_with_progress(connection, publication, *, content, operation):
+    operation.start('metadata')
     if (publication.status not in STATUSES or publication.version < 1 or publication.revision_no < 1
             or not isinstance(publication.manifest, dict)
             or publication.manifest.get("format") != FORMAT
@@ -164,8 +172,11 @@ def _verified_artifacts(connection, publication, *, content=()):
         metadata = cursor.fetchall()
     if {row[0] for row in metadata} != set(FILES):
         raise ValueError("Publication incomplète : composants documentaires manquants.")
+    operation.finish('metadata')
+    operation.start('files', total=len(metadata))
     result = {}
-    for name, size, expected_hash, count in metadata:
+    for file_index, (name, size, expected_hash, count) in enumerate(metadata):
+        operation.update('files', current=file_index, total=len(metadata), detail=f'{name} : lecture des fragments')
         if size > MAX_ARTIFACT_BYTES or count != max(1, (size + CHUNK_SIZE - 1) // CHUNK_SIZE):
             raise ValueError("Taille ou découpage de publication invalide.")
         digest = sha256()
@@ -182,6 +193,8 @@ def _verified_artifacts(connection, publication, *, content=()):
                 raise ValueError("Fragments de publication incohérents.")
             digest.update(payload)
             total += len(payload)
+            operation.update('files', current=file_index + (expected_index + 1) / max(1, count), total=len(metadata),
+                detail=f'{name} : {expected_index + 1}/{count} fragment(s), {total:,}/{size:,} octet(s) lus')
             if name in content or name in ("manifest.json", "donnees.json"):
                 pieces.append(payload)
         if total != size or digest.hexdigest() != expected_hash:
@@ -200,10 +213,21 @@ def _verified_artifacts(connection, publication, *, content=()):
                 raise ValueError("L'empreinte logique de la publication diffère de ses données archivées.")
         if name in content:
             result[name]["content"] = b"".join(pieces)
+    operation.finish('files', detail=f'{len(metadata)} fichier(s) vérifié(s), manifeste et empreinte logique conformes')
     return result
 
 
 def register_export(settings, revision: ExportRevision) -> Publication:
+    from sme_gend.services.operation_progress import operation_progress
+    with operation_progress((('read', 'Vérification de la révision locale'),
+                             ('lock', 'Contrôle du registre et de la numérotation'),
+                             ('store', 'Enregistrement des fichiers dans le registre central'),
+                             ('commit', 'Journalisation et validation de la publication'))) as operation:
+        return _register_export_with_progress(settings, revision, operation)
+
+
+def _register_export_with_progress(settings, revision, operation):
+    operation.start('read')
     _allowed("publications.create", export=True)
     require_capability(settings, "publication_registry")
     manifest = verify_export_revision(revision.folder, expected=revision.journal_metadata())
@@ -216,6 +240,8 @@ def register_export(settings, revision: ExportRevision) -> Publication:
     month = _month(manifest["mois"])
     footprint = dataset_footprint(decode_export_dataset(payloads["donnees.json"]),
                                   manifest["artifacts"]["modele.xlsx"]["sha256"])
+    operation.finish('read', detail=f'{len(payloads)} fichier(s), {sum(len(payload) for payload in payloads.values()):,} octet(s)')
+    operation.start('lock')
     from sme_gend.services.auth_context import resolve_audit_actor
     result = {}
     with _confirmed_result(result), mysql_import_transaction(settings, read_committed=True):
@@ -224,6 +250,9 @@ def register_export(settings, revision: ExportRevision) -> Publication:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT id FROM sme_publication WHERE revision_id=%s", (revision.revision_id,))
                 existing = cursor.fetchone()
+                operation.finish('lock')
+                total_chunks = sum(max(1, (len(payload) + CHUNK_SIZE - 1) // CHUNK_SIZE) for payload in payloads.values())
+                operation.start('store', total=total_chunks)
                 if existing:
                     publication = _get(connection, int(existing[0]))
                     verified = _verified_artifacts(connection, publication)
@@ -238,6 +267,7 @@ def register_export(settings, revision: ExportRevision) -> Publication:
                                     json.dumps(manifest, ensure_ascii=False)))
                     identifier = int(cursor.lastrowid)
                     cursor.execute("UPDATE sme_publication_period SET next_revision=next_revision+1,version=version+1 WHERE mois=%s", (month,))
+                    stored_chunks = 0
                     for name, payload in payloads.items():
                         count = max(1, (len(payload) + CHUNK_SIZE - 1) // CHUNK_SIZE)
                         cursor.execute("INSERT INTO sme_publication_artifact VALUES(%s,%s,%s,%s,%s)",
@@ -245,10 +275,17 @@ def register_export(settings, revision: ExportRevision) -> Publication:
                         for index in range(count):
                             cursor.execute("INSERT INTO sme_publication_chunk VALUES(%s,%s,%s,%s)",
                                            (identifier, name, index, payload[index * CHUNK_SIZE:(index + 1) * CHUNK_SIZE]))
+                            stored_chunks += 1
+                            operation.update('store', current=stored_chunks, total=total_chunks,
+                                detail=f'{name} : {index + 1}/{count} fragment(s) ; total {stored_chunks}/{total_chunks}')
+            operation.finish('store', detail='Révision déjà présente et vérifiée' if existing else 'Tous les fichiers sont enregistrés dans la transaction')
+            operation.start('commit', detail='Enregistrement de l’audit et attente de la confirmation MySQL')
             if not existing:
                 publication = _get(connection, identifier)
                 _audit(settings, "publication_created", publication)
                 result["publication"] = publication
+    from sme_gend.services.operation_commit_progress import finish_after_commit
+    finish_after_commit(settings, operation, 'commit', detail='Révision confirmée dans le registre central')
     return result["publication"]
 
 
@@ -321,11 +358,24 @@ def require_validated_publication(settings, mois, *, publication_id=None, expect
 
 
 def assert_publication_current_data(settings, publication, *, for_update=True):
+    from sme_gend.services.operation_progress import operation_progress
+    with operation_progress((('projection', 'Actualisation des situations concernées'),
+                             ('archive', 'Contrôle du modèle et des fichiers archivés'),
+                             ('capture', 'Lecture cohérente des données du mois'),
+                             ('compare', 'Comparaison avec la révision documentaire'))) as operation:
+        return _assert_publication_current_data_with_progress(settings, publication,
+            for_update=for_update, operation=operation)
+
+
+def _assert_publication_current_data_with_progress(settings, publication, *, for_update, operation):
+    operation.start('projection')
     _allowed("publications.verify")
     from sme_gend.services.publication_write_barrier import assert_exclusive_publication_barrier
     assert_exclusive_publication_barrier(settings)
     from sme_gend.services.month_projection import refresh_month_projection
     refresh_month_projection(settings, publication.mois)
+    operation.finish('projection')
+    operation.start('archive')
     from dataclasses import replace as settings_replace
     from openpyxl import load_workbook
     from sme_gend.services.numerique_excel_export import _capture_numerique_workbook_data, _parse_grade_columns
@@ -334,6 +384,8 @@ def assert_publication_current_data(settings, publication, *, for_update=True):
         if current.version != publication.version:
             raise PublicationConflict("La publication a changé ; actualisez la liste.")
         artifacts = _verified_artifacts(connection, current, content=("modele.xlsx",))
+    operation.finish('archive')
+    operation.start('capture')
     model = load_workbook(BytesIO(artifacts["modele.xlsx"]["content"]), read_only=True, data_only=True)
     try:
         grades = _parse_grade_columns(model["NUMERIQUE"])[0]
@@ -341,13 +393,27 @@ def assert_publication_current_data(settings, publication, *, for_update=True):
         model.close()
     scoped = settings_replace(settings, mysql_view_mois=publication.mois)
     dataset, _ = _capture_numerique_workbook_data(scoped, publication.mois, grades, scoped, join_transaction=True)
+    operation.finish('capture')
+    operation.start('compare')
     footprint = dataset_footprint(dataset, artifacts["modele.xlsx"]["sha256"])
     if footprint != current.dataset_footprint:
         raise PublicationDataChanged("Les données du mois ont changé depuis cet export. Créez une nouvelle révision SME.")
+    operation.finish('compare', detail='Données du mois conformes à la version documentaire')
     return footprint
 
 
 def _approve(settings, publication_id, *, expected_version, expected_current_id, reason, replacement):
+    from sme_gend.services.operation_progress import operation_progress
+    with operation_progress((('context', 'Contrôle des droits et de la version courante'),
+                             ('verify', 'Vérification des fichiers et des données du mois'),
+                             ('update', 'Enregistrement de la validation documentaire'),
+                             ('commit', 'Journalisation et validation de la transaction'))) as operation:
+        return _approve_with_progress(settings, publication_id, expected_version=expected_version,
+            expected_current_id=expected_current_id, reason=reason, replacement=replacement, operation=operation)
+
+
+def _approve_with_progress(settings, publication_id, *, expected_version, expected_current_id, reason, replacement, operation):
+    operation.start('context')
     _allowed("publications.replace" if replacement else "publications.validate", admin=True)
     require_capability(settings, "publication_registry")
     if replacement and not str(reason or "").strip():
@@ -366,7 +432,11 @@ def _approve(settings, publication_id, *, expected_version, expected_current_id,
                 raise PublicationConflict("Cette révision n'est plus le brouillon chargé ; actualisez la liste.")
             if current_id != expected_current_id or (replacement and current_id is None) or (not replacement and current_id is not None):
                 raise PublicationConflict("La publication validée du mois a changé. Choisissez un remplacement explicite.")
+            operation.finish('context')
+            operation.start('verify')
             assert_publication_current_data(settings, publication)
+            operation.finish('verify')
+            operation.start('update')
             with connection.cursor() as cursor:
                 if replacement:
                     previous = _get(connection, int(current_id), lock=True)
@@ -377,9 +447,13 @@ def _approve(settings, publication_id, *, expected_version, expected_current_id,
                                "validated_by=%s,validation_note=%s WHERE id=%s", (resolve_audit_actor(), str(reason or "").strip(), publication.id))
                 cursor.execute("UPDATE sme_publication_period SET current_validated_id=%s,version=version+1 WHERE mois=%s", (publication.id, publication.mois))
             publication = _get(connection, publication.id)
+            operation.finish('update')
+            operation.start('commit', detail='Journalisation et attente de la confirmation MySQL')
             _audit(settings, "publication_replaced" if replacement else "publication_validated", publication,
                    previous_publication_id=current_id, reason=str(reason or "").strip())
             result["publication"] = publication
+    from sme_gend.services.operation_commit_progress import finish_after_commit
+    finish_after_commit(settings, operation, 'commit', detail='Remplacement confirmé' if replacement else 'Validation confirmée')
     return result["publication"]
 
 
@@ -394,6 +468,17 @@ def replace_publication(settings, publication_id, *, expected_version, expected_
 
 
 def download_publication(settings, publication_id, destination):
+    from sme_gend.services.operation_progress import operation_progress
+    with operation_progress((('read', 'Lecture et vérification de la publication centrale'),
+                             ('copy', 'Copie du classeur'),
+                             ('verify', 'Vérification de la copie'),
+                             ('publish', 'Enregistrement du fichier'),
+                             ('audit', 'Finalisation du téléchargement'))) as operation:
+        return _download_publication_with_progress(settings, publication_id, destination, operation)
+
+
+def _download_publication_with_progress(settings, publication_id, destination, operation):
+    operation.start('read')
     _allowed("publications.download", export=True)
     require_capability(settings, "publication_registry")
     from sme_gend.services.sme_export_revision import validate_export_destination
@@ -403,15 +488,24 @@ def download_publication(settings, publication_id, destination):
     with mysql_read_snapshot(settings) as connection:
         publication = _get(connection, publication_id)
         artifacts = _verified_artifacts(connection, publication, content=("classeur.xlsx",))
+    operation.finish('read')
+    operation.start('copy', total=artifacts['classeur.xlsx']['size'])
     from sme_gend.services.safe_paths import atomic_destination
     with atomic_destination(target) as staged:
         staged.write_bytes(artifacts["classeur.xlsx"]["content"])
+        operation.finish('copy', detail=f'{artifacts["classeur.xlsx"]["size"]:,} octet(s) copiés')
+        operation.start('verify')
         if sha256(staged.read_bytes()).hexdigest() != artifacts["classeur.xlsx"]["sha256"]:
             raise ValueError("Copie du classeur SME incomplète ; le fichier précédent est conservé.")
+        operation.finish('verify')
+        operation.start('publish', detail='Enregistrement atomique du classeur')
+    operation.finish('publish')
+    operation.start('audit')
     try:
         _audit(settings, "publication_downloaded", publication, destination=str(target))
     except Exception:
         publication = replace(publication, operation_warning="Le fichier est enregistré ; sa trace de téléchargement reste à vérifier.")
+    operation.finish('audit', detail=publication.operation_warning or 'Téléchargement terminé')
     return publication
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sme_gend.services.export_progress import tracked_export, export_phase, export_rows
+
 import copy
 import json
 from datetime import date
@@ -221,7 +223,7 @@ def _fill_persons_table(
 
     gmap = grade_code_map or {}
 
-    for idx, person in enumerate(persons):
+    for idx, person in enumerate(export_rows(persons, label='Personnels du soit-transmis')):
         if template_tr is None:
             continue
         new_tr = copy.deepcopy(template_tr)
@@ -273,6 +275,7 @@ class SoitTransmisService:
 
     # ── Génération Word ───────────────────────────────────────────────────
 
+    @tracked_export
     def generate_docx(
         self,
         persons: list[ListeGeneraleRow],
@@ -294,6 +297,7 @@ class SoitTransmisService:
         if not template_path.is_file():
             raise FileNotFoundError(f"Modèle introuvable : {template_path}")
 
+        export_phase('render', total=len(persons), detail='Remplissage du modèle de soit-transmis')
         doc = Document(str(template_path))
         paras = doc.paragraphs
 
@@ -361,7 +365,9 @@ class SoitTransmisService:
 
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         with atomic_destination(dest_path, temporary_suffix=".docx") as staged:
+            export_phase("write", total=1, detail="Écriture du document final")
             doc.save(str(staged))
+            export_phase("finalize", detail="Confirmation du fichier et historique")
 
         from sme_gend.services.doc_gen_log import log_doc_generation
         log_doc_generation(

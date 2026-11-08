@@ -46,8 +46,8 @@ def test_sync_ordre_tri_from_pref_ord() -> None:
         def fetchall(self):
             self._fetch_idx += 1
             if self._fetch_idx == 1:
-                return [(5, 15)]
-            return [(10, "MDL"), (11, "Inconnu")]
+                return [(10, "MDL"), (11, "Inconnu")]
+            return [(5, 15)]
 
     cur = _Cur()
     n = sync_ordre_tri_from_pref_ord(cur, cache, mois=None)

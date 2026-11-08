@@ -6,6 +6,7 @@ from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+from sme_gend.services.export_progress import tracked_export
 
 if TYPE_CHECKING:
     from sme_gend.services.sme_export_revision import ExportRevision
@@ -1498,6 +1499,14 @@ def _capture_publication_inputs(settings, mois, grade_order, movement_settings):
     return captured
 
 
+@tracked_export(steps=(
+    ('prepare', 'Vérifier le mois, les droits et le modèle SME'),
+    ('capture', 'Lire les effectifs et les mouvements du mois'),
+    ('render', 'Remplir toutes les feuilles du modèle SME'),
+    ('register', 'Enregistrer la version SME centrale'),
+    ('write', 'Copier le classeur vers le fichier choisi'),
+    ('finalize', 'Journaliser et confirmer le document'),
+))
 def export_numerique_workbook(
     settings: Settings,
     template_path: Path,
@@ -1524,6 +1533,7 @@ def export_numerique_workbook(
     from sme_gend.services.sme_export_revision import (
         revision_root, validate_export_destination, save_export_revision, retrieve_export_revision,
     )
+    from sme_gend.services.export_progress import export_phase, export_count
 
     if not session_can_export_documents() or not session_has_permission("publications.create"):
         raise PermissionError("Le droit d'exporter les effectifs est nécessaire.")
@@ -1550,6 +1560,7 @@ def export_numerique_workbook(
         grade_order = _parse_grade_columns(model["NUMERIQUE"])[0] if "NUMERIQUE" in model.sheetnames else []
     finally:
         model.close()
+    export_phase('capture', detail='Capture cohérente des données du mois '+eff_mois)
     dataset, source = _capture_publication_inputs(data_settings, eff_mois, grade_order, movement_settings)
     actor = resolve_audit_actor()
 
@@ -1558,11 +1569,13 @@ def export_numerique_workbook(
         values["detaches_config"] = DetachesFileConfig.from_dict(values["detaches_config"])
         return build_from_model(model_path, workbook_path, **values)
 
+    export_phase('render', detail=f'{len(dataset["rows"])} personnels ; feuilles visibles et masquées')
     revision = save_export_revision(
         root=root, mois=eff_mois, template_bytes=template_bytes, dataset=dataset,
         source=source, actor=actor, renderer=render,
     )
     from sme_gend.services.sme_publication_registry import register_export
+    export_phase('register', total=1, detail='Confirmation de la nouvelle version dans MySQL')
     try:
         publication = register_export(data_settings, revision)
     except Exception as exc:
@@ -1573,12 +1586,14 @@ def export_numerique_workbook(
                        publication_status=publication.status,
                        journal_warning="\n".join(message for message in (
                            source.get("projection_warning"), publication.operation_warning) if message))
+    export_phase('write', total=1, detail='Copie de la version enregistrée vers le fichier choisi')
     try:
         retrieve_export_revision(revision.folder, dest, expected=revision.journal_metadata())
     except Exception as exc:
         raise RuntimeError("La version SME a été conservée, mais la copie vers le fichier choisi a échoué. "
                            f"Révision centrale {publication.revision_no}, identifiant {publication.id}. "
                            f"Version locale récupérable : {revision.workbook}") from exc
+    export_phase('finalize', detail='Enregistrement dans l’historique des documents')
     try:
         log_doc_generation(settings=data_settings, doc_type="numerique", format="xlsx",
                            count=len(dataset["rows"]), dest_path=str(dest), mois=eff_mois,

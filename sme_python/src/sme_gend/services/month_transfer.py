@@ -17,6 +17,7 @@ from sme_gend.services.mysql_restore_staging import validate_staged_statement, _
 from sme_gend.services.mysql_backup_service import _literal
 from sme_gend.services.mysql_import_period import normalize_import_mois as _normalize_import_mois
 from sme_gend.repositories.reference_collection_guard import fingerprint
+from sme_gend.services.operation_progress import operation_progress
 
 FORMAT = "sgi-dpf-month-v1"
 EXCLUDED = {"audit_journal", "workflow_task", "career_alert_ack", "career_alert_ack_occurrence",
@@ -196,8 +197,18 @@ def _native_directives(sql):
 
 def read_sql(sql):
     """Dialecte interne validé ; aucune instruction n'est transmise à MySQL."""
+    with operation_progress((('parse', 'Analyse des instructions du fichier SQL'),
+                             ('verify', 'Contrôle des données de l’archive'))) as operation:
+        return _read_sql_with_progress(sql, operation)
+
+
+def _read_sql_with_progress(sql, operation):
+    operation.start('parse', detail='Découpage du SQL ; aucune instruction ne sera exécutée')
     tables = {}
-    for statement in split_statements(_native_directives(sql)):
+    statements = split_statements(_native_directives(sql))
+    for index, statement in enumerate(statements, 1):
+        if index % 250 == 0 or index == len(statements):
+            operation.update('parse', current=index - 1, total=len(statements), detail=f'{index - 1:,}/{len(statements):,} instruction(s) analysée(s)')
         if is_safe_setting(statement): continue
         if re.fullmatch(r"(?:LOCK\s+TABLES\s+"+IDENT+r"\s+WRITE|UNLOCK\s+TABLES)\s*;?",statement,re.I): continue
         validate_restore_statement(statement)
@@ -219,7 +230,10 @@ def read_sql(sql):
                 if len(values) != len(columns): raise ValueError("Nombre de colonnes incohérent.")
                 tables[name]["rows"].append(dict(zip(columns,values)))
         elif command != "DROP": raise ValueError("Instruction SQL non prise en charge.")
+    operation.finish('parse', detail=f'{len(statements):,} instruction(s), {len(tables)} table(s)')
+    operation.start('verify')
     validate_dataset(tables)
+    operation.finish('verify')
     return tables
 
 
@@ -320,43 +334,76 @@ def dataset_token(tables):
 
 
 def load_source(path):
+    with operation_progress((('read', 'Lecture et contrôle du fichier source'),
+                             ('analyse', 'Analyse des données mensuelles'))) as operation:
+        return _load_source_with_progress(path, operation)
+
+
+def _load_source_with_progress(path, operation):
+    operation.start('read')
     path = Path(path)
     if path.suffix.lower() == ".sql":
         if path.stat().st_size > 512*1024*1024:
             raise ValueError("SQL trop volumineux pour l'analyse mensuelle (limite 512 Mo).")
-        return read_sql(path.read_text(encoding="utf-8-sig"))
+        sql = path.read_text(encoding="utf-8-sig")
+        operation.finish('read', detail=f'{path.stat().st_size:,} octet(s) lus')
+        operation.start('analyse')
+        result = read_sql(sql)
+        operation.finish('analyse')
+        return result
     with zipfile.ZipFile(path) as archive:
         from sme_gend.services.backup_restore_service import SQL_DUMP_NAME, inspect_backup
         if SQL_DUMP_NAME in archive.namelist():
             if archive.getinfo(SQL_DUMP_NAME).file_size > 512*1024*1024:
                 raise ValueError("SQL contenu dans l'archive trop volumineux (limite 512 Mo).")
             inspect_backup(path)
-            return read_sql(archive.read(SQL_DUMP_NAME).decode("utf-8-sig"))
+            sql = archive.read(SQL_DUMP_NAME).decode("utf-8-sig")
+            operation.finish('read')
+            operation.start('analyse')
+            result = read_sql(sql)
+            operation.finish('analyse')
+            return result
         if archive.namelist() != ["month.json"] or archive.getinfo("month.json").file_size > 256*1024*1024:
             raise ValueError("Archive mensuelle non reconnue. Choisissez un SQL global compatible ou une archive mensuelle SME.")
         if archive.testzip() is not None: raise ValueError("Archive mensuelle endommagée.")
         payload = json.loads(archive.read("month.json").decode("utf-8"))
+    operation.finish('read')
+    operation.start('analyse')
     if not isinstance(payload,dict) or payload.get("format") != FORMAT or not isinstance(payload.get("tables"),dict):
         raise ValueError("Format d'archive mensuelle inconnu.")
     tables = payload["tables"]
     # Le schéma annoncé est relu depuis sa définition, pas accepté comme code.
-    for name,table in tables.items():
+    for index, (name,table) in enumerate(tables.items(), 1):
         if not isinstance(table,dict): raise ValueError("Table d'archive invalide.")
         parsed_name,definition = schema_from_ddl(table["ddl"])
         if parsed_name != name or any(definition[key] != table[key] for key in ("columns","primary","auto","unique","types")):
             raise ValueError("Schéma mensuel incohérent.")
         if json.dumps(definition["foreign"]) != json.dumps(table["foreign"]): raise ValueError("Clés étrangères incohérentes.")
+        operation.update('analyse', current=index, total=len(tables) + 1, detail=f'{index}/{len(tables)} schéma(s) vérifié(s) ; {table_label(name)}')
     if dataset_token(tables) != payload.get("sha256"): raise ValueError("Empreinte d'archive incorrecte.")
     selected = extract_month(tables,payload["month"])
     if dataset_token(selected) != dataset_token(tables): raise ValueError("L'archive contient des données hors du mois annoncé.")
+    operation.finish('analyse')
     return tables
 
 
 def write_month(path, tables, month):
+    with operation_progress((('scope', 'Isolation et contrôle du mois'),
+                             ('write', 'Écriture de l’archive mensuelle'),
+                             ('publish', 'Enregistrement du fichier'))) as operation:
+        return _write_month_with_progress(path, tables, month, operation)
+
+
+def _write_month_with_progress(path, tables, month, operation):
     from sme_gend.services.safe_paths import atomic_destination
+    operation.start('scope')
     if Path(path).suffix.lower() not in (".zip",".sql"):
         raise ValueError("Choisissez une extension .zip ou .sql pour l'archive mensuelle.")
     tables = extract_month(tables,month)
+    operation.finish('scope', detail=f'Mois {month} ; {len(tables)} table(s)')
+    total_rows = sum(len(table['rows']) for table in tables.values())
+    operation.start('write', total=total_rows)
+    written = 0
     with atomic_destination(Path(path),replace_existing=False) as temporary:
         if Path(path).suffix.lower() == ".sql":
             with temporary.open("w",encoding="utf-8",newline="\n") as stream:
@@ -367,10 +414,17 @@ def write_month(path, tables, month):
                     for row in table["rows"]:
                         stream.write(f"INSERT INTO {quote(name)} ({columns}) VALUES ("+
                             ",".join(_literal(sql_value(row[c])) for c in table["columns"])+");\n")
+                        written += 1
+                        if written % 250 == 0 or written == total_rows:
+                            operation.update('write', current=written, total=total_rows,
+                                detail=f'{written:,}/{total_rows:,} ligne(s) ; {table_label(name)}')
         else:
             payload = dict(format=FORMAT,month=month,tables=tables,sha256=dataset_token(tables),created_at=datetime.now(timezone.utc).isoformat())
             with zipfile.ZipFile(temporary,"w",zipfile.ZIP_DEFLATED) as archive:
                 archive.writestr("month.json",json.dumps(payload,ensure_ascii=False,allow_nan=False).encode("utf-8"))
+        operation.finish('write', detail=f'{total_rows:,} ligne(s) écrite(s)')
+        operation.start('publish', detail='Fermeture et enregistrement atomique du fichier')
+    operation.finish('publish')
     return Path(path)
 
 
@@ -390,6 +444,14 @@ def read_database(settings):
 
 
 def _read_connection(connection, *, lock=False):
+    with operation_progress((('schema', 'Lecture du schéma métier'),
+                             ('tables', 'Lecture des tables métier'),
+                             ('verify', 'Contrôle des données et des dépendances'))) as operation:
+        return _read_connection_with_progress(connection, lock=lock, operation=operation)
+
+
+def _read_connection_with_progress(connection, *, lock, operation):
+    operation.start('schema')
     with connection.cursor() as cur:
         if lock:
             cur.execute("SELECT @@SESSION.sql_mode")
@@ -404,8 +466,11 @@ def _read_connection(connection, *, lock=False):
              or "sme_periode_id" in cols or any(c in cols for c in MONTH_COLUMNS))}
         if "agent_identity_alias" in columns:
             allowed.add("agent_identity_alias")  # lecture de contrôle, jamais exporté ni restauré
+        operation.finish('schema', detail=f'{len(allowed)} table(s) à lire')
+        operation.start('tables', total=len(allowed))
         tables = {}
-        for name in sorted(allowed):
+        for index, name in enumerate(sorted(allowed), 1):
+            operation.update('tables', current=index - 1, total=len(allowed), detail=f'{table_label(name)} : lecture des lignes')
             quote(name)
             cur.execute(f"SHOW CREATE TABLE {quote(name)}")
             found = cur.fetchone()
@@ -415,6 +480,9 @@ def _read_connection(connection, *, lock=False):
             cur.execute(f"SELECT {selected} FROM {quote(name)}" + (" FOR UPDATE" if lock else ""))
             table["rows"] = [dict(zip(table["columns"],map(portable,row))) for row in cur.fetchall()]
             tables[name] = table
+            operation.update('tables', current=index, total=len(allowed), detail=f'{index}/{len(allowed)} table(s) ; {len(table["rows"]):,} ligne(s) lue(s)')
+        operation.finish('tables')
+        operation.start('verify')
         cur.execute("SELECT TABLE_NAME,REFERENCED_TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA=DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL")
         owned = scope_tables(tables)
         for child,parent in cur.fetchall():
@@ -424,6 +492,7 @@ def _read_connection(connection, *, lock=False):
         if any(row[0] in allowed for row in cur.fetchall()):
             raise ValueError("Des déclencheurs SQL métier pourraient modifier d’autres mois : restauration mensuelle spécialisée requise.")
     validate_dataset(tables)
+    operation.finish('verify')
     return tables
 
 
@@ -449,6 +518,15 @@ def _target_rows(tables, month):
 
 
 def build_plan(source, live, month, owner):
+    with operation_progress((('scope', 'Isolation des données du mois source et cible'),
+                             ('compare', 'Comparaison des schémas et des identités'),
+                             ('dependencies', 'Contrôle des références des autres mois'),
+                             ('fingerprint', 'Calcul des empreintes de l’aperçu'))) as operation:
+        return _build_plan_with_progress(source, live, month, owner, operation)
+
+
+def _build_plan_with_progress(source, live, month, owner, operation):
+    operation.start('scope')
     month = normalize_import_mois(month)
     selected = extract_month(source, month)
     target = _target_rows(live,month)
@@ -458,7 +536,10 @@ def build_plan(source, live, month, owner):
     if missing_scopes:
         populated = [name for name in missing_scopes if target.get(name,{}).get("rows")]
         if populated: conflicts.append("Tables mensuelles contenant des données à remplacer mais absentes de la source : " + ", ".join(sorted(populated)))
-    for name,table in selected.items():
+    operation.finish('scope')
+    operation.start('compare', total=len(selected))
+    for table_index, (name,table) in enumerate(selected.items()):
+        operation.update('compare', current=table_index, total=len(selected), detail=table_label(name))
         if name not in live:
             conflicts.append(f"Table absente de la cible : {name}."); continue
         current = live[name]
@@ -471,7 +552,10 @@ def build_plan(source, live, month, owner):
             continue
         if name == "sme_periode": continue
         lookup = {_key(current,row):row for row in current["rows"]}
-        for row in table["rows"]:
+        for row_index, row in enumerate(table["rows"], 1):
+            if row_index % 100 == 0:
+                operation.update('compare', current=table_index + (row_index - 1) / max(1, len(table['rows'])), total=len(selected),
+                    detail=f'{table_label(name)} : {row_index - 1:,}/{len(table["rows"]):,} ligne(s) comparée(s)')
             key = _key(table,row)
             existing = lookup.get(key)
             differences = [c for c in table["columns"] if c not in TECHNICAL and existing and existing[c] != row[c]]
@@ -508,24 +592,39 @@ def build_plan(source, live, month, owner):
                         value = normalize(row.get(field))
                         if value and value == normalize(other.get(field)):
                             conflicts.append(f"Agent {row.get('noms') or key} : {field} déjà porté par la fiche {other.get('id')}. Rapprochement manuel requis.")
+    operation.finish('compare', detail=f'{len(selected)} table(s) comparée(s)')
+    operation.start('dependencies', total=len(live))
     # Toute dépendance externe à supprimer, non incluse dans le mois, interdit le remplacement.
-    for name,table in live.items():
+    for index, (name,table) in enumerate(live.items(), 1):
         for cols,parent,pcols in table["foreign"]:
             removed = target.get(parent,{}).get("rows",[]) if parent in scope_tables(live) else []
             removed_keys = {tuple(r[c] for c in pcols) for r in removed}
             kept = [r for r in table["rows"] if r not in target.get(name,{}).get("rows",[])]
             if any(tuple(r[c] for c in cols) in removed_keys for r in kept):
                 conflicts.append(f"{name} : une ligne hors du mois référence des données à remplacer ({parent}).")
+        operation.update('dependencies', current=index, total=len(live), detail=table_label(name))
     counts = tuple((name,len(table["rows"])) for name,table in sorted(target.items()) if name in scope_tables(live))
     try: _ordered_tables(selected)
     except ValueError as error: conflicts.append(str(error))
-    return MonthTransferPlan(month,selected,dataset_token(selected),dataset_token(live),owner,tuple(dict.fromkeys(conflicts)),counts)
+    operation.finish('dependencies')
+    operation.start('fingerprint')
+    result = MonthTransferPlan(month,selected,dataset_token(selected),dataset_token(live),owner,tuple(dict.fromkeys(conflicts)),counts)
+    operation.finish('fingerprint', detail=f'{len(result.conflicts)} conflit(s) détecté(s)')
+    return result
 
 
 def preview_month(settings, source, month):
     from sme_gend.repositories.mysql_connection import mysql_database_key
     _authorize(write=True)
-    return build_plan(source,read_database(settings),month,mysql_database_key(settings))
+    with operation_progress((('read', 'Lecture de la base cible'),
+                             ('compare', 'Comparaison des identités et des données du mois'))) as operation:
+        operation.start('read')
+        live = read_database(settings)
+        operation.finish('read')
+        operation.start('compare')
+        result = build_plan(source,live,month,mysql_database_key(settings))
+        operation.finish('compare', detail=f'{len(result.conflicts)} conflit(s) détecté(s)')
+        return result
 
 
 def _authorize(*,write):
@@ -541,14 +640,30 @@ def export_month(settings,month,path):
     _authorize(write=False)
     from sme_gend.services.auth_guard import session_has_permission
     if not session_has_permission("system.backup"): raise PermissionError("Export de sauvegarde non autorisé.")
-    return write_month(path,read_database(settings),normalize_import_mois(month))
+    with operation_progress((('read', 'Lecture cohérente de la base'),
+                             ('write', 'Création et enregistrement de l’archive du mois'))) as operation:
+        operation.start('read')
+        tables = read_database(settings)
+        operation.finish('read')
+        operation.start('write')
+        result = write_month(path,tables,normalize_import_mois(month))
+        operation.finish('write')
+        return result
 
 
 def preview_export(settings,month):
     _authorize(write=False)
     from sme_gend.services.auth_guard import session_has_permission
     if not session_has_permission("system.backup"): raise PermissionError("Export de sauvegarde non autorisé.")
-    return extract_month(read_database(settings),month)
+    with operation_progress((('read', 'Lecture cohérente des données métier'),
+                             ('scope', 'Isolation et contrôle du mois sélectionné'))) as operation:
+        operation.start('read')
+        tables = read_database(settings)
+        operation.finish('read')
+        operation.start('scope')
+        result = extract_month(tables,month)
+        operation.finish('scope', detail=f'{sum(len(table["rows"]) for table in result.values()):,} ligne(s) dans le mois')
+        return result
 
 
 def _ordered_tables(tables):
@@ -562,6 +677,17 @@ def _ordered_tables(tables):
 
 def apply_month(settings, plan):
     """Sauvegarde, nouveau contrôle sous verrou commun, puis DML transactionnel."""
+    with operation_progress((('plan', 'Vérification du contexte et de la source'),
+                             ('safety', 'Sauvegarde de sécurité'),
+                             ('verify', 'Nouveau contrôle sous verrou'),
+                             ('delete', 'Retrait des anciennes lignes du mois'),
+                             ('restore', 'Restauration des lignes et des références'),
+                             ('commit', 'Journalisation et validation de la transaction'))) as operation:
+        return _apply_month_with_progress(settings, plan, operation)
+
+
+def _apply_month_with_progress(settings, plan, operation):
+    operation.start('plan')
     from sme_gend.repositories.mysql_connection import MySQLConnection, mysql_database_key
     from sme_gend.services.active_month_guard import period_state_write
     from sme_gend.services.shared_reference_write import mark_shared_data_write
@@ -573,8 +699,12 @@ def apply_month(settings, plan):
         raise ValueError("Le contexte de restauration a changé. Recommencez l'aperçu.")
     if plan.conflicts or dataset_token(plan.source) != plan.source_token:
         raise ValueError("Conflits ou archive modifiée : restauration refusée.")
+    operation.finish('plan')
+    operation.start('safety')
     backup = ensure_recent_backup(settings,max_age_days=0.0)
     if backup is None: raise RuntimeError("Restauration annulée : sauvegarde préalable impossible.")
+    operation.finish('safety')
+    operation.start('verify', detail='Lecture et comparaison de la cible dans la transaction')
     _authorize(write=True)
     with period_state_write(settings,reason="month_restore",mois=plan.month) as change:
         with MySQLConnection(settings).connect() as connection:
@@ -585,6 +715,10 @@ def apply_month(settings, plan):
             target = _target_rows(live,plan.month)
             ordered = _ordered_tables(plan.source)
             owned = scope_tables(plan.source)
+            operation.finish('verify')
+            deleted = 0
+            delete_total = sum(len(table.get('rows', [])) for name, table in target.items() if name in owned)
+            operation.start('delete', total=delete_total)
             maps = {}
             with connection.cursor() as cur:
                 for name in reversed(_ordered_tables(live)):
@@ -593,7 +727,12 @@ def apply_month(settings, plan):
                     predicate = " AND ".join(f"{quote(c)}=%s" for c in table["primary"])
                     for row in target.get(name,{}).get("rows",[]):
                         cur.execute(f"DELETE FROM {quote(name)} WHERE {predicate}",_key(table,row))
-                for name in ordered:
+                        deleted += 1
+                        if deleted % 100 == 0 or deleted == delete_total:
+                            operation.update('delete', current=deleted, total=delete_total, detail=f'{deleted:,}/{delete_total:,} ligne(s) ; {table_label(name)}')
+                operation.finish('delete')
+                operation.start('restore', total=len(ordered))
+                for table_index, name in enumerate(ordered):
                     table = plan.source[name]
                     maps[name] = {}
                     existing = {_key(live[name],r):r for r in live[name]["rows"]}
@@ -630,11 +769,21 @@ def apply_month(settings, plan):
                                         tuple(sql_value(row[c]) for c in columns))
                             maps[name][key] = (int(cur.lastrowid),) if (name in owned or name == "sme_periode") else key
                             rows.remove(original); progress=True
+                            done = len(table['rows']) - len(rows)
+                            if done % 100 == 0:
+                                operation.update('restore', current=table_index + done / max(1, len(table['rows'])), total=len(ordered),
+                                    detail=f'{table_label(name)} : {done:,}/{len(table["rows"]):,} ligne(s) traitée(s)')
                         if not progress: raise ValueError("Dépendance circulaire entre lignes : restauration annulée.")
+                    operation.update('restore', current=table_index + 1, total=len(ordered),
+                        detail=f'{table_label(name)} : {len(table["rows"]):,} ligne(s) traitée(s)')
+            operation.finish('restore')
+            operation.start('commit', detail='Enregistrement de l’audit et attente de la confirmation MySQL')
             mark_shared_data_write(True)
             record_business_action(settings,action="sme_month_restore",module="workflow",entity_id=plan.month,
                 mois=plan.month,before=dict(counts=plan.existing_counts),
                 after=dict(source_sha256=plan.source_token,backup=str(backup),counts={n:len(t['rows']) for n,t in plan.source.items()}))
     from sme_gend.services.liste_generale_cache import invalidate_liste_cache
     invalidate_liste_cache(settings)
+    from sme_gend.services.operation_commit_progress import finish_after_commit
+    finish_after_commit(settings, operation, 'commit', detail='Mois restauré et transaction confirmée')
     return dict(month=plan.month,backup=str(backup),counts={n:len(t["rows"]) for n,t in plan.source.items()})

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sme_gend.services.export_progress import tracked_export, HTML_STEPS, export_phase, export_rows
+
 import base64
 import html
 from datetime import datetime
@@ -196,7 +198,7 @@ def _section_title(num: int, title: str) -> str:
 
 def _form_grid(rows: list[tuple[str, str]], *, label_width: str = "36%") -> str:
     body = ""
-    for label, val in rows:
+    for label, val in export_rows(rows):
         body += (
             f"<tr>"
             f"<td width='{label_width}' style='padding:5px 8px;border:1px solid {_CLR_LINE};"
@@ -296,7 +298,7 @@ def _data_table(
         )
     else:
         body = ""
-        for row in rows:
+        for row in export_rows(rows):
             cells = row + [""] * (len(headers) - len(row))
             tds = "".join(
                 f"<td style='border:1px solid {_CLR_LINE};padding:4px 6px;"
@@ -326,6 +328,7 @@ def _signatures_block(structure: str, etablie_le: str) -> str:
     )
 
 
+@tracked_export(steps=HTML_STEPS)
 def build_dossier_html(row: ListeGeneraleRow, settings: Settings) -> str:
     """Fiche lisible : identité, situation et seuls historiques renseignés."""
     ctx = build_export_mois_context(settings)

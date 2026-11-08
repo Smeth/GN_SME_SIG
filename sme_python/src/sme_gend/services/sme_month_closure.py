@@ -279,6 +279,17 @@ def run_piste_a_month_closure(
     - Mois actif et mois fermés relus depuis MySQL, sans promotion via un contexte local.
     - Audit et révision partagée validés dans la même transaction que la clôture.
     """
+    from sme_gend.services.operation_progress import operation_progress
+    with operation_progress((('context', 'Vérification des droits et des périodes'),
+                             ('files', 'Archivage de la source Access et de la mise en page'),
+                             ('safety', 'Sauvegarde cohérente de la base MySQL'),
+                             ('commit', 'Clôture, ouverture et validation de la transaction'))) as operation:
+        return _run_piste_a_month_closure_with_progress(settings, mois_cloture, mois_suivant,
+            expected=expected, precheck_report=precheck_report, operation=operation)
+
+
+def _run_piste_a_month_closure_with_progress(settings, mois_cloture, mois_suivant, *, expected, precheck_report, operation):
+    operation.start('context')
     from sme_gend.services.action_permissions import assert_any_permission
     assert_any_permission("workflow.close_month")
     from sme_gend.services.document_month_cycle import assert_legacy_closure
@@ -290,6 +301,8 @@ def run_piste_a_month_closure(
     from sme_gend.services.active_month_guard import load_active_month_snapshot
     if expected is None:
         expected = load_active_month_snapshot(settings)
+    operation.finish('context')
+    operation.start('files', total=2)
     warnings: list[str] = []
     data_archive: Path | None = None
     layout_archive: Path | None = None
@@ -310,10 +323,13 @@ def run_piste_a_month_closure(
                 f"Fichier Access introuvable pour snapshot : {p}"
             )
 
+    operation.update('files', current=1, total=2, detail='Source Access traitée ; lecture de la mise en page')
     try:
         layout_archive = _snapshot_layout_from_central(settings, arch, slug)
     except OSError as e:
         warnings.append(f"Archive mise en page (MySQL) : {e}")
+    operation.finish('files')
+    operation.start('safety')
 
     mysql_archive: Path | None = None
     try:
@@ -329,6 +345,8 @@ def run_piste_a_month_closure(
             "Vérifiez la connexion, les droits et l'espace du dossier de sauvegarde."
         ) from exc
 
+    operation.finish('safety')
+    operation.start('commit', detail='Mise à jour des périodes et attente de la confirmation MySQL')
     tw, n_closed, n_open, ins = _commit_closure_transition(
         settings, ym_cloture, ym_suivant, strict_source=True, expected=expected,
         action="sme_month_closure_piste_a",
@@ -341,6 +359,8 @@ def run_piste_a_month_closure(
         },
     )
     warnings.extend(tw)
+    from sme_gend.services.operation_commit_progress import finish_after_commit
+    finish_after_commit(settings, operation, 'commit', detail=f'{n_closed} période(s) fermée(s), {n_open} période(s) ouverte(s)')
 
     return SmeMonthClosureResult(
         warnings=warnings,
@@ -379,6 +399,19 @@ def import_existing_db_for_month(
     - Charge liste générale, carrière, référentiels et satellites dans MySQL (ODBC).
     - Audit : événement ``sme_month_import_existing_db`` (toujours émis).
     """
+    from sme_gend.services.operation_progress import operation_progress
+    with operation_progress((('context', 'Vérification du mois et des droits'),
+                             ('import', 'Import des données Access dans MySQL'),
+                             ('archive', 'Archivage de la source Access'),
+                             ('commit', 'Clôture éventuelle et finalisation'))) as operation:
+        return _import_existing_db_for_month_with_progress(settings, source_path, mois, mois_suivant,
+            import_to_mysql=import_to_mysql, archive_and_close=archive_and_close, progress=progress,
+            preserve_manual=preserve_manual, replacement_preview=replacement_preview, operation=operation)
+
+
+def _import_existing_db_for_month_with_progress(settings, source_path, mois, mois_suivant, *,
+        import_to_mysql, archive_and_close, progress, preserve_manual, replacement_preview, operation):
+    operation.start('context')
     from sme_gend.services.action_permissions import assert_any_permission
     assert_any_permission("workflow.import_archive")
     if archive_and_close:
@@ -399,6 +432,8 @@ def import_existing_db_for_month(
         mois_suivant = None
     else:
         _validated_closure_months(mois, mois_suivant)
+    operation.finish('context')
+    operation.start('import')
 
     # Import MySQL AVANT la clôture / bascule de mois_actif.
     # Sinon, si « mois suivant » est activé d'abord, l'import du mois choisi
@@ -434,6 +469,8 @@ def import_existing_db_for_month(
                 if w and w not in warnings:
                     warnings.append(str(w))
 
+    operation.finish('import', detail='Import terminé' if mysql_bundle_result is not None else 'Aucun import MySQL effectué')
+    operation.start('archive')
     if archive_and_close:
         if progress:
             progress("Archivage du fichier (sme_archives)…")
@@ -448,6 +485,8 @@ def import_existing_db_for_month(
             except OSError as e:
                 warnings.append(f"Copie du fichier vers les archives : {e}")
 
+        operation.finish('archive')
+        operation.start('commit', detail='Clôture du mois et attente de la confirmation MySQL')
         if progress:
             progress("Clôture du mois / activation du mois suivant…")
         from sme_gend.repositories.reference_write_guard import ReferenceConflictError
@@ -472,11 +511,15 @@ def import_existing_db_for_month(
             raise
         warnings.extend(tw)
     else:
+        operation.finish('archive', detail='Archivage non sélectionné')
+        operation.start('commit', detail='Enregistrement de l’audit de l’import')
         append_audit_event(action="sme_month_import_existing_db", sme_mois_context=mois,
             mois_importe=mois, mois_suivant="", source_file=str(source_path),
             data_archive=None, tabsme_rows_closed=0, tabsme_rows_opened=0,
             tabsme_auto_insert=False, warnings=warnings, mysql_bundle=mysql_bundle_result)
 
+    from sme_gend.services.operation_commit_progress import finish_after_commit
+    finish_after_commit(settings, operation, 'commit', detail='Import et finalisation confirmés')
     return SmeMonthClosureResult(
         warnings=warnings,
         data_archive=data_archive,

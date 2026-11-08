@@ -19,10 +19,10 @@ def app(monkeypatch):
 
 @pytest.mark.parametrize('determinate',[False,True])
 def test_premature_progress_close_cannot_report_success_before_the_worker_finishes(app,monkeypatch,determinate):
-    workers=[];original=bg_task._ProgressWorker if determinate else bg_task.FunctionWorker
+    workers=[];original=bg_task._ProgressWorker if determinate else bg_task._OperationWorker
     class Tracked(original):
         def __init__(self,*a,**kw):super().__init__(*a,**kw);workers.append(self)
-    monkeypatch.setattr(bg_task,'_ProgressWorker' if determinate else 'FunctionWorker',Tracked)
+    monkeypatch.setattr(bg_task,'_ProgressWorker' if determinate else '_OperationWorker',Tracked)
     parent=QWidget();finished=Event()
     def work(*args):
         if args:args[0]('Synthetic final step before actual work')
@@ -41,6 +41,7 @@ def test_premature_progress_close_cannot_report_success_before_the_worker_finish
         except RuntimeError:pass
     app.processEvents();parent.deleteLater()
     assert completed_at_return and result==42
+    assert len(workers)==1
 
 
 

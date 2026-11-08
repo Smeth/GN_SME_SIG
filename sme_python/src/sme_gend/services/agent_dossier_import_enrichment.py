@@ -14,6 +14,8 @@ from sme_gend.services.access_date_parse import parse_access_date
 from sme_gend.services.import_diploma_date import interpret_diploma_date, source_observation
 from sme_gend.services.carriere_snapshot_diff import diff_carriere_snapshots
 from sme_gend.services.mysql_import_period import first_day_of_month
+from sme_gend.services.operation_progress import operation_progress
+from sme_gend.services.operation_commit_progress import finish_after_commit
 
 
 @dataclass(slots=True)
@@ -219,45 +221,66 @@ def backfill_dossier_from_all_snapshots(settings: Settings) -> dict[str, int]:
     Rejoue l'enrichissement pour tous les agents et toutes les paires de mois
     consécutifs déjà en base (utile après migration).
     """
+    with operation_progress((('history', 'Lecture de l’historique carrière'),
+                             ('agents', 'Reconstruction des dossiers agents'),
+                             ('summary', 'Consolidation du bilan'))) as progress:
+        progress.start('history', detail='Lecture des agents et de leurs situations mensuelles…')
+        result = _backfill_dossier_from_all_snapshots(settings, progress)
+        finish_after_commit(settings, progress, 'summary',
+                            detail=f'{result["dossier_total"]} nouvelle(s) ligne(s) de dossier enregistrée(s).')
+        return result
+
+
+def _backfill_dossier_from_all_snapshots(settings, progress):
     repo = MySQLAgentRepository(settings)
     dossier_repo = MySQLAgentDossierRepository(settings)
     totals = DossierEnrichmentCounts()
     bulk = repo.load_carriere_history_bulk()
+    progress.finish('history', detail=f'{len(bulk)} agent(s) avec historique à examiner.')
+    progress.start('agents', total=len(bulk), detail='Comparaison des situations et ajout des événements absents…')
 
-    for leg, (_noms, snaps) in bulk.items():
-        agent_id = dossier_repo.agent_id_for_legacy(leg)
-        if agent_id is None or not snaps:
-            continue
-        for idx, after in enumerate(snaps):
-            ym = after.annee_mois
-            if not ym:
-                continue
-            obs = _import_obs(ym)
-            before = snaps[idx - 1] if idx > 0 else None
-            if before is None:
-                totals.diplomes += _maybe_add_diplome(dossier_repo, agent_id, after, obs, None)
-                totals.passations += _maybe_add_passation(dossier_repo, agent_id, after, ym, obs)
-                totals.affectations += _maybe_add_affectation(
-                    dossier_repo, agent_id, after, ym, obs, None
-                )
-                continue
-            changes = diff_carriere_snapshots(before, after)
-            if ("diplome" in changes or "date_obtention" in changes) and _norm(after.diplome):
-                totals.diplomes += _maybe_add_diplome(dossier_repo, agent_id, after, obs, None)
-            if "grade" in changes and _norm(after.grade):
-                totals.passations += _maybe_add_passation(dossier_repo, agent_id, after, ym, obs)
-            if "structure" in changes and _norm(after.structure):
-                totals.affectations += _maybe_add_affectation(
-                    dossier_repo, agent_id, after, ym, obs, None
-                )
-            elif ("fonction" in changes or "subdivision_arme" in changes) and _norm(after.structure):
-                totals.affectations += _maybe_add_affectation(
-                    dossier_repo, agent_id, after, ym, obs, None
-                )
-
+    for index, (leg, (_noms, snaps)) in enumerate(bulk.items(), 1):
+        _backfill_dossier_agent(dossier_repo, leg, snaps, totals)
+        if index % 50 == 0 or index == len(bulk):
+            progress.update('agents', current=index, total=len(bulk),
+                detail=f'{index}/{len(bulk)} agent(s) examiné(s) ; {totals.total()} ligne(s) ajoutée(s).')
+    progress.finish('agents', detail=f'{len(bulk)} agent(s) examiné(s).')
+    progress.start('summary', detail='Consolidation des diplômes, passations et affectations enregistrés…')
     return {
         "dossier_diplomes": totals.diplomes,
         "dossier_passations": totals.passations,
         "dossier_affectations": totals.affectations,
         "dossier_total": totals.total(),
     }
+
+
+def _backfill_dossier_agent(dossier_repo, leg, snaps, totals):
+    agent_id = dossier_repo.agent_id_for_legacy(leg)
+    if agent_id is None or not snaps:
+        return
+    for idx, after in enumerate(snaps):
+        ym = after.annee_mois
+        if not ym:
+            continue
+        obs = _import_obs(ym)
+        before = snaps[idx - 1] if idx > 0 else None
+        if before is None:
+            totals.diplomes += _maybe_add_diplome(dossier_repo, agent_id, after, obs, None)
+            totals.passations += _maybe_add_passation(dossier_repo, agent_id, after, ym, obs)
+            totals.affectations += _maybe_add_affectation(
+                dossier_repo, agent_id, after, ym, obs, None
+            )
+            continue
+        changes = diff_carriere_snapshots(before, after)
+        if ("diplome" in changes or "date_obtention" in changes) and _norm(after.diplome):
+            totals.diplomes += _maybe_add_diplome(dossier_repo, agent_id, after, obs, None)
+        if "grade" in changes and _norm(after.grade):
+            totals.passations += _maybe_add_passation(dossier_repo, agent_id, after, ym, obs)
+        if "structure" in changes and _norm(after.structure):
+            totals.affectations += _maybe_add_affectation(
+                dossier_repo, agent_id, after, ym, obs, None
+            )
+        elif ("fonction" in changes or "subdivision_arme" in changes) and _norm(after.structure):
+            totals.affectations += _maybe_add_affectation(
+                dossier_repo, agent_id, after, ym, obs, None
+            )

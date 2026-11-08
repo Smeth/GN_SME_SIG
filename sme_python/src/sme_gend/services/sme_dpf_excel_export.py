@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sme_gend.services.export_progress import tracked_export, export_phase, export_rows
+
 import re
 import shutil
 from pathlib import Path
@@ -73,6 +75,7 @@ def _month_label_fr(mois: str) -> str:
     return mois
 
 
+@tracked_export
 def export_sme_dpf_workbook(
     settings: Settings,
     destination: Path,
@@ -96,7 +99,9 @@ def export_sme_dpf_workbook(
     grades = GradeRepository(scoped).fetch_all()
     details = export_details(NumeriqueSatelliteRepository(scoped))
     dest = Path(destination).resolve()
+    export_phase('render', detail='Feuilles numériques et nominatives DPF')
     build_dpf(scoped, dest, data, grades, details)
+    export_phase('finalize', detail='Historique du document DPF')
     from sme_gend.services.doc_gen_log import log_doc_generation
     log_doc_generation(settings=scoped, doc_type="sme_dpf", format="xlsx", persons=[f"DPF ({data.total} agents)"],
                         dest_path=str(dest), count=data.total, mois=mois)

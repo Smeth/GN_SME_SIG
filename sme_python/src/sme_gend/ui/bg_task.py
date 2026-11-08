@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from PySide6.QtCore import Qt, QThread, Signal, QObject, Slot, QCoreApplication
+from PySide6.QtCore import Qt, QThread, Signal, QObject, Slot, QCoreApplication, QEventLoop, QTimer
 import logging
 from shiboken6 import isValid
-from PySide6.QtWidgets import QMessageBox, QProgressDialog, QWidget
+from PySide6.QtWidgets import QMessageBox, QWidget
 
 T = TypeVar("T")
 _active_workers: dict[QThread, "_WorkerDelivery"] = {}
@@ -147,24 +147,21 @@ def start_managed_thread(worker, owner, *, signals=(), on_finished=None):
     return worker
 
 
-class _TaskProgressDialog(QProgressDialog):
-    # The close button and Escape cannot turn a still-running write into an
-    # apparent successful return. Only actual QThread.finished closes the modal.
-    def reject(self):
-        pass
-
-    def closeEvent(self, event):  # noqa: N802
-        event.ignore()
-
-
 class _ProgressDelivery(_WorkerDelivery):
     def __init__(self, worker, dialog, success, error):
         super().__init__(worker, dialog, success, error, dialog.accept)
         self.dialog = dialog
+        self.has_measured_progress = False
+
+    @Slot(object)
+    def progress(self, snapshot):
+        if self.alive and not _quitting:
+            self.has_measured_progress = True
+            self.dialog.apply_snapshot(snapshot)
 
     @Slot(int, int, str)
     def step(self, current, total, message):
-        if self.alive and not _quitting:
+        if self.alive and not _quitting and not self.has_measured_progress:
             if hasattr(self.dialog, 'legacy_step'):
                 self.dialog.legacy_step(current, total, message)
                 return
@@ -174,7 +171,7 @@ class _ProgressDelivery(_WorkerDelivery):
 
     @Slot(str)
     def detail(self, message):
-        if self.alive and not _quitting:
+        if self.alive and not _quitting and not self.has_measured_progress:
             if hasattr(self.dialog, 'legacy_detail'):
                 self.dialog.legacy_detail(message)
                 return
@@ -212,57 +209,36 @@ def run_with_progress(
     minimum_duration: int = 0,
     silent: bool = False,
 ) -> T | None:
-    """
-    Exécute fn dans un thread secondaire avec dialogue modal indéterminé.
-    Ne pas utiliser pour du code qui touche aux widgets / modèles Qt.
+    """Measured phases for all jobs; short silent reads keep their delayed display.
 
-    minimum_duration : ms avant que le dialogue soit affiché (0 = immédiat).
-    silent : n'affiche la boîte de progression qu'après ~400 ms si le chargement continue.
-    Retourne le résultat, ou None si erreur (QMessageBox critique affichée).
+    Instrumented services expose their complete phases and real counters. An
+    indivisible request stays on its processing phase until its actual return.
+    The callable must not touch Qt widgets/models in the background thread.
     """
     if silent and minimum_duration <= 0:
         minimum_duration = 400
-    # The owner can be destroyed during application shutdown. Keep the modal
-    # alive until its detached worker really finishes.
-    dlg = _TaskProgressDialog()
-    dlg.setAutoClose(False)
-    dlg.setAutoReset(False)
-    dlg.setWindowTitle(title)
-    dlg.setLabelText(text)
-    dlg.setRange(0, 0)
-    dlg.setCancelButton(None)
-    dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
-    dlg.setMinimumDuration(minimum_duration)
-    dlg.setMinimumWidth(340)
+    def measured_work():
+        from sme_gend.services.operation_progress import operation_progress
+        with operation_progress((('prepare', 'Préparation du traitement'),
+                                 ('work', text),
+                                 ('finalize', 'Finalisation du résultat')),
+                                include_substeps=True) as operation:
+            operation.start('prepare')
+            operation.finish('prepare')
+            operation.start('work', detail=text+' — attente du résultat du traitement.')
+            value = fn()
+            if _unconfirmed_result(value):
+                return value
+            operation.finish('work')
+            operation.start('finalize')
+            operation.finish('finalize')
+            return value
+    return run_with_operation_progress(parent, title, text, measured_work,
+                                       minimum_duration=minimum_duration)
 
-    result: list[T] = []
-    err: list[BaseException] = []
 
-    def on_ok(value: object) -> None:
-        result.append(value)  # type: ignore[arg-type]
-
-    def on_fail(exc: object) -> None:
-        err.append(exc)  # type: ignore[arg-type]
-
-    worker = FunctionWorker(fn, parent)
-    delivery = _WorkerDelivery(worker, dlg, on_ok, on_fail, dlg.accept)
-    _start_worker(worker, delivery)
-    dlg.exec()
-    worker.wait() if isValid(worker) else None
-    dlg.deleteLater()
-
-    if err:
-        e = err[0]
-        from sme_gend.services.mysql_health import format_mysql_error_for_user
-
-        detail = format_mysql_error_for_user(e)
-        QMessageBox.critical(
-            parent if parent is None or isValid(parent) else None,
-            title,
-            detail,
-        )
-        return None
-    return result[0] if result else None
+def _unconfirmed_result(value):
+    return value is False or (isinstance(value, tuple) and len(value) == 2 and value[0] is False)
 
 
 class _ProgressWorker(QThread):
@@ -272,6 +248,7 @@ class _ProgressWorker(QThread):
     failed = Signal(object)
     step = Signal(int, int, str)
     detail = Signal(str)
+    progress = Signal(object)
 
     def __init__(
         self,
@@ -296,7 +273,8 @@ class _ProgressWorker(QThread):
     def run(self) -> None:
         try:
             from sme_gend.services.auth_context import audit_identity_scope
-            with audit_identity_scope(self._audit_identity):
+            from sme_gend.services.operation_progress import progress_reporting
+            with audit_identity_scope(self._audit_identity), progress_reporting(self.progress.emit):
                 self.succeeded.emit(self._fn(_ProgressReporter(self._report, self._report_detail)))
         except BaseException as e:
             self.failed.emit(e)
@@ -321,11 +299,10 @@ def run_with_determinate_progress(
     total_steps: int,
     fn: Callable[[Callable[[str], None]], T],
 ) -> T | None:
-    """
-    Comme ``run_with_progress``, mais avec une vraie barre 0→100 % au lieu d'un
-    spinner indéterminé : ``fn`` reçoit un callable ``report(message)`` à appeler
-    à chaque étape franchie (jusqu'à ``total_steps`` fois). La barre et le
-    libellé se mettent à jour à chaque appel.
+    """Run callback-based jobs with percentages and a visible phase list.
+
+    The complete measured service plan takes priority when one is available.
+    Other callables retain their existing ``report(message)`` interface.
     """
     total_steps = max(1, total_steps)
     # The owner can be destroyed during application shutdown. Keep the modal
@@ -333,17 +310,15 @@ def run_with_determinate_progress(
     from sme_gend.ui.operation_progress_dialog import OperationProgressDialog
     dlg = OperationProgressDialog(title, 'Préparation…')
     dlg.legacy_step(1,max(1,total_steps),'Préparation…')
-    # QProgressDialog ferme automatiquement dès que setValue() atteint le maximum
-    # (comportement Qt par défaut) — désactivé : la dernière étape signalée ne
-    # correspond pas forcément à la fin réelle de fn (code encore à exécuter après),
-    # et fermer prématurément faisait revenir un résultat vide même en cas de succès.
+    # The last reported phase may precede the callable's actual return. Only
+    # QThread.finished can confirm success and close the modal.
 
     result: list[T] = []
     err: list[BaseException] = []
 
     def on_ok(value: object) -> None:
         result.append(value)  # type: ignore[arg-type]
-        dlg.success()
+        dlg.unconfirmed() if _unconfirmed_result(value) else dlg.success()
 
     def on_fail(exc: object) -> None:
         err.append(exc)  # type: ignore[arg-type]
@@ -355,6 +330,7 @@ def run_with_determinate_progress(
     delivery.finished_callback = dlg.after_worker_finished
     worker.step.connect(delivery.step, Qt.ConnectionType.QueuedConnection)
     worker.detail.connect(delivery.detail, Qt.ConnectionType.QueuedConnection)
+    worker.progress.connect(delivery.progress, Qt.ConnectionType.QueuedConnection)
     _start_worker(worker, delivery)
     dlg.exec()
     worker.wait() if isValid(worker) else None
@@ -385,7 +361,7 @@ class _OperationDelivery(_WorkerDelivery):
             self.dialog.apply_snapshot(snapshot)
 
 
-def run_with_operation_progress(parent, title, text, fn):
+def run_with_operation_progress(parent, title, text, fn, *, minimum_duration=0):
     """Run an instrumented service with real percentages and the complete phase list."""
     from sme_gend.ui.operation_progress_dialog import OperationProgressDialog
     from sme_gend.services.mysql_health import format_mysql_error_for_user
@@ -393,14 +369,27 @@ def run_with_operation_progress(parent, title, text, fn):
     result=[]
     def success(value):
         result.append(value)
-        dlg.success()
+        dlg.unconfirmed() if _unconfirmed_result(value) else dlg.success()
     def failure(exc):
         dlg.failure(format_mysql_error_for_user(exc))
+        if minimum_duration and not dlg.isVisible():
+            dlg.open()
     worker = _OperationWorker(fn, parent)
     delivery = _OperationDelivery(worker, dlg, success, failure)
     worker.progress.connect(delivery.progress, Qt.ConnectionType.QueuedConnection)
-    _start_worker(worker, delivery)
-    dlg.exec()
+    if minimum_duration > 0:
+        loop = QEventLoop()
+        dlg.finished.connect(loop.quit)
+        timer = QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda: dlg.open() if not dlg._finished else None)
+        timer.start(minimum_duration)
+        _start_worker(worker, delivery)
+        loop.exec()
+        timer.stop()
+    else:
+        _start_worker(worker, delivery)
+        dlg.exec()
     worker.wait() if isValid(worker) else None
     dlg.deleteLater()
     return result[0] if result else None

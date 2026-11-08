@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sme_gend.services.export_progress import tracked_export, export_phase, export_rows
+
 from pathlib import Path
 
 from sme_gend.services.excel_style_helpers import write_literal_cell_value, writable_cell
@@ -28,6 +30,7 @@ def _autosize(ws, headers: tuple[str, ...], first_row: int, last_row: int) -> No
     configure_table_print(ws, header_row=first_row - 1, last_row=last_row, columns=len(headers))
 
 
+@tracked_export
 def export_malades_workbook(
     dest: Path,
     *,
@@ -50,7 +53,7 @@ def export_malades_workbook(
         write_literal_cell_value(ws, 2, col, h)
         writable_cell(ws, 2, col).font = Font(bold=True)
 
-    for i, r in enumerate(rows, start=3):
+    for i, r in enumerate(export_rows(rows), start=3):
         key = r.satellite_join_key()
         d = details.get(key) or details.get(r.id or "")
         write_literal_cell_value(ws, i, 1, key)
@@ -63,11 +66,14 @@ def export_malades_workbook(
         write_literal_cell_value(ws, i, 8, (d.obs if d else "") or "")
 
     _autosize(ws, headers, 3, max(3, len(rows) + 2))
+    export_phase("write", total=1, detail="Écriture du document final")
     wb.save(dest)
+    export_phase("finalize", detail="Confirmation du fichier et historique")
     from sme_gend.services.doc_gen_log import log_saved_list
     log_saved_list(dest, rows, doc_type="malades", settings=settings)
 
 
+@tracked_export
 def export_punis_workbook(dest: Path, *, rows: list[ListeGeneraleRow], grades=None, settings=None) -> None:
     wb = Workbook()
     ws = wb.active
@@ -80,7 +86,7 @@ def export_punis_workbook(dest: Path, *, rows: list[ListeGeneraleRow], grades=No
         write_literal_cell_value(ws, 2, col, h)
         writable_cell(ws, 2, col).font = Font(bold=True)
 
-    for i, r in enumerate(rows, start=3):
+    for i, r in enumerate(export_rows(rows), start=3):
         write_literal_cell_value(ws, i, 1, r.id or "")
         write_literal_cell_value(ws, i, 2, r.noms or "")
         write_literal_cell_value(ws, i, 3, format_grade_display(r.grade, grades))
@@ -89,6 +95,8 @@ def export_punis_workbook(dest: Path, *, rows: list[ListeGeneraleRow], grades=No
         write_literal_cell_value(ws, i, 6, r.obs or "")
 
     _autosize(ws, headers, 3, max(3, len(rows) + 2))
+    export_phase("write", total=1, detail="Écriture du document final")
     wb.save(dest)
+    export_phase("finalize", detail="Confirmation du fichier et historique")
     from sme_gend.services.doc_gen_log import log_saved_list
     log_saved_list(dest, rows, doc_type="punis", settings=settings)

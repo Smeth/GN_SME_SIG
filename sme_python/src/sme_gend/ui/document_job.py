@@ -24,6 +24,15 @@ def require_export(parent) -> bool:
 def run_document_job(parent, fn):
     from sme_gend.ui.bg_task import run_with_progress
     def work():
-        fn()
-        return True
+        from sme_gend.services.operation_progress import operation_progress
+        with operation_progress((('prepare', 'Préparer le document'),
+                                 ('generate', 'Générer et enregistrer le document'),
+                                 ('finish', 'Confirmer la fin de la génération'))) as progress:
+            progress.start('prepare')
+            progress.finish('prepare')
+            progress.start('generate')
+            fn()
+            progress.finish('generate')
+            progress.finish('finish')
+            return True
     return run_with_progress(parent, "Documents", "Génération du document en cours…", work)

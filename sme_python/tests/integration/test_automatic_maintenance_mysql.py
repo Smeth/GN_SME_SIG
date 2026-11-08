@@ -317,13 +317,17 @@ def test_automatic_lot31_decimal_changes_are_not_lost_in_plan_hashes(isolated_my
 
 
 @pytest.mark.parametrize('kind',['dossier','coherence'])
-def test_automatic_lot31_real_composite_jobs_publish_once(isolated_mysql,monkeypatch,kind):
+@pytest.mark.parametrize('category',['MILITAIRE',None])
+def test_automatic_lot31_real_composite_jobs_publish_once(isolated_mysql,monkeypatch,kind,category):
     from sme_gend.services import data_sync
     from sme_gend.services.automatic_jobs import run_dossier_maintenance,run_month_coherence
     settings,connect,params=setup(isolated_mysql,monkeypatch)
     with connect(**params) as conn:
         with conn.cursor() as cur:
-            cur.execute("INSERT INTO agent_diplome(agent_id,libelle_libre,date_obtention) VALUES(1,'SYNTHETIC DIPLOMA','2020-01-01')")
+            # The SME projects military diplomas. Legacy NULL categories are
+            # read as CIVIL and must not silently become military diplomas.
+            cur.execute("INSERT INTO agent_diplome(agent_id,categorie,libelle_libre,date_obtention) "
+                        "VALUES(1,%s,'SYNTHETIC DIPLOMA','2020-01-01')",(category,))
     publications=[];original=data_sync.publish_data_change
     def publish(*a,**kw):publications.append(True);return original(*a,**kw)
     monkeypatch.setattr(data_sync,'publish_data_change',publish)
@@ -331,4 +335,6 @@ def test_automatic_lot31_real_composite_jobs_publish_once(isolated_mysql,monkeyp
     else:out=run_month_coherence(settings,mois='2026-09',skip_maintenance=True)
     assert out and publications==[True]
     with connect(**params) as conn:
-        with conn.cursor() as cur:cur.execute('SELECT diplome_libelle FROM carriere_situation WHERE id=1');assert cur.fetchone()==('SYNTHETIC DIPLOMA',)
+        with conn.cursor() as cur:
+            cur.execute('SELECT diplome_libelle FROM carriere_situation WHERE id=1')
+            assert cur.fetchone()==('SYNTHETIC DIPLOMA' if category=='MILITAIRE' else None,)

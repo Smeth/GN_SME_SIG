@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QMenu,
-    QProgressDialog,
     QPushButton,
     QSizePolicy,
     QStackedWidget,
@@ -1821,37 +1820,35 @@ class PersonnelListView(QWidget):
             for c in range(data_col_count)
         ]
         nrows = self._proxy.rowCount()
-        dlg = QProgressDialog("Export CSV en cours…", None, 0, max(1, nrows), self)
-        dlg.setWindowTitle("Export CSV")
-        dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
-        dlg.setCancelButton(None)
-        dlg.setMinimumDuration(0)
-        dlg.setMinimumWidth(320)
-        dlg.show()
-        QApplication.processEvents()
+        from sme_gend.ui.gui_operation_progress import gui_operation_progress
         try:
-            with open(path, "w", newline="", encoding="utf-8-sig") as f:
-                w = csv.writer(f, delimiter=";")
-                w.writerow(headers)
-                for pr in range(nrows):
-                    if pr % 25 == 0:
-                        dlg.setValue(pr)
-                        QApplication.processEvents()
-                    src = self._proxy.mapToSource(self._proxy.index(pr, 0))
-                    if not src.isValid():
-                        continue
-                    row_vals = []
-                    for c in range(data_col_count):
-                        mi = self._model.index(src.row(), c)
-                        v = self._model.data(mi, Qt.ItemDataRole.DisplayRole)
-                        row_vals.append(v if v is not None else "")
-                    w.writerow(row_vals)
-                dlg.setValue(nrows)
+            with gui_operation_progress('Export CSV', 'Export des lignes affichées…',
+                    (('open','Ouverture du fichier CSV'),('rows','Écriture des lignes affichées'),
+                     ('close','Fermeture du fichier'))) as progress:
+                progress.start('open')
+                with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                    w = csv.writer(f, delimiter=";")
+                    w.writerow(headers)
+                    progress.finish('open')
+                    progress.start('rows',total=nrows)
+                    for pr in range(nrows):
+                        src = self._proxy.mapToSource(self._proxy.index(pr, 0))
+                        if src.isValid():
+                            row_vals = []
+                            for c in range(data_col_count):
+                                mi = self._model.index(src.row(), c)
+                                v = self._model.data(mi, Qt.ItemDataRole.DisplayRole)
+                                row_vals.append(v if v is not None else "")
+                            w.writerow(row_vals)
+                        if (pr+1)%25==0 or pr+1==nrows:
+                            progress.update('rows',current=pr+1,total=nrows,
+                                detail=f'{pr+1} / {nrows} ligne(s) traitée(s).')
+                    progress.finish('rows')
+                    progress.start('close')
+                progress.finish('close')
         except OSError as e:
             QMessageBox.critical(self, "Export", str(e))
             return
-        finally:
-            dlg.close()
         self._show_status(f"Export enregistré : {path}")
 
 

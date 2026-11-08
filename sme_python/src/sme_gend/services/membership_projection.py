@@ -9,6 +9,7 @@ from sme_gend.repositories.mysql_connection import MySQLConnection, has_import_t
 from sme_gend.services.access_date_parse import parse_access_date
 from sme_gend.services.mysql_import_period import first_day_of_month, last_day_of_month
 from sme_gend.services.sme_month_closure import canonical_sme_mois_yyyy_mm
+from sme_gend.services.operation_progress import operation_progress
 
 
 def _records(cursor, sql, params=()):
@@ -38,6 +39,14 @@ def _materialize_gain(cursor, aid, pid, month, careers, columns, current_flag):
 
 def apply_membership_for_agent(settings, agent_id, since, *, _period_ids=None):
     """Caller holds the agent lock and a shared business transaction (or X gate)."""
+    with operation_progress((('history', 'Lecture des faits et situations de l’agent'),
+                             ('periods', 'Recalcul de l’effectif par période'),
+                             ('acknowledge', 'Mise à jour du suivi des projections'))) as progress:
+        progress.start('history', detail='Lecture des périodes, mouvements et situations de l’agent…')
+        return _apply_membership_for_agent(settings, agent_id, since, _period_ids=_period_ids, progress=progress)
+
+
+def _apply_membership_for_agent(settings, agent_id, since, *, _period_ids, progress):
     if not has_import_transaction(settings):
         raise RuntimeError('La projection des effectifs exige la transaction du mouvement.')
     since = parse_access_date(since)
@@ -65,7 +74,9 @@ def apply_membership_for_agent(settings, agent_id, since, *, _period_ids=None):
             maps = _records(cursor, 'SELECT * FROM sme_month_membership WHERE agent_id=%s FOR UPDATE', (aid,))
             maps = {int(row['sme_periode_id']): row for row in maps}
             columns = None
-            for pid, month in periods:
+            progress.finish('history', detail=f'{len(periods)} période(s) concernée(s) par les faits datés.')
+            progress.start('periods', total=len(periods), detail='Recalcul des périodes mensuelles concernées…')
+            for index, (pid, month) in enumerate(periods, 1):
                 event = next((row for row in events if row['effective_date'] <= last_day_of_month(month)), None)
                 baseline = int(maps[pid]['baseline_member']) if pid in maps else int(pid in current)
                 is_member = int(event['category'] == 'GAIN') if event else baseline
@@ -80,18 +91,27 @@ def apply_membership_for_agent(settings, agent_id, since, *, _period_ids=None):
                     current[pid] = career
                     careers.append(career)
                 if event is None and pid not in maps:
+                    if index % 25 == 0 or index == len(periods):
+                        progress.update('periods', current=index, total=len(periods),
+                                        detail=f'{index}/{len(periods)} période(s) contrôlée(s), jusqu’à {month}.')
                     continue
                 cursor.execute('INSERT INTO sme_month_membership(agent_id,sme_periode_id,is_member,baseline_member,'
                     'event_id,updated_at) VALUES(%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE '
                     'is_member=VALUES(is_member),event_id=VALUES(event_id),updated_at=VALUES(updated_at)',
                     (aid, pid, is_member, baseline, event['id'] if event else None,
                      datetime.now(timezone.utc).replace(tzinfo=None)))
+                if index % 25 == 0 or index == len(periods):
+                    progress.update('periods', current=index, total=len(periods),
+                                    detail=f'{index}/{len(periods)} période(s) recalculée(s), jusqu’à {month}.')
+            progress.finish('periods', detail=f'{len(periods)} période(s) examinée(s).')
+            progress.start('acknowledge', detail='Contrôle de la demande de recalcul en attente…')
             cursor.execute("SELECT requested_token FROM sme_projection_dirty WHERE agent_id=%s "
                            "AND component='membership' AND state='pending' FOR UPDATE", (aid,))
             pending = cursor.fetchone()
     if pending and _period_ids is None:
         from sme_gend.services.temporal_changes import acknowledge_projection
         acknowledge_projection(settings, aid, 'membership', pending[0])
+    progress.finish('acknowledge', detail='Suivi de projection actualisé dans la transaction du mouvement.')
 
 
 def _rebuild_target_membership(settings, cursor, month, pid):

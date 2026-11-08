@@ -1,6 +1,7 @@
 """Liste des présents — mise en page configurable + export fidèle à la maquette Excel."""
 
 from __future__ import annotations
+from sme_gend.services.export_progress import tracked_export, HTML_STEPS, export_phase, export_rows
 
 import html
 from collections import defaultdict
@@ -395,6 +396,7 @@ class ListePresentService:
         parts.append("</table></body></html>")
         return "".join(parts)
 
+    @tracked_export(steps=HTML_STEPS)
     def build_preview_html(
         self,
         search_filter: str | None = None,
@@ -448,8 +450,10 @@ class ListePresentService:
             deepcopy(flat), deepcopy(grade_rows), export_month, deepcopy(anomalies))
         if on_snapshot is not None:
             on_snapshot(snapshot)
+        export_phase('render', detail='Construction de l’aperçu de la liste des présents')
         return self.render_snapshot_html(snapshot, on_progress=on_progress)
 
+    @tracked_export(steps=HTML_STEPS)
     def render_snapshot_html(self, snapshot, *, detailed=False, on_progress=None):
         """Render the captured personnel without reading the database again."""
         sections, flat, grade_rows = snapshot.sections, snapshot.flat, snapshot.grades
@@ -465,6 +469,7 @@ class ListePresentService:
         }
         mode_label = _mode_labels.get(presences_mode, presences_mode)
         total_rows = self._count_section_rows(sections)
+        export_phase('render', total=total_rows, detail='Lignes de la liste des présents')
         if not detailed and total_rows > self.PREVIEW_MAX_DETAIL_ROWS:
             pct(100)
             return self._build_preview_summary_html(
@@ -600,7 +605,7 @@ class ListePresentService:
                     )
                 elif kind == "data":
                     n_interne = 0
-                    for r in payload:
+                    for r in export_rows(payload, label='Liste des présents'):
                         n_global += 1
                         n_interne += 1
                         row_cls = "data-odd" if n_global % 2 else "data-even"
@@ -648,6 +653,7 @@ class ListePresentService:
             note += f" ⚠ {len(anomalies.positions_vides)} position(s) administrative(s) vide(s), comptée(s) comme présence au corps : {names}{extra}."
         return "<p class='note'>" + html.escape(note) + "</p>"
 
+    @tracked_export
     def export_excel(
         self,
         destination: Path,
@@ -693,6 +699,8 @@ class ListePresentService:
             return format_subdivision_arme_display(pr.subdivision_arme, flat)
 
         from sme_gend.services.safe_paths import atomic_destination
+        from sme_gend.services.export_progress import export_phase
+        export_phase('render', detail='Génération des rubriques et des lignes de présence')
         with atomic_destination(dest, temporary_suffix=".xlsx") as staged:
             if tpl is not None and tpl.is_file():
                 export_liste_fidele(
@@ -712,6 +720,7 @@ class ListePresentService:
                 )
 
             from openpyxl import load_workbook
+            export_phase('write', detail='Ajout des contrôles de présence et enregistrement du classeur')
             workbook = load_workbook(staged)
             checks = workbook.create_sheet("Contrôles de présence")
             checks.append(["Présence administrative du mois ; ce document ne constitue pas un pointage quotidien."])
@@ -732,6 +741,7 @@ class ListePresentService:
             workbook.save(staged)
             workbook.close()
 
+        export_phase('finalize', detail='Historique de la liste des présents')
         from sme_gend.config.liste_generale_scope import resolve_export_mois
         from sme_gend.services.doc_gen_log import log_doc_generation
 

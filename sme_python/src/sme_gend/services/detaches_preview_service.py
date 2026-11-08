@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sme_gend.services.export_progress import tracked_export, HTML_STEPS, export_phase, export_rows
+
 from copy import deepcopy
 from dataclasses import replace
 
@@ -121,6 +123,7 @@ class DetachesPreviewService:
             sigle=sigle,
         ).html_detail
 
+    @tracked_export(steps=HTML_STEPS)
     def build_bundle(
         self,
         *,
@@ -285,7 +288,7 @@ class DetachesPreviewService:
             + "<th>Padmin</th><th>Contrôle</th><th>Réf. note</th>"
             "</tr></thead><tbody>"
         )
-        for i, r in enumerate(rows, 1):
+        for i, r in enumerate(export_rows(rows), 1):
             sigle = sigle_ou_subdivision(r)
             des_bl = designation_bloc_excel(cfg, sigle)
             ctrl = detache_ecart_remarque(r)
@@ -338,7 +341,7 @@ class DetachesPreviewService:
             + "<th>Structure</th><th>Padmin</th><th>Remarque</th><th>Réf. note</th>"
             "</tr></thead><tbody>"
         )
-        for i, r in enumerate(rows, 1):
+        for i, r in enumerate(export_rows(rows), 1):
             sigle = sigle_ou_subdivision(r)
             parts.append("<tr>")
             parts.append(f"<td class='num'>{i}</td>")

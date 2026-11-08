@@ -12,6 +12,7 @@ LINE = Side(style="thin", color="CFD7E3")
 
 
 def table_sheet(wb, name, title, headers, rows, *, mois, header_row=3, widths=None):
+    from sme_gend.services.export_progress import export_rows
     if name in wb.sheetnames:
         index = wb.sheetnames.index(name)
         wb.remove(wb[name])
@@ -42,7 +43,7 @@ def table_sheet(wb, name, title, headers, rows, *, mois, header_row=3, widths=No
     stripe_fill = PatternFill("solid", fgColor="F0F4F8")
     date_columns = [any(part in str(header).casefold() for part in ("date", "début", "fin")) for header in headers]
     rows = list(rows)
-    for row_index, values in enumerate(rows, header_row + 1):
+    for row_index, values in enumerate(export_rows(rows, label=name), header_row + 1):
         required_lines = 1
         for col, value in enumerate(values, 1):
             if col > len(headers):

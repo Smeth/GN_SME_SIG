@@ -1,10 +1,9 @@
 """One dated return dialogue and a truthful per-agent result for activity lists."""
 from datetime import date
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QFormLayout, QLabel, QMessageBox,
-    QProgressDialog, QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget,
 )
 
 from sme_gend.ui.widgets.date_input import FrenchDateEdit
@@ -61,37 +60,37 @@ def run_activity_return(parent, settings, kind, requests, *, title):
     actual_date = ActivityReturnDialog.run(parent, title=title, agent_count=len(requests), month=month)
     if actual_date is None:
         return None
-    progress = None
-    if len(requests) > 1 and isinstance(parent, QWidget):
-        progress = QProgressDialog('Enregistrement des retours…', '', 0, len(requests), parent)
-        progress.setWindowTitle(title)
-        progress.setWindowModality(Qt.WindowModality.ApplicationModal)
-        progress.setCancelButton(None)
-        progress.setMinimumDuration(300)
-        progress.setValue(0)
+    from sme_gend.services.operation_progress import operation_progress
+    from sme_gend.ui.gui_operation_progress import gui_operation_progress
+    steps = (('returns','Enregistrement et validation des retours'),('result','Préparation du bilan'))
+    context = (gui_operation_progress(title,'Enregistrement des retours…',steps)
+               if len(requests)>1 and isinstance(parent,QWidget) else operation_progress(steps))
     confirmed, errors, warnings = set(), [], []
     unchanged = 0
-    for index, (key, row, expected) in enumerate(requests, 1):
-        label = (row.noms or row.id) if row is not None else key
-        try:
-            if row is None:
-                raise ValueError('Agent introuvable dans la liste affichée. Rechargez les données.')
-            result = complete_activity(settings, row, kind, actual_date, expected=expected)
-            confirmed.add(key)
-            unchanged += not result.changed
-            if result.position_admin != 'Présent':
-                warnings.append(f'{label} : retour enregistré ; position du mois : {result.position_admin or "—"}.')
-        except CommittedMirrorError:
-            confirmed.add(key)
-            warnings.append(f'{label} : enregistrement confirmé dans MySQL ; copie locale du journal '
-                            'à vérifier. Ne recommencez pas l’opération.')
-        except Exception as exc:
-            errors.append(f'{label} : {exc} — aucune modification enregistrée pour cet agent.')
-        finally:
-            if progress is not None:
-                progress.setValue(index)
-    if progress is not None:
-        progress.close()
+    with context as progress:
+        progress.start('returns',total=len(requests))
+        for index, (key, row, expected) in enumerate(requests, 1):
+            label = (row.noms or row.id) if row is not None else key
+            try:
+                if row is None:
+                    raise ValueError('Agent introuvable dans la liste affichée. Rechargez les données.')
+                result = complete_activity(settings, row, kind, actual_date, expected=expected)
+                confirmed.add(key)
+                unchanged += not result.changed
+                if result.position_admin != 'Présent':
+                    warnings.append(f'{label} : retour enregistré ; position du mois : {result.position_admin or "—"}.')
+            except CommittedMirrorError:
+                confirmed.add(key)
+                warnings.append(f'{label} : enregistrement confirmé dans MySQL ; copie locale du journal '
+                                'à vérifier. Ne recommencez pas l’opération.')
+            except Exception as exc:
+                errors.append(f'{label} : {exc} — aucune modification enregistrée pour cet agent.')
+            finally:
+                progress.update('returns',current=index,total=len(requests),
+                    detail=f'{index} / {len(requests)} agent(s) traité(s) ; {len(confirmed)} confirmé(s), {len(errors)} échec(s).')
+        progress.finish('returns')
+        progress.start('result')
+        progress.finish('result',detail=f'{len(confirmed)} retour(s) confirmé(s), {len(errors)} échec(s).')
     message = f'{len(confirmed) - unchanged} retour(s) enregistré(s) au {actual_date:%d/%m/%Y}.'
     if unchanged:
         message += f'\n{unchanged} retour(s) déjà enregistré(s) à cette date, conservé(s).'

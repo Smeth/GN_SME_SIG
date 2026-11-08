@@ -221,6 +221,17 @@ def _build(settings, source, target, options, state):
 
 
 def preview_month_fill(settings, source, target, options=FillOptions()):
+    from sme_gend.services.operation_progress import operation_progress
+    with operation_progress((('read', 'Lecture des périodes et des données source'),
+                             ('plan', 'Calcul et contrôle de la reprise mensuelle'),
+                             ('finish', 'Finalisation de l’aperçu'))) as operation:
+        result = _preview_month_fill_with_progress(settings, source, target, options, operation)
+        operation.finish('finish')
+        return result
+
+
+def _preview_month_fill_with_progress(settings, source, target, options, operation):
+    operation.start('read')
     from sme_gend.services.active_month_guard import load_active_month_snapshot
     _authorize()
     from sme_gend.services.document_month_cycle import assert_legacy_month_fill
@@ -234,7 +245,12 @@ def preview_month_fill(settings, source, target, options=FillOptions()):
         with MySQLConnection(settings).connect(read_only=True) as conn:
             snapshot = load_active_month_snapshot(settings)
             state = _read_state(conn, source, target, periods=snapshot.rows, period_revision=snapshot.revision)
-            return _build(settings, source, target, options, state)[0]
+            operation.finish('read')
+            operation.start('plan')
+            result = _build(settings, source, target, options, state)[0]
+            operation.finish('plan', detail=f'{sum(dict(result.counts).values()):,} ligne(s) à reprendre ; {len(result.conflicts)} conflit(s)')
+            operation.start('finish')
+    return result
 
 
 def month_fill_progress_steps(plan):
@@ -244,6 +260,17 @@ def month_fill_progress_steps(plan):
 
 
 def apply_month_fill(settings, plan, *, progress=None):
+    from sme_gend.services.operation_progress import operation_progress
+    with operation_progress((('safety', 'Sauvegarde de sécurité'),
+                             ('verify', 'Contrôle de la source et du mois cible'),
+                             ('period', 'Préparation de la période cible'),
+                             ('rows', 'Reprise des agents et de leurs activités'),
+                             ('history', 'Application des historiques aux situations'),
+                             ('commit', 'Journalisation et validation de la transaction'))) as operation:
+        return _apply_month_fill_with_progress(settings, plan, progress=progress, operation=operation)
+
+
+def _apply_month_fill_with_progress(settings, plan, *, progress, operation):
     from pathlib import Path
     from sme_gend.services.active_month_guard import period_state_write
     from sme_gend.services.shared_reference_write import mark_shared_data_write
@@ -261,10 +288,13 @@ def apply_month_fill(settings, plan, *, progress=None):
     report = progress if progress is not None else lambda message: None
     detail = getattr(progress, 'detail', lambda message: None)
     detail('Création de la sauvegarde préalable…')
+    operation.start('safety')
     backup = ensure_recent_backup(settings, max_age_days=0.0)
     if backup is None or not Path(backup).is_file():
         raise RuntimeError('Reprise annulée : la sauvegarde préalable a échoué.')
     report('Sauvegarde préalable vérifiée')
+    operation.finish('safety')
+    operation.start('verify')
     _authorize()
     with legacy_month_transition(settings), period_state_write(settings, reason='month_fill', mois=plan.target) as change:
         assert_legacy_month_fill(settings)
@@ -275,8 +305,14 @@ def apply_month_fill(settings, plan, *, progress=None):
             if current.revision != plan.revision or current.conflicts:
                 raise ReferenceConflictError('Les données ou les périodes ont changé depuis l’aperçu. Aucune reprise effectuée ; relancez l’aperçu.')
             report('Données source et mois cible vérifiés')
+            operation.finish('verify')
+            operation.start('period')
             pid = state['target_pid'] or ensure_sme_periode(conn, plan.target, statut='Préparé')
             report('Période cible prête')
+            operation.finish('period')
+            total_rows = sum(len(rows) for rows in payload.values())
+            inserted_rows = 0
+            operation.start('rows', total=total_rows)
             active = change.before.active_month == plan.target
             with conn.cursor() as cur:
                 new_careers=[]
@@ -301,18 +337,25 @@ def apply_month_fill(settings, plan, *, progress=None):
                         cur.execute(f'INSERT INTO {table} (' + ','.join(f'`{c}`' for c in columns) + ') VALUES ('
                                     + ','.join(['%s'] * len(columns)) + ')', tuple(row[c] for c in columns))
                         if table=='carriere_situation':new_careers.append((int(cur.lastrowid),int(row['agent_id'])))
+                        inserted_rows += 1
                         if index % 50 == 0 or index == len(rows):
                             report(f'{LABELS.get(table, table)} : {index} / {len(rows)}')
+                            operation.update('rows', current=inserted_rows, total=total_rows,
+                                detail=f'{LABELS.get(table, table)} : {index:,}/{len(rows):,} ; total {inserted_rows:,}/{total_rows:,}')
+            operation.finish('rows')
             from sme_gend.services.temporal_events import project_available_history
             detail('Mise à jour des situations depuis les historiques…')
-            if progress is None:
-                project_available_history(settings,new_careers)
-            else:
-                project_available_history(settings, new_careers,
-                    progress=lambda done, total: report(f'Historiques des agents : {done} / {total}')
-                        if done % 50 == 0 or done == total else None)
+            operation.start('history', total=len(new_careers))
+            def history_progress(done, total):
+                if done % 50 == 0 or done == total:
+                    if progress is not None:
+                        report(f'Historiques des agents : {done} / {total}')
+                    operation.update('history', current=done, total=total, detail=f'{done:,}/{total:,} agent(s) projeté(s)')
+            project_available_history(settings, new_careers, progress=history_progress)
             if active:
                 refresh_est_actuelle_flags(conn, plan.target)
+            operation.finish('history')
+            operation.start('commit', detail='Journalisation et attente de la confirmation MySQL')
             record_business_action(settings, action='sme_month_fill', module='workflow', entity_id=plan.target,
                                    mois=plan.target, after=dict(source=plan.source, target=plan.target,
                                        source_revision=plan.revision,
@@ -323,5 +366,7 @@ def apply_month_fill(settings, plan, *, progress=None):
     from sme_gend.services.sme_editing_policy import invalidate_editing_state_cache
     invalidate_editing_state_cache()
     report('Remplissage terminé et validé en base')
+    from sme_gend.services.operation_commit_progress import finish_after_commit
+    finish_after_commit(settings, operation, 'commit', detail='Remplissage terminé et validé en base')
     return dict(source=plan.source, target=plan.target, counts=dict(current.counts),
                 review=len(current.review), backup=str(backup))

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sme_gend.services.export_progress import tracked_export, HTML_STEPS, export_phase, export_rows
+
 import html
 from collections.abc import Sequence
 from datetime import date, datetime
@@ -193,6 +195,7 @@ def _data_row(
     return "<tr>" + "".join(cells) + "</tr>"
 
 
+@tracked_export(steps=HTML_STEPS)
 def build_liste_generale_print_html(
     rows: Sequence[ListeGeneraleRow],
     *,
@@ -205,7 +208,7 @@ def build_liste_generale_print_html(
     cols = resolve_print_columns(columns)
     row_list = list(rows)
     body = "".join(
-        _data_row(r, i + 1, flat=flat, columns=cols, grades=grades) for i, r in enumerate(row_list)
+        _data_row(r, i + 1, flat=flat, columns=cols, grades=grades) for i, r in enumerate(export_rows(row_list))
     )
     title_block = f"<p class='title'>{LISTE_GENERALE_OFFICIAL_TITLE}</p>"
     table = f"<table><tbody>{_header_row(cols)}{body}</tbody></table>"

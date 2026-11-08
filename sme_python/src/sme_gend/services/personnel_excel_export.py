@@ -7,6 +7,7 @@ from pathlib import Path
 from dataclasses import replace
 import math
 from sme_gend.services.excel_style_helpers import write_literal_cell_value
+from sme_gend.services.export_progress import tracked_export, export_phase, export_rows
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, Side
@@ -147,7 +148,7 @@ def _write_official_data_rows(
     hidden_keys: set[str] | None = None,
 ) -> None:
     cols = list(columns or OFFICIAL_EXCEL_COLS)
-    for ri, row in enumerate(rows, start_row):
+    for ri, row in enumerate(export_rows(rows, label=ws.title), start_row):
         line_no = line_offset + (ri - start_row) + 1
         hidden = hidden_keys or set()
         masked = {key: None for key in ("date_naissance", "lieu_naissance") if key in hidden}
@@ -168,6 +169,7 @@ def _write_official_data_rows(
         ws.row_dimensions[ri].height = height
 
 
+@tracked_export
 def export_liste_filtered(
     rows: list[ListeGeneraleRow],
     path: Path,
@@ -190,13 +192,16 @@ def export_liste_filtered(
     hdr_row, data_start = _write_official_sheet_header(
         ws, mois_label=mois_label or log_mois, n_rows=len(rows), columns=cols
     )
+    export_phase("render", total=len(rows))
     _write_official_data_rows(
         ws, rows, flat=flat, start_row=data_start, columns=cols, grades=grades,
         hidden_keys=hidden_keys if not column_keys else None
     )
     last_row = data_start + max(len(rows), 1) - 1
     _apply_official_print_setup(ws, hdr_row=hdr_row, last_row=last_row, ncol=len(cols))
+    export_phase("write", total=1, detail="Enregistrement du classeur Excel")
     wb.save(str(path))
+    export_phase("finalize", detail="Historique du document")
     from sme_gend.services.doc_gen_log import log_doc_generation
 
     log_doc_generation(
@@ -209,6 +214,7 @@ def export_liste_filtered(
     return len(rows)
 
 
+@tracked_export
 def export_liste_by_padmin(
     rows: list[ListeGeneraleRow],
     path: Path,
@@ -234,6 +240,7 @@ def export_liste_by_padmin(
     first = True
     line_offset = 0
 
+    export_phase("render", total=len(rows))
     for padmin in sorted(groups.keys(), key=str.lower):
         padmin_rows = groups[padmin]
         if first:
@@ -272,7 +279,9 @@ def export_liste_by_padmin(
     ws_recap.cell(last, 1, "TOTAL").font = Font(bold=True, name="Times New Roman", size=10)
     ws_recap.cell(last, 2, total).font = Font(bold=True, name="Times New Roman", size=10)
 
+    export_phase("write", total=1, detail="Enregistrement des feuilles et du récapitulatif")
     wb.save(str(path))
+    export_phase("finalize", detail="Historique du document")
     from sme_gend.services.doc_gen_log import log_doc_generation
 
     log_doc_generation(

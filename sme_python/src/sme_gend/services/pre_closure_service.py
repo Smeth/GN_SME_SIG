@@ -22,6 +22,7 @@ from sme_gend.services.sme_month_closure import (
 )
 from sme_gend.services.sme_workspace_service import SmeWorkspaceService
 from sme_gend.services.workflow_task_service import WorkflowTaskService
+from sme_gend.services.operation_progress import operation_progress
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +53,19 @@ def run_pre_closure_checks(
     mois_cloture: str,
     mois_suivant: str,
 ) -> PreClosureReport:
+    with operation_progress((('period', 'Contrôle des périodes et du mois actif'),
+                             ('personnel', 'Vérification des effectifs et des présents'),
+                             ('movements', 'Contrôle des gains, pertes et sorties'),
+                             ('mysql', 'Vérification de la connexion MySQL'),
+                             ('backup', 'Contrôle des sauvegardes et des archives'),
+                             ('report', 'Préparation du rapport de contrôle'))) as operation:
+        result = _run_pre_closure_checks_with_progress(settings, mois_cloture, mois_suivant, operation)
+        operation.finish('report', detail=f'{len(result.checks)} constat(s), {len(result.blocking)} blocage(s)')
+        return result
+
+
+def _run_pre_closure_checks_with_progress(settings, mois_cloture, mois_suivant, operation):
+    operation.start('period')
     ym_c = extract_yyyy_mm(mois_cloture) or mois_cloture.strip()
     ym_s = extract_yyyy_mm(mois_suivant) or mois_suivant.strip()
     checks: list[PreClosureCheck] = []
@@ -138,6 +152,8 @@ def run_pre_closure_checks(
             )
         )
 
+    operation.finish('period')
+    operation.start('personnel')
     try:
         liste = ListeGeneraleRepository(scoped_settings)
         rows = liste.fetch_all()
@@ -172,6 +188,8 @@ def run_pre_closure_checks(
             )
         )
 
+    operation.finish('personnel')
+    operation.start('movements')
     try:
         gp = GainPerteRepository(settings).fetch_for_month(ym_c)
         if not gp:
@@ -209,6 +227,8 @@ def run_pre_closure_checks(
         checks.append(PreClosureCheck("gain_perte_error", "block",
             "Mouvements inaccessibles", str(exc)))
 
+    operation.finish('movements')
+    operation.start('mysql')
     mysql_ok, mysql_msg = check_mysql_connectivity(settings)
     if not mysql_ok:
         checks.append(
@@ -222,6 +242,8 @@ def run_pre_closure_checks(
             )
         )
 
+    operation.finish('mysql')
+    operation.start('backup')
     backup = find_latest_backup_zip()
     if backup is None:
         checks.append(
@@ -277,9 +299,14 @@ def run_pre_closure_checks(
             )
         )
 
+    operation.finish('backup')
+    operation.start('report')
     return PreClosureReport(ym_c, ym_s, tuple(checks))
 
 
 def finalize_pre_closure_report(settings: Settings, report: PreClosureReport) -> None:
     """Crée les tâches workflow à partir du rapport (après affichage UI)."""
-    WorkflowTaskService(settings).sync_from_pre_closure(report)
+    with operation_progress((('tasks', 'Enregistrement des contrôles et des tâches de suivi'),)) as operation:
+        operation.start('tasks')
+        WorkflowTaskService(settings).sync_from_pre_closure(report)
+        operation.finish('tasks')

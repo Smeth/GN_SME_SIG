@@ -179,12 +179,21 @@ def test_permission_revoked_in_save_dialog_prevents_generation(view,monkeypatch,
 
 
 def test_worker_failure_reports_error_and_returns_no_success(app,monkeypatch):
-    from PySide6.QtWidgets import QMessageBox
-    reported=MagicMock();monkeypatch.setattr(QMessageBox,"critical",reported)
+    from sme_gend.ui.operation_progress_dialog import OperationProgressDialog
+    reported=[]
+    def acknowledge_error():
+        for dialog in QApplication.topLevelWidgets():
+            if isinstance(dialog,OperationProgressDialog) and dialog._failed:
+                reported.append((dialog._bar.value(),dialog._detail.text()))
+                dialog._close.click()
+    timer=QTimer();timer.timeout.connect(acknowledge_error);timer.start(5)
     def fail():
         raise ValueError("SYNTHETIC FAILURE")
-    assert jobs.run_document_job(None,fail) is None
-    reported.assert_called_once()
+    try:
+        assert jobs.run_document_job(None,fail) is None
+    finally:
+        timer.stop()
+    assert reported and reported[0][0]<100 and 'SYNTHETIC FAILURE' in reported[0][1]
 
 
 def test_failed_batch_is_not_opened(view,monkeypatch,tmp_path):

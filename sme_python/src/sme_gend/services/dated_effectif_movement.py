@@ -1,15 +1,34 @@
 """Real dated workforce movements, separate from monthly Access observations."""
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
+from functools import wraps
 
 from sme_gend.repositories.mysql_connection import MySQLConnection, mysql_database_key
 from sme_gend.services.access_date_parse import parse_access_date
 from sme_gend.services.personnel_service import _personnel_write
+from sme_gend.services.operation_progress import operation_progress, current_operation_progress
+from sme_gend.services.operation_commit_progress import finish_after_commit
 
 
 TABLE = 'agent_effectif_movement'
 COLUMNS = ('m.id,m.agent_id,m.category,m.movement_kind,m.effective_date,m.recorded_at,'
            'm.recorded_by,m.reference_note,m.details,m.version,a.legacy_access_id,a.noms')
+
+
+def _movement_progress(function):
+    @wraps(function)
+    def run(*args, **kwargs):
+        with operation_progress((('prepare', 'Contrôle du mouvement et de l’agent'),
+                                 ('write', 'Enregistrement du mouvement daté'),
+                                 ('project', 'Recalcul des situations concernées'),
+                                 ('journal', 'Journalisation de la modification'),
+                                 ('commit', 'Validation de la transaction MySQL'))) as progress:
+            progress.start('prepare', detail='Vérification des droits, de la date et de la version…')
+            result = function(*args, **kwargs)
+            finish_after_commit(args[0] if args else kwargs['settings'], progress, 'commit',
+                                detail='Mouvement et situations concernées enregistrés.')
+            return result
+    return run
 
 
 class MovementConflict(ValueError):
@@ -122,13 +141,20 @@ def _journal(settings, before, after, reason):
     from sme_gend.services.business_audit import record_business_action
     value = after or before
     since = min(item.effective_date for item in (before, after) if item is not None)
+    progress = current_operation_progress()
+    progress.finish('write', detail='Mouvement enregistré dans la transaction.')
+    progress.start('project', detail=f'Recalcul des situations à partir du {since:%d/%m/%Y}…')
     record_source_change(settings, value.agent_id, TABLE, value.id, _state(before), _state(after),
                          reason=reason, effective_from=since, enabled=True)
     apply_membership_for_agent(settings, value.agent_id, since)
+    progress.finish('project', detail='Situations concernées recalculées ; transaction non encore validée.')
+    progress.start('journal', detail='Enregistrement de la trace métier…')
     record_business_action(settings, action='dated_effectif_movement_' + ('created' if before is None else
         'deleted' if after is None else 'corrected'), module='personnel', entity_id=value.id,
         before=_state(before), after={'movement': _state(after), 'reason': reason},
         personnel_id=str(value.agent_id), personnel_nom=value.agent_name, mois=value.effective_date.strftime('%Y-%m'))
+    progress.finish('journal', detail='Modification journalisée dans la transaction.')
+    progress.start('commit', detail='Validation du mouvement, des projections et du journal…')
 
 
 def resolve_selected_agent(settings, legacy_id):
@@ -184,6 +210,7 @@ def _list(settings, month, agent_id, limit, offset):
             return [_movement(settings, row) for row in cursor.fetchall()]
 
 
+@_movement_progress
 def create_movement(settings, agent_id, category, movement_kind, effective_date, *, reference_note=None,
                     details=None, reason=''):
     _allowed(write=True)
@@ -199,6 +226,8 @@ def create_movement(settings, agent_id, category, movement_kind, effective_date,
         with MySQLConnection(settings).connect() as connection:
             with connection.cursor() as cursor:
                 _day_available(cursor, agent_id, values[2])
+                current_operation_progress().finish('prepare', detail='Agent et date contrôlés.')
+                current_operation_progress().start('write', detail='Création du mouvement daté…')
                 cursor.execute(f'INSERT INTO {TABLE}(agent_id,category,movement_kind,effective_date,recorded_at,'
                     'recorded_by,reference_note,details,version) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,1)',
                     (int(agent_id), *values[:3], datetime.now(timezone.utc).replace(tzinfo=None),
@@ -208,6 +237,7 @@ def create_movement(settings, agent_id, category, movement_kind, effective_date,
         return result
 
 
+@_movement_progress
 def update_movement(settings, snapshot, *, category, movement_kind, effective_date, reference_note=None,
                     details=None, reason):
     _allowed(write=True, correction=True)
@@ -226,6 +256,8 @@ def update_movement(settings, snapshot, *, category, movement_kind, effective_da
                 if before.version != snapshot.version or before.agent_id != snapshot.agent_id:
                     raise MovementConflict('Ce mouvement a changé depuis son affichage. Rechargez avant de corriger.')
                 _day_available(cursor, snapshot.agent_id, values[2], excluding=snapshot.id)
+                current_operation_progress().finish('prepare', detail='Version, agent et date contrôlés.')
+                current_operation_progress().start('write', detail='Correction du mouvement daté…')
                 cursor.execute(f'UPDATE {TABLE} SET category=%s,movement_kind=%s,effective_date=%s,'
                     'reference_note=%s,details=%s,version=version+1 WHERE id=%s AND version=%s',
                     (*values, snapshot.id, snapshot.version))
@@ -236,6 +268,7 @@ def update_movement(settings, snapshot, *, category, movement_kind, effective_da
         return after
 
 
+@_movement_progress
 def delete_movement(settings, snapshot, *, reason):
     _allowed(write=True, correction=True)
     _check_snapshot(settings, snapshot)
@@ -251,6 +284,8 @@ def delete_movement(settings, snapshot, *, reason):
                 before = _read(settings, cursor, snapshot.id, lock=True)
                 if before.version != snapshot.version or before.agent_id != snapshot.agent_id:
                     raise MovementConflict('Ce mouvement a changé depuis son affichage. Rechargez avant de supprimer.')
+                current_operation_progress().finish('prepare', detail='Version et agent contrôlés.')
+                current_operation_progress().start('write', detail='Suppression du mouvement daté…')
                 cursor.execute(f'DELETE FROM {TABLE} WHERE id=%s AND version=%s', (snapshot.id, snapshot.version))
                 if cursor.rowcount != 1:
                     raise MovementConflict('Suppression concurrente : rechargez le mouvement.')

@@ -31,6 +31,7 @@ from sme_gend.services.mysql_ref_etl import (
     import_referentials_from_access,
 )
 from sme_gend.services.sme_month_closure import canonical_sme_mois_yyyy_mm
+from sme_gend.services.operation_progress import operation_progress
 
 
 def _norm_id(v: Any) -> str:
@@ -314,6 +315,23 @@ def import_full_mysql_bundle_from_access(
     preserve_manual: bool = True,
     replacement_preview=None,
 ) -> dict[str, Any]:
+    with operation_progress((('context', 'Contrôle du mois et des autorisations'),
+                             ('safety', 'Sauvegarde de sécurité MySQL'),
+                             ('access', 'Préparation du fichier Access'),
+                             ('schema', 'Vérification du schéma et de la configuration'),
+                             ('import', 'Import et réconciliation des données du mois'),
+                             ('commit', 'Validation et nettoyage de l’import'))) as operation:
+        result = _import_full_mysql_bundle_with_progress(access_settings, mysql_settings,
+            progress=progress, mois=mois, on_month_committed=on_month_committed,
+            preserve_manual=preserve_manual, replacement_preview=replacement_preview, operation=operation)
+        from sme_gend.services.operation_commit_progress import finish_after_commit
+        finish_after_commit(mysql_settings or access_settings, operation, 'commit', detail='Import confirmé et caches invalidés')
+        return result
+
+
+def _import_full_mysql_bundle_with_progress(access_settings, mysql_settings, *, progress, mois,
+        on_month_committed, preserve_manual, replacement_preview, operation):
+    operation.start('context')
     if not mois:
         raise ValueError("Le mois de l'import (YYYY-MM) est obligatoire.")
 
@@ -326,6 +344,8 @@ def import_full_mysql_bundle_from_access(
 
     from sme_gend.services.backup_restore_service import ensure_recent_backup
 
+    operation.finish('context')
+    operation.start('safety')
     try:
         if progress:
             progress("Sauvegarde de sécurité…")
@@ -338,6 +358,8 @@ def import_full_mysql_bundle_from_access(
             "Vérifiez l'espace disque et les droits d'accès au dossier des sauvegardes."
         ) from exc
 
+    operation.finish('safety')
+    operation.start('access')
     original_access_path = access_settings.database_path
     from sme_gend.services.access_odbc import cleanup_staged_copy, stage_access_file_copy
 
@@ -350,6 +372,8 @@ def import_full_mysql_bundle_from_access(
             access_settings = dataclasses.replace(access_settings, database_path=staged_path)
         except OSError:
             staged_path = None  # copie impossible (disque plein, permissions…) : lecture directe
+    operation.finish('access', detail='Copie de travail prête' if staged_path is not None else 'Lecture directe de la source Access')
+    operation.start('schema')
     try:
         from sme_gend.repositories.mysql_common import ensure_mysql_schema
         from sme_gend.repositories.mysql_connection import mysql_import_transaction
@@ -359,6 +383,8 @@ def import_full_mysql_bundle_from_access(
         # valide implicitement les transactions lors d'un CREATE/ALTER TABLE.
         ensure_mysql_schema(mysql_st)
         ensure_central_config_ready(mysql_st)
+        operation.finish('schema')
+        operation.start('import')
         from sme_gend.services.active_month_guard import period_state_write
         with period_state_write(mysql_st,reason="career_import",mois=mois) as change:
             if replacement_preview is not None:
@@ -367,7 +393,7 @@ def import_full_mysql_bundle_from_access(
             if on_month_committed is not None:
                 from sme_gend.repositories.mysql_connection import after_mysql_commit
                 after_mysql_commit(lambda: on_month_committed(change.result))
-            return _run_mysql_bundle_import(
+            result = _run_mysql_bundle_import(
                 access_settings,
                 mysql_st,
                 original_access_path=original_access_path,
@@ -375,6 +401,9 @@ def import_full_mysql_bundle_from_access(
                 mois=mois,
                 **({"preserve_manual": False} if not preserve_manual else {}),
             )
+            operation.finish('import')
+            operation.start('commit', detail='Attente de la confirmation de la transaction MySQL')
+        return result
     finally:
         cleanup_staged_copy(staged_path)
         from sme_gend.services.liste_generale_cache import invalidate_liste_cache
@@ -395,6 +424,27 @@ def _run_mysql_bundle_import(
     mois: str,
     preserve_manual: bool = True,
 ) -> dict[str, Any]:
+    with operation_progress((('context', 'Préparation du contexte mensuel'),
+                             ('replace', 'Remplacement des données du mois'),
+                             ('refs', 'Import des référentiels'),
+                             ('liste', 'Import des agents et des situations'),
+                             ('satellites', 'Import des stages, missions et activités'),
+                             ('links', 'Rattachement des activités aux agents'),
+                             ('dossier', 'Enrichissement des dossiers'),
+                             ('conges', 'Synchronisation des congés'),
+                             ('duplicates', 'Contrôle des doublons carrière'),
+                             ('reconcile', 'Réconciliation des référentiels carrière'),
+                             ('projection', 'Projection des situations depuis les dossiers'),
+                             ('period', 'Alignement de la période active'),
+                             ('audit', 'Enregistrement du bilan d’import'))) as operation:
+        return _run_mysql_bundle_with_progress(access_settings, mysql_st,
+            original_access_path=original_access_path, progress=progress, mois=mois,
+            preserve_manual=preserve_manual, operation=operation)
+
+
+def _run_mysql_bundle_with_progress(access_settings, mysql_st, *, original_access_path,
+        progress, mois, preserve_manual, operation):
+    operation.start('context')
     from sme_gend.config.sme_context import load_sme_context
     from sme_gend.repositories.mysql_agent_repository import MySQLAgentRepository
     from sme_gend.services.liste_generale_import import import_liste_generale_access_to_mysql
@@ -416,11 +466,15 @@ def _run_mysql_bundle_import(
         original_access_path,
     )
 
+    operation.finish('context')
+    operation.start('replace')
     if progress:
         progress(f"Remplacement des données et historiques du mois {ym}…")
     replacement_counts = replace_import_month_data(access_settings, mysql_st, ym,
         **({"preserve_manual": False} if not preserve_manual else {}))
 
+    operation.finish('replace')
+    operation.start('refs')
     if progress:
         progress(f"Référentiels ({ym})…")
     ref = copy_referentials_and_satellites_to_mysql(
@@ -433,11 +487,18 @@ def _run_mysql_bundle_import(
         include_referentials=True,
         include_agent_satellites=False,
     )
+    operation.finish('refs')
+    operation.start('liste')
     if progress:
         progress(f"Liste générale — historique {ym}…")
     ref_cache = ref.get("ref_cache")
     if not isinstance(ref_cache, RefEtlCache):
         ref_cache = None
+    def liste_detail(message):
+        operation.update('liste', detail=str(message))
+        callback = getattr(progress, 'detail', None)
+        if callback is not None:
+            callback(message)
     ins, upd, imported_ids, lg_stats = import_liste_generale_access_to_mysql(
         access_settings,
         mysql_st,
@@ -447,8 +508,10 @@ def _run_mysql_bundle_import(
         import_lot_id=lot_id,
         historical=historical,
         ref_cache=ref_cache,
-        detail_progress=getattr(progress, "detail", None),
+        detail_progress=liste_detail,
     )
+    operation.finish('liste', detail=f'{ins:,} agent(s) inséré(s), {upd:,} mis à jour')
+    operation.start('satellites')
     if progress:
         progress("Satellites (missions, maladies, stages…)…")
     sat = copy_referentials_and_satellites_to_mysql(
@@ -462,6 +525,8 @@ def _run_mysql_bundle_import(
         include_agent_satellites=True,
         ref_cache=ref_cache,
     )
+    operation.finish('satellites', detail=f'{sum(value for value in (sat.get("counts") or {}).values() if isinstance(value, int)):,} ligne(s) traitée(s)')
+    operation.start('links')
     ref_counts = ref.setdefault("counts", {})
     if isinstance(ref_counts, dict):
         sat_counts = sat.get("counts") or {}
@@ -476,6 +541,8 @@ def _run_mysql_bundle_import(
     repo = MySQLAgentRepository(mysql_st)
     repo.link_satellite_agent_ids()
 
+    operation.finish('links')
+    operation.start('dossier')
     if progress:
         progress("Enrichissement des dossiers agents…")
     from sme_gend.services.agent_dossier_import_enrichment import enrich_dossier_after_import
@@ -487,6 +554,8 @@ def _run_mysql_bundle_import(
         import_lot_id=lot_id,
     )
 
+    operation.finish('dossier')
+    operation.start('conges')
     if progress:
         progress("Synchronisation des congés…")
     from sme_gend.services.agent_conge_service import sync_conges_from_carriere_period
@@ -500,12 +569,16 @@ def _run_mysql_bundle_import(
                 sme_periode_id=periode_id,
                 import_lot_id=lot_id,
             )
+    operation.finish('conges', detail=f'{conge_padmin:,} congé(s) synchronisé(s)')
+    operation.start('duplicates')
     if progress:
         progress("Réparation des doublons carrière…")
     from sme_gend.services.mysql_import_period import repair_carriere_liste_duplicates
 
     repair_carriere_liste_duplicates(mysql_st)
 
+    operation.finish('duplicates')
+    operation.start('reconcile')
     if progress:
         progress(f"Réconciliation référentiels carrière ({ym})…")
     from sme_gend.services.carriere_reconciliation import reconcile_after_import
@@ -516,6 +589,8 @@ def _run_mysql_bundle_import(
         import_lot_id=lot_id,
     )
 
+    operation.finish('reconcile')
+    operation.start('projection')
     if progress:
         progress("Projection de la carrière (dossiers)…")
     from sme_gend.services.sot_maintenance import project_carriere_from_dossier_batch
@@ -526,6 +601,8 @@ def _run_mysql_bundle_import(
         only_est_actuelle=not historical,
     )
 
+    operation.finish('projection')
+    operation.start('period')
     if progress:
         progress("Alignement période active (est_actuelle)…")
     mc = MySQLConnection(mysql_st)
@@ -540,6 +617,8 @@ def _run_mysql_bundle_import(
             refresh_est_actuelle_flags(conn, SmeWorkspaceService(mysql_st).get_active_mois())
         refresh_carriere_segment_dates(conn)
 
+    operation.finish('period')
+    operation.start('audit')
     if progress:
         progress("Finalisation…")
     from sme_gend.services.shared_reference_write import mark_shared_data_write
@@ -564,6 +643,7 @@ def _run_mysql_bundle_import(
         ref_counts=ref.get("counts"),
         ref_warnings=ref.get("warnings"),
     )
+    operation.finish('audit')
     return {
         "mysql_database": mysql_st.mysql_database,
         "access_database": str(original_access_path.resolve()),

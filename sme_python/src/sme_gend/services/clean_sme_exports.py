@@ -4,6 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 from openpyxl import Workbook
 from sme_gend.services.safe_paths import atomic_destination
+from sme_gend.services.export_progress import tracked_export, export_phase
 
 from sme_gend.services.export_workbook_tables import table_sheet, grade_summary, export_details, personnel_cells, detail_cells
 from sme_gend.services.excel_style_helpers import build_grade_abbrev_map, grade_to_abbrev
@@ -53,12 +54,14 @@ def _movement_sheet(wb, name, movements, rows, gmap, mois):
                        output, mois=mois, widths=[7, 14, 10, 38, 24, 48])
 
 
+@tracked_export
 def build_numerique(settings, destination, *, mois, rows, grades, details, detaches, grade_order, previous_counts,
                     movement_settings=None):
     from sme_gend.services.numerique_stats import RECAP_INDISPO_KEYS
     from sme_gend.services.numerique_excel_export import _prev_ym_canon
     wb = Workbook()
     wb.remove(wb.active)
+    export_phase('render', detail='Construction des tableaux du mois')
     gmap = build_grade_abbrev_map(grades)
     table_sheet(wb, "LISTE GENERALE", "LISTE GÉNÉRALE", LIST_HEADERS,
                 [list_cells(r, i, gmap) for i, r in enumerate(rows, 1)], mois=mois,
@@ -105,12 +108,15 @@ def build_numerique(settings, destination, *, mois, rows, grades, details, detac
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
         with atomic_destination(destination, temporary_suffix=".xlsx") as staged:
+            export_phase('write', total=1, detail='Enregistrement du classeur SME')
             wb.save(staged)
+        export_phase('finalize', detail='Classeur final installé')
         return tuple(wb.sheetnames)
     finally:
         wb.close()
 
 
+@tracked_export
 def build_dpf(settings, destination, data, grades, details):
     from sme_gend.services.sme_dpf_scope import filter_dpf_rows, is_dpf_stagiaire, is_dpf_control_row
     rows = filter_dpf_rows(data.liste_gnle)
@@ -118,6 +124,7 @@ def build_dpf(settings, destination, data, grades, details):
     gmap = build_grade_abbrev_map(grades)
     wb = Workbook()
     wb.remove(wb.active)
+    export_phase('render', detail='Construction des feuilles SME DPF')
     grade_summary(wb, "I- SITUATION NUMERIQUE DES EFF", rows, mois=mois, gmap=gmap,
                   grade_order=[grade_to_abbrev(g.code, gmap) for g in grades], dpf=True)
     for name, title, subset in (
@@ -137,6 +144,8 @@ def build_dpf(settings, destination, data, grades, details):
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
         with atomic_destination(destination, temporary_suffix=".xlsx") as staged:
+            export_phase('write', total=1, detail='Enregistrement du classeur SME DPF')
             wb.save(staged)
+        export_phase('finalize', detail='Classeur DPF final installé')
     finally:
         wb.close()

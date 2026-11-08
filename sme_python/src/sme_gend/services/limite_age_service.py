@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sme_gend.services.export_progress import tracked_export, HTML_STEPS, export_phase, export_rows, export_subtask, export_count
+
 import json
 import re
 import unicodedata
@@ -1158,6 +1160,7 @@ class LimiteAgeService:
         g = grade.strip()
         return (g[0].upper() + g[1:].lower()) if g else ""
 
+    @tracked_export
     def generate_docx(
         self,
         person: ListeGeneraleRow,
@@ -1186,6 +1189,7 @@ class LimiteAgeService:
         if not template_path.is_file():
             raise FileNotFoundError(f"Modèle introuvable : {template_path}")
 
+        export_phase('render', total=1, detail='Remplissage de l’attestation individuelle')
         doc   = Document(str(template_path))
         template_fields = _attestation_template_fields(doc)
 
@@ -1251,7 +1255,9 @@ class LimiteAgeService:
 
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         with atomic_destination(dest_path, temporary_suffix=".docx") as staged:
+            export_phase("write", total=1, detail="Écriture du document final")
             doc.save(str(staged))
+            export_phase("finalize", detail="Confirmation du fichier et historique")
 
         from sme_gend.services.doc_gen_log import log_doc_generation
         if log_generation:
@@ -1263,6 +1269,7 @@ class LimiteAgeService:
 
     # ---- Génération HTML (pour PDF via QPrinter) ---------------------------
 
+    @tracked_export(steps=HTML_STEPS)
     def generate_html(
         self,
         person: ListeGeneraleRow,
@@ -1438,6 +1445,11 @@ class LimiteAgeService:
 
     # ---- Génération d'un document Word fusionné (plusieurs personnes) --------
 
+    @tracked_export(steps=(('prepare', 'Préparer les personnels et le modèle'),
+                           ('render', 'Générer les attestations individuelles'),
+                           ('merge', 'Assembler les pages Word'),
+                           ('write', 'Enregistrer le document final'),
+                           ('finalize', 'Confirmer et journaliser le lot')))
     def generate_docx_batch(
         self,
         persons: list,
@@ -1500,18 +1512,22 @@ class LimiteAgeService:
 
         # Génère chaque personne dans un fichier temp, puis fusionne
         tmp_paths: list[Path] = []
+        export_phase('render', total=len(persons), detail='Attestations individuelles')
         try:
-            for person in persons:
+            for person_number, person in enumerate(persons):
                 import os
                 fd, name = tempfile.mkstemp(suffix=".docx")
                 os.close(fd)
                 tmp = Path(name)
                 tmp_paths.append(tmp)
-                self.generate_docx(person, cfg, tmp, sign_date, settings, log_generation=False)
+                with export_subtask(person_number, len(persons), detail=f'Attestation {person_number+1} / {len(persons)}'):
+                    self.generate_docx(person, cfg, tmp, sign_date, settings, log_generation=False)
 
+            export_phase('merge', total=len(tmp_paths), detail='Assemblage des pages et des images')
             merged = Document(str(tmp_paths[0]))
+            export_count(1)
 
-            for src_path in tmp_paths[1:]:
+            for source_number, src_path in enumerate(tmp_paths[1:], 2):
                 src = Document(str(src_path))
                 rid_map = _copy_images(src, merged)
 
@@ -1532,6 +1548,7 @@ class LimiteAgeService:
                     ec = copy.deepcopy(elem)
                     _patch_rids(ec, rid_map)
                     _insert(ec)
+                export_count(source_number, detail=f'{source_number} / {len(tmp_paths)} attestations assemblées')
 
         finally:
             for p in tmp_paths:
@@ -1542,7 +1559,9 @@ class LimiteAgeService:
 
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         with atomic_destination(dest_path, temporary_suffix=".docx") as staged:
+            export_phase("write", total=1, detail="Écriture du document final")
             merged.save(str(staged))
+            export_phase("finalize", detail="Confirmation du fichier et historique")
 
         from sme_gend.services.doc_gen_log import log_doc_generation
         log_doc_generation(
@@ -1554,6 +1573,7 @@ class LimiteAgeService:
 
     # ---- Export PDF ---------------------------------------------------------
 
+    @tracked_export
     def generate_pdf(
         self,
         person: ListeGeneraleRow,
@@ -1566,11 +1586,13 @@ class LimiteAgeService:
         import shutil, subprocess, tempfile
 
         soffice = shutil.which("soffice") or shutil.which("libreoffice")
+        export_phase('render', detail='Préparation de l’attestation PDF')
         if soffice:
             try:
                 with tempfile.TemporaryDirectory(prefix="sgi-dpf-pdf-") as directory:
                     tmp_docx = Path(directory) / "attestation.docx"
                     self.generate_docx(person, cfg, tmp_docx, sign_date, settings, log_generation=False)
+                    export_phase('write', total=1, detail='Conversion Word vers PDF')
                     subprocess.run(
                         [soffice, "--headless", "--convert-to", "pdf",
                          str(tmp_docx), "--outdir", str(tmp_docx.parent)],
@@ -1582,6 +1604,7 @@ class LimiteAgeService:
                 import logging
                 logging.getLogger(__name__).warning("Conversion LibreOffice indisponible ; repli PDF Qt.", exc_info=True)
             else:
+                export_phase('finalize', detail='Historique de l’attestation PDF')
                 from sme_gend.services.doc_gen_log import log_doc_generation
                 log_doc_generation(settings=settings, doc_type="attestation", format="pdf", persons=[person.noms or "?"], dest_path=str(dest_path))
                 return dest_path
@@ -1592,6 +1615,9 @@ class LimiteAgeService:
         from PySide6.QtCore import QMarginsF
 
         html = self.generate_html(person, cfg, sign_date)
+        # A failed LibreOffice conversion can already have entered the write
+        # phase; continue in that phase while the Qt fallback renders the PDF.
+        export_phase('write', total=1, detail='Rendu PDF et écriture du fichier final')
         dest_path.parent.mkdir(parents=True, exist_ok=True)
 
         def configure(document, printer):
@@ -1605,4 +1631,5 @@ class LimiteAgeService:
         from sme_gend.services.document_pdf_output import save_document_pdf
         save_document_pdf(doc, dest_path, configure=configure, doc_type="attestation",
             count=1, persons=[person.noms or "?"], settings=settings)
+        export_phase('finalize', detail='Attestation PDF enregistrée')
         return dest_path

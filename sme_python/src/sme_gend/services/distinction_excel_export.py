@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sme_gend.services.export_progress import tracked_export, export_phase, export_rows
+
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -107,6 +109,7 @@ def _autosize(ws, headers: tuple[str, ...], header_row: int, last_row: int) -> N
         ws.column_dimensions[get_column_letter(col)].width = min(52, width + 2)
 
 
+@tracked_export
 def export_distinctions_workbook(
     dest: Path,
     *,
@@ -141,7 +144,7 @@ def export_distinctions_workbook(
         write_literal_cell_value(ws, header_row, col, h)
         writable_cell(ws, header_row, col).font = Font(bold=True)
 
-    for i, ln in enumerate(lines, start=header_row + 1):
+    for i, ln in enumerate(export_rows(lines), start=header_row + 1):
         kind = "Médaille" if ln.kind == DISTINCTION_KIND_MEDAILLE else "Décoration / ordre"
         vals = (
             ln.legacy_id,
@@ -163,11 +166,14 @@ def export_distinctions_workbook(
 
     last = max(header_row, header_row + len(lines))
     _autosize(ws, headers, header_row, last)
+    export_phase("write", total=1, detail="Écriture du document final")
     wb.save(dest)
+    export_phase("finalize", detail="Confirmation du fichier et historique")
     from sme_gend.services.doc_gen_log import log_saved_list
     log_saved_list(dest, lines, doc_type="distinctions", settings=settings)
 
 
+@tracked_export
 def write_distinction_import_template(dest: Path, *, settings=None) -> None:
     wb = Workbook()
     ws = wb.active
@@ -205,6 +211,8 @@ def write_distinction_import_template(dest: Path, *, settings=None) -> None:
     write_literal_cell_value(ws3, 2, 1, "EXEMPLE_DEC")
     write_literal_cell_value(ws3, 2, 2, "Décoration exemple")
 
+    export_phase("write", total=1, detail="Écriture du document final")
     wb.save(dest)
+    export_phase("finalize", detail="Confirmation du fichier et historique")
     from sme_gend.services.doc_gen_log import log_saved_list
     log_saved_list(dest, [], doc_type="distinction_template", settings=settings)

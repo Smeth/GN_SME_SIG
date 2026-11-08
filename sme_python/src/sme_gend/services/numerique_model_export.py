@@ -16,6 +16,7 @@ from sme_gend.services.export_workbook_tables import detail_cells, personnel_cel
 from sme_gend.services.numerique_padmin import is_present_strict, row_predicate_for_rubrique
 from sme_gend.services.position_codes import LABELS, position_code, normalized_label
 from sme_gend.services.safe_paths import atomic_destination
+from sme_gend.services.export_progress import tracked_export, export_phase, export_count, export_detail
 
 
 def _put(ws, row, column, value):
@@ -54,6 +55,8 @@ def _body(ws, values, *, start, columns):
         for col, value in enumerate(record, 1):
             _put(ws, row, col, value)
             ws.cell(row, col)._style = copy(styles[col - 1])
+        if (row-start+1) % 100 == 0 or row-start+1 == len(values):
+            export_detail(f'{ws.title} : {row-start+1} / {len(values)} lignes écrites')
         ws.row_dimensions[row].height = height
     for row in range(start, max(old_end, end) + 1):
         ws.row_dimensions[row].hidden = row > end
@@ -210,6 +213,7 @@ def _detach_recap(ws, detaches, config):
     ws.print_area = f'A1:C{max(total_row, extra_row - 1)}'
 
 
+@tracked_export
 def build_from_model(template, destination, *, mois, rows, grades, details, detaches,
                      previous_counts, movements, detaches_config):
     wb = load_workbook(template)
@@ -235,13 +239,15 @@ def build_from_model(template, destination, *, mois, rows, grades, details, deta
             if code:
                 record[10] = LABELS[code][0]
             values.append(record)
+        export_phase('render', total=16, detail='Feuilles du modèle SME, y compris les feuilles masquées')
         list_end = _body(wb['LISTE GENERALE'], values, start=4, columns=17)
+        export_count(1, detail='LISTE GENERALE remplie')
         specs = [('MISSION', 'mission', 4, 8), ('MALADE', 'malade', 4, 7),
                  ('DESERTEUR', 'deserteur', 4, 5), ('CONGé ADMIN', 'conge_admin', 4, 5),
                  ('DETENTION-PRISON', 'prison_ma', 4, 7), ('NON-REJOINT', 'inst_mr', 4, 5),
                  ('STAGE-EXT', 'stage_ex', 4, 7), ('STAGE-LOC', 'stage_local', 4, 7),
                  ('Feuil4', 'stage_interne', 5, 7), ('DETACHE', 'detache', 5, 7)]
-        for name, key, start, columns in specs:
+        for sheet_number, (name, key, start, columns) in enumerate(specs, 2):
             if key == 'detache':
                 subset = detaches
             elif key == 'stage_interne':
@@ -267,9 +273,13 @@ def build_from_model(template, destination, *, mois, rows, grades, details, deta
                 else: record += [lieu, nature, obs]
                 output.append(record)
             _body(wb[name], output, start=start, columns=columns)
+            export_count(sheet_number, detail=f'{name} : {len(output)} lignes écrites')
         _presents(wb['PRESENT'], [r for r in rows if is_present_strict(r)], gmap)
+        export_count(12, detail='PRESENT rempli')
         _movements(wb['GAIN PERTE'], movements, rows, gmap)
+        export_count(13, detail='GAIN PERTE rempli')
         _detach_recap(wb['DETACHE PAR STRUCTURE'], detaches, detaches_config)
+        export_count(14, detail='DETACHE PAR STRUCTURE rempli')
         title = month_title_from_mois_actif(mois)
         # All month labels, including the lower second page of NUMERIQUE.
         for ws in wb:
@@ -335,12 +345,17 @@ def build_from_model(template, destination, *, mois, rows, grades, details, deta
                     cell.value = re.sub(r"('LISTE GENERALE'!\$?[A-Z]+\$?)\d+:(\$?[A-Z]+\$?)\d+",
                                         lambda m: f'{m[1]}4:{m[2]}{list_end}', cell.value)
         wb.calculation = CalcProperties(calcId=0, fullCalcOnLoad=True, forceFullCalc=True, calcMode='auto')
+        export_count(16, detail='NUMERIQUE et PAGE INTER remplis ; formules et titres actualisés')
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
         with atomic_destination(destination, temporary_suffix='.xlsx') as staged:
+            export_phase('write', total=2, detail='Écriture du classeur fidèle au modèle')
             wb.save(staged)
+            export_count(1, detail='Calcul des valeurs mises en cache des formules')
             from sme_gend.services.numerique_formula_cache import cache_model_formulae
             cache_model_formulae(wb, staged)
+            export_count(2, detail='Classeur et résultats des formules enregistrés')
+        export_phase('finalize', detail='Fichier final installé')
         return tuple(wb.sheetnames)
     finally:
         wb.close()

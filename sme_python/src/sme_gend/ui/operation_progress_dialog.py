@@ -18,10 +18,14 @@ class OperationProgressDialog(QDialog):
         self._failed = False
         self._snapshot = None
         self._plan = ()
+        self._active_key = None
         self._legacy_labels = []
         self._heading = QLabel(text)
         self._heading.setWordWrap(True)
         self._heading.setObjectName('dashSubtitle')
+        heading_font = self._heading.font()
+        heading_font.setBold(True)
+        self._heading.setFont(heading_font)
         self._bar = QProgressBar()
         self._bar.setRange(0, 100)
         self._bar.setValue(0)
@@ -78,7 +82,8 @@ class OperationProgressDialog(QDialog):
             return
         self._snapshot = snapshot
         plan = tuple((step.key, step.label) for step in snapshot.steps)
-        if plan != self._plan:
+        plan_changed = plan != self._plan
+        if plan_changed:
             self._steps.clear()
             for step in snapshot.steps:
                 self._steps.addItem(QListWidgetItem(step.label))
@@ -88,6 +93,9 @@ class OperationProgressDialog(QDialog):
         for index, step in enumerate(snapshot.steps):
             state = 'running' if all_done and index == active else step.state
             self._set_step(index, step.label, state)
+        if plan_changed or self._active_key != snapshot.active_key:
+            self._steps.scrollToItem(self._steps.item(active))
+        self._active_key = snapshot.active_key
         self._heading.setText(f'Étape {active+1} / {len(snapshot.steps)} — {snapshot.steps[active].label}')
         self._detail.setText(snapshot.detail or ('Finalisation de l’opération…' if all_done else 'Traitement en cours…'))
         self._bar.setValue(max(self._bar.value(), min(99, snapshot.percent)))
@@ -131,6 +139,11 @@ class OperationProgressDialog(QDialog):
         self._counter.setText('Opération non terminée — consultez le détail ci-dessus.')
         self._close.show()
         self._close.setFocus()
+
+    def unconfirmed(self):
+        """The caller handles a False/error envelope; never flash a false 100%."""
+        self._finished = True
+        self._detail.setText('Traitement non confirmé.')
 
     def after_worker_finished(self):
         if not self._failed:

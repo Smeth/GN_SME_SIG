@@ -46,7 +46,7 @@ def current_operation_progress():
 
 
 class operation_progress:
-    def __init__(self, steps):
+    def __init__(self, steps, *, include_substeps=False):
         self._steps = tuple((str(key), str(label)) for key, label in steps)
         if not self._steps or len({key for key, _ in self._steps}) != len(self._steps):
             raise ValueError('Les étapes de progression doivent avoir des identifiants uniques.')
@@ -57,12 +57,17 @@ class operation_progress:
         self._detail = ''
         self._completed_units = self._total_units = None
         self._parent = None
+        self._parent_index = None
         self._child_span = None
         self._parent_span = (0.0, 1.0)
         self._token = None
+        self._include_substeps = include_substeps
+        self._children = {}
 
     def __enter__(self):
         self._parent = _current.get()
+        if self._parent is not None:
+            self._parent_index = self._parent._active
         if self._parent is not None and self._parent._child_span is not None:
             self._parent_span = self._parent._child_span
         self._token = _current.set(self)
@@ -137,11 +142,14 @@ class operation_progress:
         if self._parent is not None:
             parent = self._parent
             begin, end = self._parent_span
-            parent._fractions[parent._active] = max(parent._fractions[parent._active], begin+(end-begin)*fraction)
+            index = self._parent_index
+            parent._fractions[index] = max(parent._fractions[index], begin+(end-begin)*fraction)
             label = self._steps[self._active][1]
-            parent._detail = label + (' — '+self._detail if self._detail else '')
-            parent._completed_units = self._completed_units
-            parent._total_units = self._total_units
+            if index == parent._active and not parent._finished[index]:
+                parent._detail = label + (' — '+self._detail if self._detail else '')
+                parent._completed_units = self._completed_units
+                parent._total_units = self._total_units
+            parent._children[index] = self._expanded_steps()
             parent._emit()
             return
         callback = _sink.get()
@@ -150,10 +158,33 @@ class operation_progress:
         steps = tuple(ProgressStep(key, label,
             'done' if self._finished[index] else 'running' if index == self._active and self._started else 'pending')
             for index, (key, label) in enumerate(self._steps))
-        snapshot = ProgressSnapshot(steps, self._steps[self._active][0],
+        active_key = self._steps[self._active][0]
+        if self._include_substeps:
+            steps, active_key = self._expanded_steps()
+        snapshot = ProgressSnapshot(steps, active_key,
                                     min(100 if all(self._finished) else 99, math.floor(100*fraction + 1e-8)), self._detail,
                                     self._completed_units, self._total_units)
         try:
             callback(snapshot)
         except Exception:
             _log.warning('Affichage de progression indisponible ; traitement poursuivi.')
+
+    def _expanded_steps(self):
+        """Keep the real service phases visible inside the generic UI job."""
+        steps = []
+        active_key = self._steps[self._active][0]
+        for index, (key, label) in enumerate(self._steps):
+            state = 'done' if self._finished[index] else 'running' if index == self._active and self._started else 'pending'
+            children = self._children.get(index)
+            if children:
+                nested, nested_active = children
+                steps.extend(ProgressStep(key+'/'+step.key, step.label,
+                    'done' if self._finished[index] else step.state) for step in nested)
+                if index == self._active:
+                    active_key = key+'/'+nested_active
+                    if not self._finished[index] and all(step.state=='done' for step in nested):
+                        steps.append(ProgressStep(key,label,'running'))
+                        active_key = key
+            else:
+                steps.append(ProgressStep(key, label, state))
+        return tuple(steps), active_key

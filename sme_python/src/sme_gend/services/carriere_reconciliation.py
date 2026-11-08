@@ -6,6 +6,7 @@ from sme_gend.services.automatic_maintenance import automatic_write
 
 from dataclasses import dataclass, field
 from typing import Any
+from functools import wraps
 
 from sme_gend.config.settings import Settings
 from sme_gend.repositories.mysql_common import ensure_mysql_schema
@@ -16,6 +17,31 @@ from sme_gend.services.mysql_ref_backfill import backfill_carriere_fk_and_dates
 from sme_gend.services.mysql_ref_etl import RefEtlCache, ensure_ref_etl_cache, load_ref_cache_from_db
 from sme_gend.services.mysql_ref_etl import _cf as _casefold_key
 from sme_gend.padmin_present import invalidate_padmin_presence_cache
+from sme_gend.services.operation_progress import operation_progress, current_operation_progress
+from sme_gend.services.operation_commit_progress import finish_after_commit
+
+
+_RECONCILIATION_STEPS = (
+    ('prepare', 'Préparation et verrouillage des référentiels'),
+    ('before', 'Analyse des liens manquants'),
+    ('references', 'Réconciliation des situations carrière'),
+    ('precedence', 'Alignement de l’ordre des grades'),
+    ('after', 'Contrôle des liens après réconciliation'),
+    ('journal', 'Journalisation des anomalies restantes'),
+    ('commit', 'Validation des corrections dans MySQL'),
+)
+
+
+def _reconciliation_progress(function):
+    @wraps(function)
+    def run(*args, **kwargs):
+        with operation_progress(_RECONCILIATION_STEPS) as progress:
+            progress.start('prepare', detail='Contrôle du plan et acquisition de la transaction…')
+            result = function(*args, **kwargs)
+            finish_after_commit(args[0] if args else kwargs['settings'], progress, 'commit',
+                                detail='Réconciliation terminée ; transaction validée.')
+            return result
+    return run
 
 
 @dataclass(slots=True)
@@ -141,30 +167,37 @@ def sync_ordre_tri_from_pref_ord(cur: Any, cache: RefEtlCache, *, mois: str | No
         """,
         params,
     )
+    careers = cur.fetchall()
     pref_by_id: dict[int, int] = {}
     cur.execute("SELECT id, pref_ord FROM ref_grade WHERE pref_ord IS NOT NULL")
     for rid, po in cur.fetchall():
         pref_by_id[int(rid)] = int(po)
 
     updated = 0
-    for cid, gl in cur.fetchall():
-        gtxt = (gl or "").strip()
-        if not gtxt:
-            continue
-        gid = cache.grade_by_libelle.get(_casefold_key(gtxt)) or cache.grade_by_code.get(
-            _casefold_key(gtxt)
-        )
-        if gid is None:
-            continue
-        po = pref_by_id.get(int(gid))
-        if po is None:
-            continue
-        cur.execute(
-            "UPDATE carriere_situation SET ordre_tri=%s, presseance=%s WHERE id=%s",
-            (po, po, int(cid)),
-        )
-        updated += 1
+    with operation_progress((('grades', 'Alignement de l’ordre des grades'),)) as progress:
+        progress.start('grades', total=len(careers), detail=f'{len(careers)} situation(s) à examiner.')
+        for index, (cid, gl) in enumerate(careers, 1):
+            updated += _sync_career_order(cur, cache, pref_by_id, cid, gl)
+            if index % 100 == 0 or index == len(careers):
+                progress.update('grades', current=index, total=len(careers),
+                                detail=f'{index}/{len(careers)} situation(s) examinée(s) ; {updated} ordre(s) aligné(s).')
+        progress.finish('grades', detail=f'{updated} ordre(s) de grade aligné(s).')
     return updated
+
+
+def _sync_career_order(cur, cache, pref_by_id, cid, gl):
+    gtxt = (gl or "").strip()
+    if not gtxt:
+        return 0
+    gid = cache.grade_by_libelle.get(_casefold_key(gtxt)) or cache.grade_by_code.get(_casefold_key(gtxt))
+    if gid is None:
+        return 0
+    po = pref_by_id.get(int(gid))
+    if po is None:
+        return 0
+    cur.execute("UPDATE carriere_situation SET ordre_tri=%s, presseance=%s WHERE id=%s",
+                (po, po, int(cid)))
+    return 1
 
 
 def _log_unresolved_samples(
@@ -292,31 +325,40 @@ def backfill_carriere_fk_scoped(
         """,
         params,
     )
+    rows = cur.fetchall()
     n = 0
-    for r in cur.fetchall():
-        cid = int(r[0])
-        lg = _row_from_carriere(r)
-        fk = resolve_carriere_fk_ids(cur, cache, lg, flat_rows=flat, auto_create=True)
-        cur.execute(
-            """
-            UPDATE carriere_situation SET
-              structure_id=%s, grade_id=%s, position_admin_id=%s,
-              fonction_id=%s, subdivision_arme_id=%s
-            WHERE id=%s
-            """,
-            (
-                fk["structure_id"],
-                fk["grade_id"],
-                fk["position_admin_id"],
-                fk["fonction_id"],
-                fk["subdivision_arme_id"],
-                cid,
-            ),
-        )
-        n += 1
+    with operation_progress((('careers', 'Traitement des situations carrière du mois'),)) as progress:
+        progress.start('careers', total=len(rows), detail=f'{len(rows)} situation(s) à réconcilier.')
+        for index, r in enumerate(rows, 1):
+            n += _backfill_scoped_row(cur, cache, flat, r)
+            if index % 100 == 0 or index == len(rows):
+                progress.update('careers', current=index, total=len(rows),
+                                detail=f'{index}/{len(rows)} situation(s) réconciliée(s).')
+        progress.finish('careers', detail=f'{n} situation(s) réconciliée(s).')
     return n
 
 
+def _backfill_scoped_row(cur, cache, flat, r):
+    from sme_gend.services.mysql_ref_backfill import _row_from_carriere
+    from sme_gend.services.mysql_ref_etl import resolve_carriere_fk_ids
+    # The per-row business statements are unchanged; only their progress is batched.
+    cid = int(r[0])
+    lg = _row_from_carriere(r)
+    fk = resolve_carriere_fk_ids(cur, cache, lg, flat_rows=flat, auto_create=True)
+    cur.execute(
+        """
+        UPDATE carriere_situation SET
+          structure_id=%s, grade_id=%s, position_admin_id=%s,
+          fonction_id=%s, subdivision_arme_id=%s
+        WHERE id=%s
+        """,
+        (fk["structure_id"], fk["grade_id"], fk["position_admin_id"],
+         fk["fonction_id"], fk["subdivision_arme_id"], cid),
+    )
+    return 1
+
+
+@_reconciliation_progress
 @automatic_write
 def reconcile_carriere_referentiels(
     settings: Settings,
@@ -328,22 +370,35 @@ def reconcile_carriere_referentiels(
     ensure_mysql_schema(settings)
     ensure_mysql_migrations(settings)
     result = CarriereReconciliationResult(mois=(mois or "").strip() or None)
+    progress = current_operation_progress()
+    progress.finish('prepare', detail='Plan et schéma contrôlés ; transaction acquise.')
 
     mc = MySQLConnection(settings)
     with mc.connect() as conn:
         with conn.cursor() as cur:
+            progress.start('before', detail='Comptage des liens manquants vers les cinq référentiels…')
             result.unresolved_before = scan_unresolved_carriere_fk(cur, mois=mois)
+            progress.finish('before', detail=f'{result.unresolved_before.total()} lien(s) manquant(s) détecté(s).')
+            progress.start('references', detail='Chargement des référentiels et réconciliation des situations…')
             cache = ensure_ref_etl_cache(cur)
             result.fk_rows_updated = backfill_carriere_fk_scoped(cur, cache, mois=mois)
+            progress.finish('references', detail=f'{result.fk_rows_updated} situation(s) traitée(s).')
+            progress.start('precedence', detail='Lecture des grades et alignement de leur ordre…')
             cache = load_ref_cache_from_db(cur)
             result.ordre_tri_updated = sync_ordre_tri_from_pref_ord(cur, cache, mois=mois)
+            progress.finish('precedence', detail=f'{result.ordre_tri_updated} ordre(s) aligné(s).')
+            progress.start('after', detail='Nouveau contrôle des cinq liens référentiels…')
             result.unresolved_after = scan_unresolved_carriere_fk(cur, mois=mois)
+            progress.finish('after', detail=f'{result.unresolved_after.total()} lien(s) restant(s) à vérifier.')
+            progress.start('journal', detail='Journalisation des anomalies non résolues…')
             if log_unresolved and result.unresolved_after.total() > 0:
                 result.etl_errors_logged = _log_unresolved_samples(
                     cur,
                     import_lot_id=import_lot_id,
                     mois=mois,
                 )
+            progress.finish('journal', detail=f'{result.etl_errors_logged} anomalie(s) journalisée(s).')
+        progress.start('commit', detail='Validation de la transaction et de la révision partagée…')
         conn.commit()
     from sme_gend.services.liste_generale_cache import invalidate_liste_cache
 

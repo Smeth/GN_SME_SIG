@@ -5,6 +5,7 @@ import json
 
 from sme_gend.services.action_permissions import assert_any_permission
 from sme_gend.services.sme_month_closure import canonical_sme_mois_yyyy_mm, shift_sme_month_yyyy_mm
+from sme_gend.services.operation_progress import operation_progress
 
 KEY_CYCLE_MODE = "sme_document_cycle"
 LEGACY = "legacy"
@@ -137,6 +138,17 @@ def _validated_current(settings, month, publication_id, expected_version):
 def activate_document_cycle(settings, *, expected_month, publication_id, expected_publication_version, reason,
                             clients_updated_confirmed=False):
     """An administrator explicitly adopts the cycle after validating the active month."""
+    with operation_progress((('context', 'Vérification des droits et de la période'),
+                             ('publication', 'Contrôle de la publication validée'),
+                             ('commit', 'Activation du cycle et validation de la transaction'))) as operation:
+        return _activate_document_cycle_with_progress(settings, expected_month=expected_month,
+            publication_id=publication_id, expected_publication_version=expected_publication_version,
+            reason=reason, clients_updated_confirmed=clients_updated_confirmed, operation=operation)
+
+
+def _activate_document_cycle_with_progress(settings, *, expected_month, publication_id,
+        expected_publication_version, reason, clients_updated_confirmed, operation):
+    operation.start('context')
     from sme_gend.services.auth_guard import session_has_admin_role
     if not session_has_admin_role():
         raise PermissionError("L’activation du cycle documentaire est réservée aux administrateurs.")
@@ -165,7 +177,11 @@ def activate_document_cycle(settings, *, expected_month, publication_id, expecte
             raise ValueError("Définissez un mois de travail unique avant d’activer ce cycle.")
         if sum(canonical_sme_mois_yyyy_mm(str(row[1])) == month for row in change.before.rows) != 1:
             raise ValueError("Plusieurs périodes correspondent au mois de travail. Faites les rapprocher avant d’activer le cycle documentaire.")
+        operation.finish('context')
+        operation.start('publication')
         publication = _validated_current(settings, month, publication_id, expected_publication_version)
+        operation.finish('publication')
+        operation.start('commit', detail='Enregistrement du mode documentaire et de son audit')
         repository = AppConfigRepository(settings)
         repository.set_json(KEY_CYCLE_MODE, {"mode": DOCUMENTS, "activated_month": month,
             "publication_id": publication.id, "reason": reason, "actor": resolve_audit_actor(),
@@ -175,12 +191,27 @@ def activate_document_cycle(settings, *, expected_month, publication_id, expecte
                                                "minimum_client_version": "0.2", "clients_updated_confirmed": True})
         mark_shared_data_write(True)
         results.append(DocumentCycleActivationResult(DOCUMENTS, month, publication.id))
+    from sme_gend.services.operation_commit_progress import finish_after_commit
+    finish_after_commit(settings, operation, 'commit', detail='Activation confirmée dans MySQL')
     return results[0]
 
 
 def close_document_month(settings, source_month, target_month, *, expected_month,
                          publication_id, expected_publication_version):
     """Validate source evidence and create only next month's projected situation atomically."""
+    with operation_progress((('context', 'Vérification du cycle et des périodes'),
+                             ('publication', 'Contrôle de la version SME validée'),
+                             ('projection', 'Préparation des situations du mois suivant'),
+                             ('periods', 'Clôture et ouverture des périodes'),
+                             ('commit', 'Journalisation et validation de la transaction'))) as operation:
+        return _close_document_month_with_progress(settings, source_month, target_month,
+            expected_month=expected_month, publication_id=publication_id,
+            expected_publication_version=expected_publication_version, operation=operation)
+
+
+def _close_document_month_with_progress(settings, source_month, target_month, *, expected_month,
+        publication_id, expected_publication_version, operation):
+    operation.start('context')
     assert_any_permission("workflow.close_month")
     assert_any_permission("publications.view")
     assert_any_permission("publications.verify")
@@ -202,9 +233,15 @@ def close_document_month(settings, source_month, target_month, *, expected_month
             raise ValueError("Activez explicitement le cycle documentaire avant de l’utiliser.")
         if change.before.active_month != source:
             raise ValueError("Le mois de travail a changé. Actualisez le pilotage avant de clôturer.")
+        operation.finish('context')
+        operation.start('publication')
         publication = _validated_current(settings, source, publication_id, expected_publication_version)
+        operation.finish('publication')
+        operation.start('projection')
         from sme_gend.services.month_projection import prepare_month_projection
         projection = prepare_month_projection(settings, target, source)
+        operation.finish('projection', detail=f'{projection.projected_agents:,} agent(s), {projection.created_rows:,} situation(s) créée(s)')
+        operation.start('periods')
         with MySQLConnection(settings).connect() as connection:
             with connection.cursor() as cursor:
                 source_ids = [int(row[0]) for row in change.before.rows
@@ -215,6 +252,8 @@ def close_document_month(settings, source_month, target_month, *, expected_month
                 cursor.execute(f"UPDATE sme_periode SET statut='Fermé' WHERE id IN ({placeholders})", tuple(source_ids))
                 cursor.execute("UPDATE sme_periode SET statut='Ouvert' WHERE id=%s", (projection.period_id,))
             refresh_est_actuelle_flags(connection, target)
+        operation.finish('periods')
+        operation.start('commit', detail='Enregistrement de la clôture et attente de la confirmation MySQL')
         repository = AppConfigRepository(settings)
         repository.append_audit(action="sme_document_month_closed", module="workflow", sme_mois_context=source,
             actor=resolve_audit_actor(), payload={"mois_cloture": source, "mois_suivant": target,
@@ -225,4 +264,6 @@ def close_document_month(settings, source_month, target_month, *, expected_month
                                               projection.projected_agents, projection.created_rows))
     from sme_gend.services.sme_editing_policy import invalidate_editing_state_cache
     invalidate_editing_state_cache()
+    from sme_gend.services.operation_commit_progress import finish_after_commit
+    finish_after_commit(settings, operation, 'commit', detail='Clôture confirmée et période actualisée')
     return results[0]

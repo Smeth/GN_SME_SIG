@@ -62,6 +62,7 @@ def fill_detache_sheet(
     Retourne (effectif total écrit, nombre de blocs affichés).
     """
     opt = cfg.options
+    from sme_gend.services.export_progress import export_rows
     gmap = grade_abbrev_map or {}
     if not gmap and grades:
         from sme_gend.services.excel_style_helpers import build_grade_abbrev_map, grade_to_abbrev
@@ -130,7 +131,7 @@ def fill_detache_sheet(
             write_literal_cell_value(ws, row, 1, line)
             row += 1
         local_n = 0
-        for r in _sort_persons(personnes, grades, settings):
+        for r in export_rows(_sort_persons(personnes, grades, settings), label='DETACHE'):
             global_n += 1
             local_n += 1
             write_literal_cell_value(ws, row, 1, global_n)

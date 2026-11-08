@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sme_gend.services.export_progress import tracked_export, export_phase, export_rows
+
 from collections.abc import Callable
 from copy import copy
 from pathlib import Path
@@ -85,6 +87,7 @@ def _write_merged_rubric_row(
     out_ws.row_dimensions[cur].height = height
 
 
+@tracked_export
 def export_liste_fidele(
     template_path: Path,
     layout: ListeLayoutConfig,
@@ -130,6 +133,7 @@ def export_liste_fidele(
 
     cur = layout.header_row + 1
     n_global = 0
+    export_phase('render', total=sum(len(people) for _, _, _, blocks in sections_data for _, people in blocks))
 
     for title_main, title_sub, _code, blocks in sections_data:
         for kind, payload in iter_section_rubrics(title_main, title_sub, blocks):
@@ -157,7 +161,7 @@ def export_liste_fidele(
                 cur += 1
             elif kind == "data":
                 n_interne = 0
-                for pr in payload:
+                for pr in export_rows(payload):
                     n_global += 1
                     n_interne += 1
                     sub_disp = (
@@ -182,9 +186,12 @@ def export_liste_fidele(
     tpl_wb.close()
     dest = Path(destination)
     dest.parent.mkdir(parents=True, exist_ok=True)
+    export_phase("write", total=1, detail="Écriture du document final")
     out_wb.save(dest)
+    export_phase("finalize", detail="Confirmation du fichier et historique")
 
 
+@tracked_export
 def export_simple_fallback(
     destination: Path,
     sections_data: list[tuple[str, str, str, list[tuple[str, list[ListeGeneraleRow]]]]],
@@ -219,6 +226,7 @@ def export_simple_fallback(
         cell.alignment = Alignment(vertical="top", wrap_text=True)
     row += 1
     n_global = 0
+    export_phase('render', total=sum(len(people) for _, _, _, blocks in sections_data for _, people in blocks))
 
     for title_main, title_sub, _c, blocks in sections_data:
         for kind, payload in iter_section_rubrics(title_main, title_sub, blocks):
@@ -240,7 +248,7 @@ def export_simple_fallback(
                 row += 1
             elif kind == "data":
                 n_interne = 0
-                for pr in payload:
+                for pr in export_rows(payload):
                     n_global += 1
                     n_interne += 1
                     sub_disp = (
@@ -265,4 +273,6 @@ def export_simple_fallback(
     for col in range(1, ncols + 1):
         ws.column_dimensions[get_column_letter(col)].width = 14
     configure_table_print(ws, header_row=3, last_row=row - 1, columns=ncols)
+    export_phase("write", total=1, detail="Écriture du document final")
     wb.save(destination)
+    export_phase("finalize", detail="Confirmation du fichier et historique")

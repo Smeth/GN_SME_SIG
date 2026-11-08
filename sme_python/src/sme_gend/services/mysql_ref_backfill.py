@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from sme_gend.services.operation_progress import operation_progress
 
 from sme_gend.config.settings import Settings
 from sme_gend.models.liste_generale import ListeGeneraleRow
@@ -45,6 +46,11 @@ def _row_from_carriere(row: tuple[Any, ...]) -> ListeGeneraleRow:
 
 
 def backfill_carriere_fk_and_dates(cur: Any, cache: RefEtlCache) -> dict[str, int]:
+    with operation_progress((('careers', 'Réconciliation des FK et dates carrière'),)) as progress:
+        return _backfill_carriere_fk_and_dates(cur, cache, progress)
+
+
+def _backfill_carriere_fk_and_dates(cur, cache, progress):
     flat = load_subdiv_flat_rows(cur)
     cur.execute(
         """
@@ -62,7 +68,8 @@ def backfill_carriere_fk_and_dates(cur: Any, cache: RefEtlCache) -> dict[str, in
     rows = cur.fetchall()
     n_fk = 0
     n_dates = 0
-    for r in rows:
+    progress.start('careers', total=len(rows), detail=f'{len(rows)} situation(s) à traiter.')
+    for index, r in enumerate(rows, 1):
         cid = int(r[0])
         lg = _row_from_carriere(r)
         fk = resolve_carriere_fk_ids(cur, cache, lg, flat_rows=flat, auto_create=True)
@@ -95,6 +102,10 @@ def backfill_carriere_fk_and_dates(cur: Any, cache: RefEtlCache) -> dict[str, in
                 (debut, date_fin, cid),
             )
             n_dates += 1
+        if index % 100 == 0 or index == len(rows):
+            progress.update('careers', current=index, total=len(rows),
+                detail=f'{index}/{len(rows)} situation(s) traitée(s) ; {n_dates} date(s) alignée(s).')
+    progress.finish('careers', detail=f'{n_fk} situation(s) réconciliée(s), {n_dates} date(s) alignée(s).')
     return {"carriere_fk": n_fk, "carriere_dates": n_dates}
 
 
