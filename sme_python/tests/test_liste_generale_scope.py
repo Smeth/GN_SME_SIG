@@ -68,7 +68,7 @@ def test_resolve_carriere_scope_mois_operational_uses_exact_month() -> None:
         assert resolve_carriere_scope_mois(st) == "2026-05"
         sql, params = carriere_scope_for_settings(st)
         assert "est_actuelle" in sql
-        assert params == ("202605", date(2026,5,31), date(2026,5,31), "202605")
+        assert params == ("202605", "052026", date(2026,5,31), date(2026,5,31), "202605", "052026")
 
 
 def test_resolve_carriere_scope_mois_archive_uses_interval() -> None:

@@ -69,3 +69,18 @@ def test_month_switch_rejects_same_or_earlier_month(qapp, monkeypatch):
     monkeypatch.setattr(QDialog, "exec", execute)
     assert dialogs.pick_import_options() is None
     assert len(warnings) == 1
+
+
+def test_document_cycle_import_cannot_close_or_activate_a_period(qapp, monkeypatch):
+    monkeypatch.setattr(dialogs, "load_sme_context", lambda: SimpleNamespace(mois_actif="2026-09"))
+    def execute(dlg):
+        archive = dlg.findChild(QCheckBox, "archiveAndClose")
+        following = dlg.findChild(QCheckBox, "activateNextMonth")
+        assert not archive.isChecked() and not archive.isEnabled()
+        assert not following.isChecked() and not following.isEnabled()
+        assert not dlg.findChild(QGroupBox, "nextMonthGroup").isEnabled()
+        dlg.findChild(QDialogButtonBox).accepted.emit()
+        return dlg.result()
+    monkeypatch.setattr(QDialog, "exec", execute)
+    result = dialogs.pick_import_options(allow_legacy_cycle=False)
+    assert result.archive_and_close is False and result.mois_suivant is None

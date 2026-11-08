@@ -237,6 +237,14 @@ def test_period_filters_selection_and_consultation_use_existing_navigation(workf
     view._activate_period.assert_called_once_with('2026-01')
 
 
+@pytest.mark.parametrize('month', ['202609', '092026'])
+def test_legacy_period_labels_remain_selectable_by_canonical_month(workflow, month):
+    view, ui = workflow
+    view.update_sme_table(SimpleNamespace(sme_table_ok=True, sme_rows=[SimpleNamespace(codsme='legacy', mois=month, statut='Fermé')]))
+    view._sme_table.selectRow(0)
+    assert view._selected_period() == '2026-09'
+
+
 def test_export_access_uses_valid_progress_api_and_handles_failure(workflow,tmp_path,monkeypatch):
     view,ui=workflow
     monkeypatch.setattr(ui,'load_sme_context',lambda:SimpleNamespace(mois_actif='2026-09'))

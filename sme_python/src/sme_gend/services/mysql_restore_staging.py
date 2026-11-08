@@ -306,7 +306,8 @@ class PreparedRestore:
 @contextmanager
 def prepared_restore(settings,statements,workspace,counts=None):
     from sme_gend.services.database_maintenance import centralized_maintenance
-    with centralized_maintenance(settings) as lease:
+    from sme_gend.repositories.mysql_connection import schema_metadata_lock
+    with schema_metadata_lock(settings), centralized_maintenance(settings) as lease:
         prepared=PreparedRestore(settings,workspace)
         try:
             prepared.prepare(statements,counts)

@@ -14,6 +14,7 @@ from sme_gend.models.liste_generale import ListeGeneraleRow
 from sme_gend.models.personnel_identity import new_internal_personnel_key
 from sme_gend.models.personnel_sexe import normalize_sexe
 from sme_gend.services.access_agent_profile import profile_field_supplied
+from sme_gend.services.membership_scope import membership_projection_enabled
 
 from sme_gend.repositories.mysql_common import BaseMySQLRepository
 from sme_gend.config.liste_generale_scope import (
@@ -45,9 +46,10 @@ def _sql_for_like_match(expr: str) -> str:
     return f"CONVERT({expr} USING utf8mb4) COLLATE {_MYSQL_LIKE_COLLATE}"
 
 
-def _carriere_join_sql(view_mois: str | None) -> tuple[str, tuple]:
+def _carriere_join_sql(view_mois: str | None, *, settings=None, cursor=None) -> tuple[str, tuple]:
     """Jointure carrière : un segment par agent (le plus récent si doublons)."""
-    filt, params = carriere_scope_sql(view_mois, alias="c_pick")
+    membership = settings is not None and membership_projection_enabled(settings, cursor=cursor)
+    filt, params = carriere_scope_sql(view_mois, alias="c_pick", membership=membership)
     return (
         f"""INNER JOIN carriere_situation c ON c.agent_id = a.id AND c.id = (
             SELECT MAX(c_pick.id) FROM carriere_situation c_pick
@@ -57,8 +59,8 @@ def _carriere_join_sql(view_mois: str | None) -> tuple[str, tuple]:
     )
 
 
-def _select_liste(view_mois: str | None) -> tuple[str, tuple]:
-    join, params = _carriere_join_sql(view_mois)
+def _select_liste(view_mois: str | None, *, settings=None, cursor=None) -> tuple[str, tuple]:
+    join, params = _carriere_join_sql(view_mois, settings=settings, cursor=cursor)
     return (
         f"""
 SELECT
@@ -93,8 +95,9 @@ LEFT JOIN agent_diplome display_diploma ON display_diploma.agent_id = a.id AND d
     WHERE d.agent_id = a.id AND d.categorie = 'MILITAIRE'
       AND (d.date_obtention IS NULL OR d.date_obtention <= LEAST(
           COALESCE(c.date_fin, '9999-12-31'),
-          LAST_DAY(CONCAT(LEFT(REPLACE(diploma_period.annee_mois, '-', ''), 4), '-',
-                          RIGHT(REPLACE(diploma_period.annee_mois, '-', ''), 2), '-01'))))
+          LAST_DAY(CASE WHEN LEFT(REPLACE(diploma_period.annee_mois,'-',''),4) BETWEEN '1900' AND '2999'
+            THEN CONCAT(LEFT(REPLACE(diploma_period.annee_mois,'-',''),4),'-',RIGHT(REPLACE(diploma_period.annee_mois,'-',''),2),'-01')
+            ELSE CONCAT(RIGHT(REPLACE(diploma_period.annee_mois,'-',''),4),'-',LEFT(REPLACE(diploma_period.annee_mois,'-',''),2),'-01') END)))
     ORDER BY d.date_obtention DESC, d.id DESC LIMIT 1
 )
 LEFT JOIN ref_structure rs ON rs.id = c.structure_id
@@ -143,8 +146,9 @@ def _padmin_where_clause(mode: str) -> tuple[str, tuple]:
     return f"({present} OR {stage})", ()
 
 
-def _carriere_scope_where(view_mois: str | None) -> tuple[str, tuple]:
-    return carriere_scope_sql(view_mois, alias="")
+def _carriere_scope_where(view_mois: str | None, *, settings=None, cursor=None) -> tuple[str, tuple]:
+    membership = settings is not None and membership_projection_enabled(settings, cursor=cursor)
+    return carriere_scope_sql(view_mois, alias="", membership=membership)
 
 
 def _parse_date(v) -> datetime | None:
@@ -460,7 +464,7 @@ class MySQLAgentRepository(BaseMySQLRepository):
             return None
         with self._connect(read_only=True) as conn:
             with conn.cursor() as cur:
-                sql, params = _select_liste(self._scope_mois)
+                sql, params = _select_liste(self._scope_mois, settings=self._settings, cursor=cur)
                 cur.execute(f"{sql} WHERE c.id = %s", params + (pk,))
                 r = cur.fetchone()
                 return _row_to_liste(r) if r else None
@@ -471,7 +475,7 @@ class MySQLAgentRepository(BaseMySQLRepository):
             with conn.cursor() as cur:
                 from sme_gend.services.agent_identity_alias import canonical_legacy_id
                 legacy_id = canonical_legacy_id(cur, legacy_id)
-                sql, params = _select_liste(self._scope_mois)
+                sql, params = _select_liste(self._scope_mois, settings=self._settings, cursor=cur)
                 cur.execute(f"{sql} WHERE a.legacy_access_id = %s", params + (legacy_id.strip(),))
                 row = cur.fetchone()
                 return _row_to_liste(row) if row else None
@@ -479,7 +483,7 @@ class MySQLAgentRepository(BaseMySQLRepository):
     def fetch_all(self) -> list[ListeGeneraleRow]:
         with self._connect(read_only=True) as conn:
             with conn.cursor() as cur:
-                sql, params = _select_liste(self._scope_mois)
+                sql, params = _select_liste(self._scope_mois, settings=self._settings, cursor=cur)
                 cur.execute(f"{sql} ORDER BY c.ordre_tri, c.id", params)
                 return [_row_to_liste(r) for r in cur.fetchall()]
 
@@ -503,14 +507,14 @@ class MySQLAgentRepository(BaseMySQLRepository):
         concat = f"UPPER(CONCAT_WS(' ', {', '.join(columns)}))"
         where = (f"{_sql_for_like_match(concat)} LIKE %s OR EXISTS (SELECT 1 FROM agent_identity_alias ax "
                  "WHERE ax.canonical_agent_id=a.id AND ax.alias_legacy_id LIKE %s)")
-        sql, scope_params = _select_liste(self._scope_mois)
-        query = f"{sql} WHERE ({where}) ORDER BY c.ordre_tri, c.id"
-        params = scope_params + (needle, needle)
-        if limit is not None:
-            query += " LIMIT %s"
-            params += (max(1, int(limit)),)
         with self._connect(read_only=True) as conn:
             with conn.cursor() as cur:
+                sql, scope_params = _select_liste(self._scope_mois, settings=self._settings, cursor=cur)
+                query = f"{sql} WHERE ({where}) ORDER BY c.ordre_tri, c.id"
+                params = scope_params + (needle, needle)
+                if limit is not None:
+                    query += " LIMIT %s"
+                    params += (max(1, int(limit)),)
                 cur.execute(query, params)
                 return [_row_to_liste(row) for row in cur.fetchall()]
 
@@ -521,12 +525,14 @@ class MySQLAgentRepository(BaseMySQLRepository):
         needle = f"%{term.strip().upper()}%"
         with self._connect(read_only=True) as conn:
             with conn.cursor() as cur:
+                current_scope, current_params = carriere_scope_sql(None, alias='current_c',
+                    membership=membership_projection_enabled(self._settings, cursor=cur))
                 query = f"""
                     SELECT a.id
                     FROM agent a
                     WHERE NOT EXISTS (
                       SELECT 1 FROM carriere_situation current_c
-                      WHERE current_c.agent_id = a.id AND current_c.est_actuelle = 1
+                      WHERE current_c.agent_id = a.id AND {current_scope}
                     )
                       AND (
                         {_sql_for_like_match("UPPER(COALESCE(a.noms, ''))")} LIKE %s
@@ -550,7 +556,7 @@ class MySQLAgentRepository(BaseMySQLRepository):
                       )
                     ORDER BY a.noms, a.id
                     """
-                params = (needle,) * 6
+                params = current_params + (needle,) * 6
                 if limit is not None:
                     query += " LIMIT %s"
                     params += (max(1, int(limit)),)
@@ -647,7 +653,7 @@ class MySQLAgentRepository(BaseMySQLRepository):
             return self.fetch_all()
         with self._connect() as conn:
             with conn.cursor() as cur:
-                sql, params = _select_liste(ym)
+                sql, params = _select_liste(ym, settings=self._settings, cursor=cur)
                 cur.execute(f"{sql} ORDER BY c.ordre_tri, c.id", params)
                 return [_row_to_liste(r) for r in cur.fetchall()]
 
@@ -660,7 +666,8 @@ class MySQLAgentRepository(BaseMySQLRepository):
         where_sql, _ = _padmin_where_clause(mode)
         with self._connect() as conn:
             with conn.cursor() as cur:
-                sql, params = _select_liste(mois_ym if mois_ym is not None else self._scope_mois)
+                sql, params = _select_liste(mois_ym if mois_ym is not None else self._scope_mois,
+                                            settings=self._settings, cursor=cur)
                 cur.execute(
                     f"{sql} WHERE {where_sql} "
                     "ORDER BY c.ordre_tri, c.presseance, a.noms, c.id",
@@ -669,7 +676,7 @@ class MySQLAgentRepository(BaseMySQLRepository):
                 return [_row_to_liste(r) for r in cur.fetchall()]
 
     def fetch_distinct_padmin(self) -> list[str]:
-        scope, scope_p = _carriere_scope_where(self._scope_mois)
+        scope, scope_p = _carriere_scope_where(self._scope_mois, settings=self._settings)
         q = f"""
         SELECT DISTINCT position_admin_libelle FROM carriere_situation
         WHERE {scope} AND position_admin_libelle IS NOT NULL
@@ -682,7 +689,7 @@ class MySQLAgentRepository(BaseMySQLRepository):
                 return [str(r[0]).strip() for r in cur.fetchall() if r[0]]
 
     def fetch_distinct_subarme(self) -> list[str]:
-        scope, scope_p = _carriere_scope_where(self._scope_mois)
+        scope, scope_p = _carriere_scope_where(self._scope_mois, settings=self._settings)
         q = f"""
         SELECT DISTINCT subdivision_arme_libelle FROM carriere_situation
         WHERE {scope} AND subdivision_arme_libelle IS NOT NULL
@@ -695,7 +702,7 @@ class MySQLAgentRepository(BaseMySQLRepository):
                 return [str(r[0]).strip() for r in cur.fetchall() if r[0]]
 
     def fetch_distinct_subarme_for_structure(self, structure_code: str) -> list[str]:
-        scope, scope_p = _carriere_scope_where(self._scope_mois)
+        scope, scope_p = _carriere_scope_where(self._scope_mois, settings=self._settings)
         q = f"""
         SELECT DISTINCT subdivision_arme_libelle FROM carriere_situation
         WHERE {scope} AND structure_code = %s
@@ -1243,9 +1250,9 @@ class MySQLAgentRepository(BaseMySQLRepository):
         sc = (structure_code or "").strip()
         if not sc:
             return 0
-        scope, scope_p = carriere_write_scope_for_settings(self._settings)
         with self._connect() as conn:
             with conn.cursor() as cur:
+                scope, scope_p = carriere_write_scope_for_settings(self._settings, cursor=cur)
                 cur.execute(
                     f"""
                     UPDATE carriere_situation c
@@ -1261,9 +1268,9 @@ class MySQLAgentRepository(BaseMySQLRepository):
 
     @atomic_repository_write()
     def update_structure_column(self, old_code: str, new_code: str) -> int:
-        scope, scope_p = carriere_write_scope_for_settings(self._settings)
         with self._connect() as conn:
             with conn.cursor() as cur:
+                scope, scope_p = carriere_write_scope_for_settings(self._settings, cursor=cur)
                 cur.execute(
                     f"""
                     UPDATE carriere_situation c SET c.structure_code = %s
@@ -1283,16 +1290,16 @@ class MySQLAgentRepository(BaseMySQLRepository):
         old_l = (old_label or "").strip()
         new_l = (new_label or "").strip()
         new_val = None if new_l in ("", "(Sans subdivision)") else new_l
-        if mois_ym is None:
-            scope, scope_p = carriere_write_scope_for_settings(self._settings)
-        else:
-            if not mois_ym.strip():
-                raise ValueError('Choisissez un mois SME avant de renommer une subdivision.')
-            join, scope_p = _carriere_join_sql(mois_ym)
-            scope = ('c.id IN (SELECT scoped.id FROM (SELECT DISTINCT c.id '
-                     f'FROM agent a {join}) AS scoped)')
+        if mois_ym is not None and not mois_ym.strip():
+            raise ValueError('Choisissez un mois SME avant de renommer une subdivision.')
         with self._connect() as conn:
             with conn.cursor() as cur:
+                if mois_ym is None:
+                    scope, scope_p = carriere_write_scope_for_settings(self._settings, cursor=cur)
+                else:
+                    join, scope_p = _carriere_join_sql(mois_ym, settings=self._settings, cursor=cur)
+                    scope = ('c.id IN (SELECT scoped.id FROM (SELECT DISTINCT c.id '
+                             f'FROM agent a {join}) AS scoped)')
                 cur.execute("SELECT rsa.id FROM ref_subdivision_arme rsa JOIN ref_structure rs ON rs.id=rsa.structure_id "
                             "WHERE BINARY rsa.libelle=BINARY %s AND BINARY rs.code=BINARY %s ORDER BY rsa.id LIMIT 2", (new_val, sc))
                 matches = cur.fetchall()
@@ -1331,6 +1338,14 @@ class MySQLAgentRepository(BaseMySQLRepository):
         detail_progress: Callable[[str], None] | None = None,
     ) -> tuple[int, int, ListeGeneraleImportStats]:
         """Upsert agent + snapshot carrière pour la période ``mois`` (``YYYY-MM``)."""
+        from sme_gend.repositories.mysql_connection import has_import_transaction, mysql_import_transaction
+        if not has_import_transaction(self._settings):
+            # The monthly observation and its optional membership overlay commit
+            # together, including when this repository is called by an Excel import.
+            with mysql_import_transaction(self._settings):
+                return self.bulk_import_from_access_rows(rows, sme_periode_id=sme_periode_id,
+                    import_lot_id=import_lot_id, mois=mois, historical=historical,
+                    ref_cache=ref_cache, prep_stats=prep_stats, detail_progress=detail_progress)
         inserted = 0
         updated = 0
         stats = prep_stats or ListeGeneraleImportStats(rows_read=len(rows))
@@ -1709,6 +1724,9 @@ class MySQLAgentRepository(BaseMySQLRepository):
                 from sme_gend.services.mysql_import_period import dedupe_carriere_for_periode
 
                 dedupe_carriere_for_periode(conn, sme_periode_id)
+                if membership_projection_enabled(self._settings, cursor=cur):
+                    from sme_gend.services.membership_projection import rebuild_imported_membership
+                    rebuild_imported_membership(self._settings, mois, [sme_periode_id])
                 cur.execute(
                     """
                     SELECT COUNT(DISTINCT agent_id)

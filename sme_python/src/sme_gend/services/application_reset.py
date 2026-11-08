@@ -60,6 +60,12 @@ def reset_application(settings, options, *, confirmation, new_username="", new_p
                     with conn.cursor() as cur:
                         cur.execute("SELECT TABLE_NAME,ENGINE,TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() ORDER BY TABLE_NAME")
                         tables = [r for r in cur.fetchall() if r[0] not in INTERNAL_TABLES]
+                        # DDL capability state and the shared barrier survive a
+                        # data reset. Kept documents retain their central bytes.
+                        from sme_gend.services.schema_migrations import LEDGER, PUBLICATION_TABLES
+                        preserved = {LEDGER, 'sme_publication_write_gate'}
+                        if options.keep_document_history:
+                            preserved.update(PUBLICATION_TABLES)
                         if any(r[1] != 'InnoDB' or r[2] != 'BASE TABLE' for r in tables):
                             raise RuntimeError("Réinitialisation annulée : objets non transactionnels dans la base.")
                         cur.execute("SELECT payload FROM app_config WHERE config_key='auth_config' FOR UPDATE")
@@ -76,6 +82,8 @@ def reset_application(settings, options, *, confirmation, new_username="", new_p
                         cur.execute("SET SESSION FOREIGN_KEY_CHECKS=0")
                         try:
                             for table, _, _ in tables:
+                                if table in preserved:
+                                    continue
                                 quoted = '`' + table.replace('`', '``') + '`'
                                 if table == 'audit_journal' and options.keep_document_history:
                                     cur.execute("DELETE FROM audit_journal WHERE module IS NULL OR module <> 'doc_gen'")
@@ -84,7 +92,7 @@ def reset_application(settings, options, *, confirmation, new_username="", new_p
                                 removed[table] = int(cur.rowcount)
                             # Every business table must really be empty before commit.
                             for table, _, _ in tables:
-                                if table in ('app_config', 'audit_journal'):
+                                if table in ('app_config', 'audit_journal') or table in preserved:
                                     continue
                                 quoted = '`' + table.replace('`', '``') + '`'
                                 cur.execute(f"SELECT COUNT(*) FROM {quoted}")

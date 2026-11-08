@@ -20,7 +20,7 @@ def settings():
     return Settings(database_path=Path("synthetic.mdb"), mysql_host="invalid.test", mysql_database="synthetic")
 
 
-def test_nested_initialization_uses_one_session_and_releases_only_at_outer_exit(monkeypatch):
+def test_nested_initialization_uses_one_session_per_lock_and_releases_only_at_outer_exit(monkeypatch):
     connections = []
     def connect(**kwargs):
         connection = MagicMock()
@@ -30,12 +30,15 @@ def test_nested_initialization_uses_one_session_and_releases_only_at_outer_exit(
     monkeypatch.setattr(mysql_connection.pymysql, "connect", connect)
     with mysql_connection.mysql_initialization_lock(settings()):
         with mysql_connection.mysql_initialization_lock(settings()):
-            assert len(connections) == 1
-        cursor = connections[0].cursor.return_value.__enter__.return_value
-        assert cursor.execute.call_count == 1
-        connections[0].close.assert_not_called()
-    assert cursor.execute.call_count == 2
-    connections[0].close.assert_called_once()
+            assert len(connections) == 2
+        for connection in connections:
+            cursor = connection.cursor.return_value.__enter__.return_value
+            assert cursor.execute.call_count == 1
+            connection.close.assert_not_called()
+    for connection in connections:
+        cursor = connection.cursor.return_value.__enter__.return_value
+        assert cursor.execute.call_count == 2
+        connection.close.assert_called_once()
 
 
 def test_initialization_scope_does_not_reuse_another_database_lock(monkeypatch):
@@ -48,7 +51,9 @@ def test_initialization_scope_does_not_reuse_another_database_lock(monkeypatch):
     monkeypatch.setattr(mysql_connection.pymysql, "connect", connect)
     with mysql_connection.mysql_initialization_lock(settings()):
         with mysql_connection.mysql_initialization_lock(replace(settings(), mysql_database="other")):
-            assert len(connections) == 2
+            assert len(connections) == 4
+            names = [c.cursor.return_value.__enter__.return_value.execute.call_args[0][1][0] for c in connections]
+            assert names[0] != names[2] and names[1] != names[3]
     assert all(connection.close.call_count == 1 for connection in connections)
 
 

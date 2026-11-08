@@ -15,6 +15,11 @@ from sme_gend.services.sme_workspace_service import SmeWorkspaceService,Workspac
 from sme_gend.services.shared_config_write import bind_config_version
 
 
+@pytest.fixture(autouse=True)
+def legacy_database_without_dated_movements(monkeypatch):
+    monkeypatch.setattr('sme_gend.services.document_month_cycle._has_dated_movements', lambda settings: False)
+
+
 def snapshot(settings=None):
     settings=settings or Settings(database_path=Path('unused.mdb'))
     return guard.ActiveMonthSnapshot(mysql_database_key(settings),((1,'2026-09','Ouvert','SME-202609'),(2,'2026-08','Réouvert','SME-202608')),'a'*64)
@@ -106,6 +111,7 @@ def test_existing_import_status_is_preserved_while_new_historical_open_is_closed
 
 
 def test_archive_workflow_reports_that_a_committed_import_is_not_rolled_back(monkeypatch,tmp_path):
+    monkeypatch.setattr("sme_gend.services.document_month_cycle.get_cycle_mode", lambda settings: "legacy")
     from sme_gend.services import sme_month_closure as closure
     settings=Settings(database_path=tmp_path/'source.mdb');settings.database_path.write_bytes(b'SYNTHETIC ACCESS')
     monkeypatch.setattr(guard,'load_active_month_snapshot',lambda *a,**kw:snapshot(settings))

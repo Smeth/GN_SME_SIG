@@ -8,6 +8,7 @@ import re
 import shutil
 import zipfile
 import stat
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -196,6 +197,8 @@ class BackupManifest:
     personnel_media_photos: int = 0
     personnel_media_grades: int = 0
     publication_files: list[str] | None = None
+    snapshot_consistency: dict[str, Any] | None = None
+    file_inventory: dict[str, dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -219,6 +222,10 @@ class BackupManifest:
             d["publication_files"] = self.publication_files
         if self.backup_scope:
             d["backup_scope"] = self.backup_scope
+        if self.snapshot_consistency is not None:
+            d["snapshot_consistency"] = self.snapshot_consistency
+        if self.file_inventory is not None:
+            d["file_inventory"] = self.file_inventory
         if self.personnel_media_photos or self.personnel_media_grades:
             d["personnel_media_photos"] = self.personnel_media_photos
             d["personnel_media_grades"] = self.personnel_media_grades
@@ -248,6 +255,8 @@ class BackupManifest:
             personnel_media_photos=int(d.get("personnel_media_photos", 0)),
             personnel_media_grades=int(d.get("personnel_media_grades", 0)),
             publication_files=[str(name) for name in d.get("publication_files", [])],
+            snapshot_consistency=d.get("snapshot_consistency"),
+            file_inventory=d.get("file_inventory"),
         )
 
     def saved_scope(self) -> BackupScope:
@@ -522,6 +531,7 @@ def _export_mysql_sql(
     settings: Settings,
     *,
     tables: list[str] | None = None,
+    snapshot_data: dict | None = None,
 ) -> tuple[str, dict[str, int]]:
     """Use the same consistent, typed dump as closure backups."""
     import tempfile
@@ -532,8 +542,79 @@ def _export_mysql_sql(
         directory = Path(folder)
         _restrict_folder(directory)
         dump = directory / "database.sql"
-        counts = _python_sql_dump(settings, dump, selected_tables=tables)
+        options = {}
+        if snapshot_data is not None:
+            options["snapshot_reader"] = lambda connection, names: _capture_backup_sidecars(connection, names, snapshot_data)
+        counts = _python_sql_dump(settings, dump, selected_tables=tables, **options)
         return dump.read_text(encoding="utf-8"), counts
+
+
+def _capture_backup_sidecars(connection, table_names, result):
+    """Read shared configuration and counts in the SQL dump's exact snapshot."""
+    configs = []
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT DATABASE(),@@server_uuid")
+        selected_database,server_uuid=cursor.fetchone()
+        if result.get("include_app_config") and "app_config" in table_names:
+            cursor.execute("SELECT config_key,payload,updated_by,updated_at FROM app_config ORDER BY config_key")
+            for key, payload, actor, stamp in cursor.fetchall():
+                if isinstance(payload, (bytes, bytearray)):
+                    payload = payload.decode("utf-8")
+                if isinstance(payload, str):
+                    payload = json.loads(payload)
+                if not isinstance(payload, dict):
+                    raise ValueError("Configuration partagée invalide : sauvegarde annulée.")
+                configs.append(dict(config_key=str(key), payload=payload, updated_by=actor,
+                    updated_at=stamp.isoformat() if hasattr(stamp, "isoformat") else str(stamp or "")))
+        audit = {}
+        if "audit_journal" in table_names:
+            cursor.execute("SELECT module,COUNT(*) FROM audit_journal GROUP BY module")
+            audit = {str(module or "—"): int(count) for module, count in cursor.fetchall()}
+    result.update(captured=True, app_config_rows=configs, audit_by_module=audit,
+        consistency={"database": "innodb-repeatable-read", "sql_and_shared_config": "same_transaction",
+                     "captured_at_utc": datetime.now(timezone.utc).isoformat(),
+                     "database_name": str(selected_database), "server_uuid": str(server_uuid),
+                     "external_files": "captured_separately_with_hashes"})
+
+
+def _backup_file_inventory(archive):
+    from copy import copy
+    result = {}
+    for info in archive.infolist():
+        if info.filename == MANIFEST_NAME:
+            continue
+        digest = hashlib.sha256()
+        # ZipInfo.from_file on Windows retains a backslash orig_filename even
+        # though write() stores a normalized '/' local header. Reopening the ZIP
+        # would normalize this too; use an isolated read descriptor here.
+        read_info = copy(info)
+        read_info.orig_filename = info.filename
+        with archive.open(read_info) as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+        result[info.filename] = {"sha256": digest.hexdigest(), "size": info.file_size}
+    return result
+
+
+def _verify_backup_file_inventory(archive, inventory):
+    if inventory is None:
+        return  # Existing v1-v4 backups remain readable.
+    names = {info.filename for info in archive.infolist() if info.filename != MANIFEST_NAME}
+    if not isinstance(inventory, dict) or set(inventory) != names:
+        raise ValueError("Inventaire des fichiers de sauvegarde incomplet ou ambigu.")
+    for info in archive.infolist():
+        if info.filename == MANIFEST_NAME:
+            continue
+        item = inventory[info.filename]
+        if (not isinstance(item, dict) or type(item.get("size")) is not int
+                or item["size"] != info.file_size or not re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256", "")))):
+            raise ValueError("Inventaire des fichiers de sauvegarde invalide.")
+        digest = hashlib.sha256()
+        with archive.open(info) as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+        if digest.hexdigest() != item["sha256"]:
+            raise ValueError("Sauvegarde altérée : " + info.filename)
 
 
 def _split_sql_statements(sql: str) -> list[str]:
@@ -567,7 +648,8 @@ def _app_config_rows_for_restore(
 ) -> list[dict[str, Any]]:
     """Keep local accounts and live transition metadata when requested."""
     if preserve_runtime_state:
-        rows = [row for row in rows if str(row.get("config_key", "")).strip().casefold() != "active_month_revision"]
+        from sme_gend.services.configuration_restore import operational_key
+        rows = [row for row in rows if not operational_key(str(row.get("config_key", "")))]
     if not preserve_local_accounts:
         return rows
     from sme_gend.services.app_config_store import KEY_AUTH
@@ -643,12 +725,13 @@ def create_backup(
 
     counts: dict[str, int] = {}
     sql_text = ""
+    snapshot_data = {"include_app_config": sc.include_app_config}
     if sc.include_mysql:
         tbl_list = list(sc.mysql_tables) if sc.mysql_tables else None
-        sql_text, counts = _export_mysql_sql(settings, tables=tbl_list)
-    audit_by_module = (
-        _fetch_audit_journal_by_module(settings) if sc.include_mysql else {}
-    )
+        sql_text, counts = _export_mysql_sql(settings, tables=tbl_list, snapshot_data=snapshot_data)
+        if not snapshot_data.get("captured"):
+            raise RuntimeError("L'instantané SQL et ses configurations n'ont pas été confirmés ensemble.")
+    audit_by_module = snapshot_data.get("audit_by_module", {})
     config_paths = _collect_config_paths() if sc.include_user_config else []
     media_files = (
         _iter_personnel_media_files(
@@ -665,10 +748,13 @@ def create_backup(
 
     app_config_rows: list[dict[str, Any]] = []
     if sc.include_app_config:
-        try:
-            app_config_rows = AppConfigRepository(settings).export_all_config_rows()
-        except Exception as exc:
-            raise RuntimeError("Sauvegarde interrompue : configuration partagée inaccessible.") from exc
+        if sc.include_mysql:
+            app_config_rows = snapshot_data["app_config_rows"]
+        else:
+            try:
+                app_config_rows = AppConfigRepository(settings).export_all_config_rows()
+            except Exception as exc:
+                raise RuntimeError("Sauvegarde interrompue : configuration partagée inaccessible.") from exc
 
     config_arcs: list[str] = []
     app_data_arcs: list[str] = []
@@ -725,6 +811,8 @@ def create_backup(
                 personnel_media_photos=media_photos,
                 personnel_media_grades=media_grades,
                 publication_files=publication_files or None,
+                snapshot_consistency=snapshot_data.get("consistency"),
+                file_inventory=_backup_file_inventory(zf),
             )
             zf.writestr(MANIFEST_NAME, json.dumps(manifest.to_dict(), indent=2).encode("utf-8"))
         if not sc.include_mysql and not config_arcs and not media_files and not app_data_arcs and not app_config_rows and not publication_files:
@@ -761,6 +849,7 @@ def _validate_backup_zip(zip_path: Path) -> BackupManifest:
         if MANIFEST_NAME not in names:
             raise ValueError("Archive invalide : manifest.json absent.")
         raw = json.loads(zf.read(MANIFEST_NAME).decode("utf-8"))
+        _verify_backup_file_inventory(zf, raw.get("file_inventory"))
     manifest = BackupManifest.from_dict(raw)
     from sme_gend.services.sme_publication_backup import PREFIX, validate_in_backup
     with zipfile.ZipFile(zip_path, "r") as publications:
@@ -925,6 +1014,13 @@ def restore_backup(
                                      preserve_audit_journal=rs.preserve_audit_journal):
             statements.append(stmt)
     created_tables = {target_table(stmt) for stmt in statements if stmt.lstrip().upper().startswith("CREATE")}
+    from sme_gend.services.schema_migrations import PUBLICATION_TABLES
+    publication_business_tables=set(PUBLICATION_TABLES)-{'sme_publication_write_gate'}
+    if created_tables & publication_business_tables and not publication_business_tables <= created_tables:
+        raise ValueError("Restaurez le registre des publications et tous ses fichiers SQL ensemble.")
+    membership_tables = {'agent_effectif_movement', 'sme_month_membership'}
+    if created_tables & membership_tables and not membership_tables <= created_tables:
+        raise ValueError("Restaurez les mouvements datés et leur appartenance mensuelle ensemble.")
     if rs.restore_mysql and sql_text:
         expected_tables = set(manifest.table_counts) if allowed is None else set(allowed)
         from sme_gend.services.database_maintenance import INTERNAL_TABLES
@@ -939,7 +1035,9 @@ def restore_backup(
     if statements and not rs.maintenance_confirmed:
         raise RuntimeError("Restauration MySQL refusée : confirmez la maintenance et la fermeture des autres postes.")
 
-    config_rows = _app_config_rows_for_restore(raw_cfg, preserve_local_accounts=local_auth is not None, preserve_runtime_state=not rs.restore_mysql) if raw_cfg is not None else []
+    partial_requested = bool(rs.mysql_tables or manifest.saved_scope().mysql_tables)
+    config_rows = _app_config_rows_for_restore(raw_cfg, preserve_local_accounts=local_auth is not None,
+        preserve_runtime_state=not rs.restore_mysql or partial_requested) if raw_cfg is not None else []
     with zipfile.ZipFile(stable_archive, "r") as structured_source:
         for name, target, kind in plan:
             if kind in ("config", "data") and target.suffix.lower() == ".json":
@@ -978,8 +1076,18 @@ def restore_backup(
         atomic_write(workspace / "safety_backup.txt", str(retained_safety).encode("utf-8"))
         try:
             with prepared_restore(settings, statements, workspace, manifest.table_counts) as prepared:
-                prepared.apply_config(config_rows, local_auth)
+                from sme_gend.services.configuration_restore import apply_prepared_configuration
+                apply_prepared_configuration(prepared, config_rows, local_auth, created_tables=created_tables,
+                    preserve_audit=rs.preserve_audit_journal, full_requested=not partial_requested)
                 prepared.validate()
+                from dataclasses import replace
+                from sme_gend.services.sme_publication_registry import validate_registry_snapshot
+                # The prepared database contains either the retained registry
+                # or a full restored family. Validate its bytes before switching.
+                if publication_business_tables & set(prepared.prepared):
+                    if not publication_business_tables <= set(prepared.prepared):
+                        raise ValueError("Registre des publications incomplet dans la restauration préparée.")
+                    validate_registry_snapshot(replace(settings,mysql_database=prepared.new))
                 prepared.record_restore_audit(archive_name=zip_path.name, preserve_audit=rs.preserve_audit_journal)
                 try:
                     prepared.publish()
@@ -997,6 +1105,9 @@ def restore_backup(
                         raise RuntimeError("Récupération à terminer en maintenance ; ne rouvrez pas les postes.") from failures[0]
                     raise
         except BaseException as exc:
+            from sme_gend.services.configuration_restore import IncompatibleRestoreError
+            if isinstance(exc, IncompatibleRestoreError):
+                raise
             raise RuntimeError(
                 "Restauration interrompue. Les copies de récupération sont conservées. "
                 f"Maintenez la maintenance et vérifiez le journal : {workspace}"

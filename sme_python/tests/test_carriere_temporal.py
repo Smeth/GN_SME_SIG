@@ -34,7 +34,7 @@ def test_carriere_scope_sql_uses_intervals() -> None:
     sql, params = carriere_scope_sql("2026-04")
     assert "date_debut" in sql
     assert "date_fin" in sql
-    assert params == ("202604", date(2026,4,30), date(2026,4,30), "202604")
+    assert params == ("202604", "042026", date(2026,4,30), date(2026,4,30), "202604", "042026")
     assert sql.count("%s") == len(params)
 
 

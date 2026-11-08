@@ -64,9 +64,22 @@ def project_positions(settings,aid,since,*,removed_kind=None,only_carriere_id=No
     scope=POSITION_SCOPE.get()
     with MySQLConnection(settings).connect() as conn:
         with conn.cursor() as cur:
-            closed_months={m for _,m,status in periods(cur) if is_statut_ferme(status or '')}
+            catalog=periods(cur)
+            closed_months={m for _,m,status in catalog if is_statut_ferme(status or '')}
+            eligible_periods=[pid for pid,m,_ in catalog if m and m>=since.strftime('%Y-%m')]
             changes=[]
-            cur.execute('SELECT c.id,p.annee_mois,c.date_fin,c.position_admin_libelle FROM carriere_situation c JOIN sme_periode p ON p.id=c.sme_periode_id WHERE c.agent_id=%s',(aid,))
+            sql = ('SELECT c.id,p.annee_mois,c.date_fin,c.position_admin_libelle FROM carriere_situation c '
+                   'JOIN sme_periode p ON p.id=c.sme_periode_id WHERE c.agent_id=%s AND (' +
+                   ('p.id IN ('+','.join(['%s']*len(eligible_periods))+')' if eligible_periods else '0=1'))
+            parameters = [aid, *eligible_periods]
+            if scope and scope.before is not None:
+                sql += ' OR c.id=%s'
+                parameters.append(int(scope.before.id))
+            sql += ')'
+            if only_carriere_id is not None:
+                sql += ' AND c.id=%s'
+                parameters.append(int(only_carriere_id))
+            cur.execute(sql, tuple(parameters))
             careers=cur.fetchall()
             cur.execute('SELECT position_admin,date_debut,date_fin FROM agent_position_event WHERE agent_id=%s ORDER BY date_debut DESC,id DESC',(aid,))
             events=cur.fetchall()
@@ -94,7 +107,7 @@ def project_positions(settings,aid,since,*,removed_kind=None,only_carriere_id=No
         log_temporal_projection(aid,'position_admin',since,changes)
 
 
-def record_position(settings,aid,label,start,end=None,*,reference=None,baseline='Présent',project=True):
+def record_position(settings,aid,label,start,end=None,*,reference=None,baseline='Présent',project=True,automatic_return=True):
     start=parse_access_date(start);end=parse_access_date(end)
     if start is None: return
     if end and end<start: raise ValueError('La date de fin doit être postérieure ou égale au début.')
@@ -103,12 +116,13 @@ def record_position(settings,aid,label,start,end=None,*,reference=None,baseline=
             event_period(cur,start)
             if end:
                 event_period(cur,end)
-                event_period(cur,end+timedelta(days=1))
+                if automatic_return:
+                    event_period(cur,end+timedelta(days=1))
             if reference:
                 cur.execute('DELETE FROM agent_position_event WHERE agent_id=%s AND reference_decision=%s',(aid,reference))
             cur.execute('INSERT INTO agent_position_event(agent_id,position_admin,date_debut,date_fin,mois_sme,reference_decision) VALUES(%s,%s,%s,%s,%s,%s)',
                         (aid,label,start,end,start.strftime('%Y-%m'),reference))
-            if end:
+            if end and automatic_return:
                 cur.execute('INSERT INTO agent_position_event(agent_id,position_admin,date_debut,mois_sme,reference_decision) VALUES(%s,%s,%s,%s,%s)',
                     (aid,baseline if baseline!=label else 'Présent',end+timedelta(days=1),(end+timedelta(days=1)).strftime('%Y-%m'),reference))
     scope=POSITION_SCOPE.get()
@@ -178,6 +192,8 @@ def temporal_write(table,method):
                         cur.execute('SELECT id FROM agent WHERE legacy_access_id=%s UNION ALL SELECT canonical_agent_id FROM agent_identity_alias WHERE alias_legacy_id=%s LIMIT 1',(legacy,legacy));row=cur.fetchone();aid=row[0] if row else None
                     if not aid: return method(self,*args,**kwargs)
                     old=_table_rows(cur,table,aid)
+                    from sme_gend.services.temporal_changes import temporal_capability_enabled
+                    journal_enabled=temporal_capability_enabled(self._settings)
                     override=None
                     expected=bound.get('expected')
                     token=getattr(expected,'write_token',None)
@@ -198,15 +214,26 @@ def temporal_write(table,method):
                         ref=f'sgi:auto:{table}:{key}'
                         if current is None:
                             cur.execute('DELETE FROM agent_position_event WHERE agent_id=%s AND reference_decision=%s',(aid,ref))
-                            if table in {'agent_mission','agent_conge','agent_desertion'}:
+                            if table in {'agent_mission','agent_conge','agent_desertion','parcours_stage','agent_malade'}:
                                 from sme_gend.services.activity_completion import activity_return_reference
                                 cur.execute('DELETE FROM agent_position_event WHERE agent_id=%s AND reference_decision=%s',
                                             (aid,activity_return_reference(table,key)))
                             if old_start: project_positions(self._settings,aid,old_start,removed_kind=_event_position(table,previous))
+                            if journal_enabled:
+                                from sme_gend.services.temporal_changes import record_source_change, acknowledge_projection
+                                request=record_source_change(self._settings,aid,table,key,previous,None,
+                                                             reason=method.__name__,enabled=True)
+                                acknowledge_projection(self._settings,aid,'position',request)
                             continue
                         start=parse_access_date(current.get(start_col));end=parse_access_date(current.get(end_col)) if end_col else None
-                        if not start: continue
-                        if table in {'agent_mission','agent_conge','agent_desertion'}:
+                        if not start:
+                            if journal_enabled:
+                                from sme_gend.services.temporal_changes import record_source_change
+                                record_source_change(self._settings,aid,table,key,previous,current,
+                                                     reason=method.__name__,enabled=True)
+                            continue
+                        actual_return=None
+                        if table in {'agent_mission','agent_conge','agent_desertion','parcours_stage','agent_malade'}:
                             from sme_gend.services.activity_completion import recorded_return
                             actual_return=recorded_return(cur,aid,table,key)
                             if actual_return is not None:
@@ -222,8 +249,16 @@ def temporal_write(table,method):
                         label=_event_position(table,current)
                         scope=POSITION_SCOPE.get()
                         baseline=scope.before.position_admin if scope and scope.before else 'Présent'
-                        record_position(self._settings,aid,label,start,end,reference=ref,baseline=baseline or 'Présent')
+                        record_position(self._settings,aid,label,start,end,reference=ref,baseline=baseline or 'Présent',
+                                        automatic_return=actual_return is None)
                         if old_start and old_start<start: project_positions(self._settings,aid,old_start,removed_kind=label)
+                        if journal_enabled:
+                            from sme_gend.services.temporal_changes import record_source_change, acknowledge_projection
+                            current['sme_periode_id']=pid
+                            if end_col: current[end_col]=end
+                            request=record_source_change(self._settings,aid,table,key,previous,current,
+                                                         reason=method.__name__,enabled=True)
+                            acknowledge_projection(self._settings,aid,'position',request)
                     return result
     return write
 

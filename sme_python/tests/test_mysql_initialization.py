@@ -68,24 +68,33 @@ def _settings() -> Settings:
 
 def test_initialization_lock_releases_mysql_advisory_lock(monkeypatch) -> None:
     statements: list[tuple[str, tuple | None]] = []
-    conn = _Connection(statements)
+    connections = []
     connect_params: list[dict] = []
 
     def connect(**params):
         connect_params.append(params)
+        conn = _Connection(statements)
+        connections.append(conn)
         return conn
 
     monkeypatch.setattr(mysql_connection.pymysql, "connect", connect)
 
     with mysql_connection.mysql_initialization_lock(_settings()):
-        assert not conn.closed
+        assert len(connections) == 2
+        assert all(not conn.closed for conn in connections)
 
     assert connect_params[0]["autocommit"] is True
     assert [statement for statement, _ in statements] == [
+        "SELECT GET_LOCK(%s,%s)",
         "SELECT GET_LOCK(%s, %s)",
         "SELECT RELEASE_LOCK(%s)",
+        "SELECT RELEASE_LOCK(%s)",
     ]
-    assert conn.closed
+    assert statements[0][1][0].startswith('sme_schema_')
+    assert statements[1][1][0].startswith('sme_gend_init_')
+    assert statements[2][1][0] == statements[1][1][0]
+    assert statements[3][1][0] == statements[0][1][0]
+    assert all(conn.closed for conn in connections)
 
 
 def test_schema_migrations_cached_across_view_months(monkeypatch) -> None:

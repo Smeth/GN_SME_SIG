@@ -71,7 +71,7 @@ def test_fetch_organigram_uses_four_fixed_queries_and_matches_correctly(
 
     repo = MySQLOrganigramRepository.__new__(MySQLOrganigramRepository)
     monkeypatch.setattr(repo, "_connect", lambda **kwargs: conn)
-    monkeypatch.setattr(repo, "_scope", lambda: ("1=1", ()))
+    monkeypatch.setattr(repo, "_scope", lambda **kwargs: ("1=1", ()))
 
     result = repo.fetch_organigram()
 

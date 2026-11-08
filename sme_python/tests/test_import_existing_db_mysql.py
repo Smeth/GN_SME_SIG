@@ -10,6 +10,12 @@ import pytest
 from sme_gend.config.settings import Settings
 
 
+@pytest.fixture(autouse=True)
+def legacy_archive_cycle(monkeypatch):
+    monkeypatch.setattr("sme_gend.services.document_month_cycle.get_cycle_mode", lambda settings: "legacy")
+    monkeypatch.setattr("sme_gend.services.document_month_cycle._has_dated_movements", lambda settings: False)
+
+
 def test_import_existing_db_for_month_calls_mysql_bundle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

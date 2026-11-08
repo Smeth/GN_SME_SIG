@@ -68,3 +68,15 @@ def test_validate_refuses_rows_outside_target():
     p=payload();p['tables']['workflow_task']=[{'id':4,'mois':'2026-08'}]
     schema={t:{'columns':list(rows[0]),'pk':['id'],'fk':[]} for t,rows in p['tables'].items()}
     with pytest.raises(ValueError,match='autre mois'):m.validate_rows(p,schema)
+
+
+@pytest.mark.parametrize('field',['is_member','baseline_member'])
+def test_month_archive_refuses_non_boolean_membership_baseline(field):
+    p=payload()
+    row={'agent_id':1,'sme_periode_id':1,'is_member':0,'baseline_member':1,'event_id':None}
+    row[field]=7
+    p['tables']['sme_month_membership']=[row]
+    schema={t:{'columns':list(rows[0]),'pk':['id'] if t=='sme_periode' else ['agent_id','sme_periode_id'],'fk':[]}
+            for t,rows in p['tables'].items()}
+    with pytest.raises(ValueError,match='0 ou 1'):
+        m.validate_rows(p,schema)

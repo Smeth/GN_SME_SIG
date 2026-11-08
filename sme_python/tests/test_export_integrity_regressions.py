@@ -71,6 +71,9 @@ def scenario(monkeypatch):
 
 
 def test_complete_sme_has_selected_period_details_and_no_template_records(monkeypatch, tmp_path):
+    monkeypatch.setattr("sme_gend.services.schema_migrations.require_capability", lambda *a: None)
+    monkeypatch.setattr("sme_gend.services.sme_publication_registry.register_export",
+                        lambda *a: SimpleNamespace(id=1, revision_no=1, status="brouillon", operation_warning=""))
     from sme_gend.services.numerique_excel_export import export_numerique_workbook
     settings, rows, detail = scenario(monkeypatch)
     from sme_gend.models.detaches_file_config import DetachesFileConfig
@@ -80,7 +83,7 @@ def test_complete_sme_has_selected_period_details_and_no_template_records(monkey
         return {"mois": mois, "rows": rows, "grades": [], "details": detail,
                 "detaches": [rows[5]], "previous_counts": [0] * 10, "movements": [],
                 "detaches_config": DetachesFileConfig().to_dict()}, {"captured_at_utc": "2026-11-06T10:00:00+00:00"}
-    monkeypatch.setattr(export, "_capture_numerique_workbook_data", capture)
+    monkeypatch.setattr(export, "_capture_publication_inputs", capture)
     monkeypatch.setattr("sme_gend.services.sme_export_revision.revision_root", lambda st: tmp_path / "revisions")
     target = tmp_path / "SME.xlsx"
     template = Path(__file__).resolve().parents[2] / "SME_GEND_model.xlsx"

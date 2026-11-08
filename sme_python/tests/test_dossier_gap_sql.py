@@ -83,7 +83,7 @@ def test_gap_query_applies_military_rule_and_normalization(monkeypatch) -> None:
     monkeypatch.setattr(
         scope_mod,
         "carriere_scope_for_settings",
-        lambda settings, *, alias="c": ("c.est_actuelle = 1", ()),
+        lambda settings, *, alias="c", cursor=None: ("c.est_actuelle = 1", ()),
     )
 
     ids = ess.fetch_dossier_gap_carriere_ids(object())

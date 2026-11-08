@@ -188,6 +188,8 @@ class SmeWorkspaceService:
         assert_any_permission("workflow.close_month")
         from sme_gend.services.active_month_guard import require_period_scope
         require_period_scope(self._settings)
+        from sme_gend.services.document_month_cycle import assert_legacy_closure
+        assert_legacy_closure(self._settings)
         self._apply_active_month_locked(mois_suivant)
         return mois_suivant
 
@@ -214,6 +216,8 @@ class SmeWorkspaceService:
             current=load_active_month_snapshot(self._settings,current=True)
             if current.active_month==ym and current.rows==change.before.rows:
                 return ym
+            from sme_gend.services.document_month_cycle import assert_legacy_closure
+            assert_legacy_closure(self._settings)
             self._apply_active_month_locked(ym)
         return ym
 

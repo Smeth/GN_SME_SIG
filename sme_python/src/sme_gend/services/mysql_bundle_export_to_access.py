@@ -218,10 +218,12 @@ def _fetch_liste_rows(
     *,
     export_mois: str | None = None,
 ) -> list[ExportListeRow]:
+    from sme_gend.services.membership_scope import membership_projection_enabled
+    membership = membership_projection_enabled(settings, cursor=cur)
     if export_mois:
-        filt, params = carriere_scope_for_explicit_export_mois(export_mois, alias="c")
+        filt, params = carriere_scope_for_explicit_export_mois(export_mois, alias="c", membership=membership)
     else:
-        filt, params = carriere_scope_for_settings(settings, alias="c")
+        filt, params = carriere_scope_for_settings(settings, alias="c", membership=membership)
     sql = f"""
 SELECT
   a.id,

@@ -32,8 +32,8 @@ def detail_sheet(wb, name, title, subset, details, gmap, mois):
 
 
 def _movements(settings, mois, rows, *, dpf=False):
-    from sme_gend.repositories.gain_perte_repository import GainPerteRepository
-    movements = GainPerteRepository(settings).fetch_for_month(mois)
+    from sme_gend.services.monthly_movements import export_month_movements
+    movements = export_month_movements(settings, mois)
     if dpf:
         keys = {r.satellite_join_key() for r in rows}
         names = {(r.noms or "").casefold() for r in rows}

@@ -39,6 +39,7 @@ def evidence(monkeypatch):
             raise rows[current[0]]
     cursor.execute.side_effect = execute
     cursor.fetchall.side_effect = lambda: rows[current[0]]
+    cursor.fetchone.return_value = (0,)  # The synthetic schema predates migration 0003.
     monkeypatch.setattr(service, "MySQLConnection", lambda _: connection)
     monkeypatch.setattr(service, "session_has_permission", lambda _: True)
     monkeypatch.setattr(service, "resolve_carriere_scope_mois", lambda _: "2026-09")

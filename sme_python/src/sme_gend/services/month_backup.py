@@ -17,7 +17,9 @@ EXTRA = ('workflow_task', 'career_alert_ack', 'career_alert_ack_occurrence')
 EVENTS = ('agent_diplome', 'agent_distinction', 'agent_passation_grade', 'agent_affectation',
           'agent_mission', 'agent_malade', 'agent_desertion', 'parcours_stage',
           'mouvement_effectif', 'agent_conge', 'agent_position_event', 'carriere_situation')
-OWNED = frozenset((*EVENTS, *EXTRA, 'import_lot', 'etl_erreur', 'sme_periode'))
+MEMBERSHIP = 'sme_month_membership'
+DATED_MOVEMENTS = 'agent_effectif_movement'
+OWNED = frozenset((*EVENTS, *EXTRA, 'import_lot', 'etl_erreur', 'sme_periode', MEMBERSHIP))
 
 
 def quote(name):
@@ -82,6 +84,7 @@ def ownership(cur, month, ids, schema):
         add('sme_periode', 'd.id=%s', (pid,))
         add('import_lot', 'd.sme_periode_id=%s', (pid,))
         add('etl_erreur', 'd.import_lot_id IN (SELECT id FROM import_lot WHERE sme_periode_id=%s)', (pid,))
+        add(MEMBERSHIP, 'd.sme_periode_id=%s', (pid,))
     for table in EXTRA:
         add(table, "TRIM(REPLACE(d.mois,'-',''))=%s", (month.replace('-',''),))
     return result
@@ -111,11 +114,23 @@ def _create_month_backup(settings, month, destination):
                 args = tuple(v for _, values in predicates for v in values)
                 tables[table] = sorted(read_rows(cur, table, where, args, alias='d'),
                                        key=lambda row:tuple(row[k] for k in schema[table]['pk']))
+            dated_agents = []
+            if DATED_MOVEMENTS in schema and MEMBERSHIP in schema:
+                from sme_gend.services.mysql_import_period import first_day_of_month, last_day_of_month
+                dated_agents = sorted({int(row['agent_id']) for table in ('carriere_situation', MEMBERSHIP)
+                    for row in tables.get(table, [])} | {int(row['agent_id']) for row in read_rows(cur,
+                    DATED_MOVEMENTS, 'effective_date BETWEEN %s AND %s', (first_day_of_month(month),last_day_of_month(month)))})
+                tables[DATED_MOVEMENTS] = []
+                for offset in range(0, len(dated_agents), 500):
+                    batch = dated_agents[offset:offset + 500]
+                    tables[DATED_MOVEMENTS].extend(read_rows(cur, DATED_MOVEMENTS,
+                        'agent_id IN (' + ','.join(['%s'] * len(batch)) + ') AND effective_date<=%s',
+                        (*batch, last_day_of_month(month))))
             shared_diplomas = []
             shared_passations = []
             auto_sources = []
             from sme_gend.repositories.mysql_agent_repository import _select_liste
-            display_sql, display_params = _select_liste(month)
+            display_sql, display_params = _select_liste(month, settings=settings, cursor=cur)
             cur.execute(display_sql, display_params)
             displayed = {r[0]: (r[17], r[18]) for r in cur.fetchall()}
             for row in tables.get('carriere_situation', []):
@@ -160,7 +175,7 @@ def _create_month_backup(settings, month, destination):
                 changed = False
                 for table, rows in list(tables.items()):
                     for column, parent, parent_col in schema[table]['fk']:
-                        if parent not in OWNED and parent != 'agent' and not parent.startswith('ref_'):
+                        if parent not in OWNED and parent not in ('agent', DATED_MOVEMENTS) and not parent.startswith('ref_'):
                             raise ValueError('Dépendance de mois non prise en charge : '+parent)
                         known = {r[parent_col] for r in tables.get(parent, [])}
                         missing = {r[column] for r in rows if r.get(column) is not None} - known
@@ -177,6 +192,7 @@ def _create_month_backup(settings, month, destination):
     payload = {'format': 'sme-month', 'version': 1, 'month': month,
                'created_at': datetime.now(timezone.utc).isoformat(), 'shared_diplomas': shared_diplomas,
                'shared_passations': shared_passations, 'auto_sources': auto_sources,
+               'dated_movement_agents': dated_agents,
                'tables': {t: [{k:encode(v) for k,v in r.items()} for r in rows] for t,rows in tables.items()}}
     data = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode('utf-8')
     from sme_gend.services.safe_paths import atomic_destination
@@ -203,7 +219,7 @@ def inspect_month_backup(path):
     p['month'] = normalize_import_mois(p['month'])
     if not isinstance(p.get('tables'), dict): raise ValueError('Tables mensuelles invalides.')
     for table, rows in p['tables'].items():
-        if table not in OWNED and table != 'agent' and not table.startswith('ref_'):
+        if table not in OWNED and table not in ('agent', DATED_MOVEMENTS) and not table.startswith('ref_'):
             raise ValueError('Table interdite dans une sauvegarde mensuelle : '+table)
         if not isinstance(rows, list) or any(not isinstance(r,dict) for r in rows):
             raise ValueError('Lignes mensuelles invalides.')
@@ -220,6 +236,22 @@ def validate_rows(payload, schema):
     rows_by_table = {t:[{k:decode(v) for k,v in r.items()} for r in rows]
                      for t,rows in payload['tables'].items()}
     period_ids = {r['id'] for r in rows_by_table['sme_periode']}
+    if DATED_MOVEMENTS in rows_by_table:
+        from sme_gend.services.access_date_parse import parse_access_date
+        from sme_gend.services.mysql_import_period import last_day_of_month
+        agents = payload.get('dated_movement_agents', [])
+        if (not isinstance(agents, list) or any(type(aid) is not int or aid < 1 for aid in agents)
+                or len(set(agents)) != len(agents)
+                or not set(agents) <= {row['id'] for row in rows_by_table.get('agent', [])}):
+            raise ValueError('Agents du registre daté invalides dans la sauvegarde.')
+        seen_days = set()
+        for row in rows_by_table[DATED_MOVEMENTS]:
+            stamp = parse_access_date(row.get('effective_date'))
+            key = (row.get('agent_id'), stamp)
+            if (key in seen_days or row.get('agent_id') not in agents or stamp is None
+                    or stamp > last_day_of_month(month) or row.get('category') not in ('GAIN','PERTE')):
+                raise ValueError('Chronologie des mouvements datés invalide.')
+            seen_days.add(key)
     lot_ids = {r['id'] for r in rows_by_table.get('import_lot', [])}
     shared_diplomas = set(payload.get('shared_diplomas', []))
     shared_passations = set(payload.get('shared_passations', []))
@@ -238,6 +270,8 @@ def validate_rows(payload, schema):
             key = tuple(row[c] for c in schema[table]['pk'])
             if not key or key in seen: raise ValueError('Clé dupliquée dans '+table)
             seen.add(key)
+            if table == MEMBERSHIP and (row.get('is_member') not in (0,1) or row.get('baseline_member') not in (0,1)):
+                raise ValueError('Observation et visibilité mensuelle doivent valoir 0 ou 1.')
             if table not in OWNED or table=='sme_periode': continue
             if table == 'agent_passation_grade' and row['id'] in shared_passations:
                 from sme_gend.services.access_date_parse import parse_access_date
@@ -307,6 +341,43 @@ def shared_match(cur, table, row, meta, schema):
     return next(iter(found.values()), None)
 
 
+def _movement_evidence(row):
+    return tuple(str(row.get(key) or '') for key in ('category','movement_kind','effective_date','reference_note','details'))
+
+
+def _check_dated_timeline(cur, month, rows, original_agent_id, target_agent_id):
+    """Current global facts cannot be silently corrected by restoring a month."""
+    from sme_gend.services.mysql_import_period import last_day_of_month
+    archived = {str(row['effective_date']): row for row in rows.get(DATED_MOVEMENTS, [])
+                if row['agent_id'] == original_agent_id}
+    current = read_rows(cur, DATED_MOVEMENTS, 'agent_id=%s AND effective_date<=%s',
+                        (target_agent_id,last_day_of_month(month)))
+    for row in current:
+        matching = archived.get(str(row['effective_date']))
+        if matching is None or _movement_evidence(matching) != _movement_evidence(row):
+            raise ValueError('Les mouvements réels déjà enregistrés pour cet agent diffèrent de la sauvegarde. '
+                             'Régularisez explicitement leur historique avant de restaurer ce mois ; aucun fait daté n’a été remplacé.')
+
+
+def _check_dated_correction_evidence(cur, row):
+    """A month archive cannot resurrect a globally deleted/moved/corrected fact."""
+    stamp = str(row['effective_date'])
+    cur.execute("SELECT after_state FROM sme_temporal_change WHERE agent_id=%s AND source_table=%s "
+                "AND (JSON_UNQUOTE(JSON_EXTRACT(before_state,'$.effective_date'))=%s "
+                "OR JSON_UNQUOTE(JSON_EXTRACT(after_state,'$.effective_date'))=%s) ORDER BY id DESC LIMIT 1",
+                (row['agent_id'],DATED_MOVEMENTS,stamp,stamp))
+    evidence = cur.fetchone()
+    if evidence is None:
+        return
+    after = evidence[0]
+    if isinstance(after,(str,bytes,bytearray)):
+        after = json.loads(after)
+    if not isinstance(after,dict) or _movement_evidence(after) != _movement_evidence(row):
+        raise ValueError('Ce mouvement réel a été supprimé ou corrigé dans l’historique partagé. '
+                         'Une archive mensuelle antérieure ne peut pas annuler cette correction. '
+                         'Vérifiez explicitement une restauration complète si cette annulation est intentionnelle ; aucun mois n’a été modifié.')
+
+
 def restore_month_backup(settings, archive, *, confirmed_month, _safety_backup=None):
     from sme_gend.services.auth_guard import session_has_admin_role, session_has_permission
     if not session_has_admin_role() or not session_has_permission('system.restore'):
@@ -326,13 +397,16 @@ def restore_month_backup(settings, archive, *, confirmed_month, _safety_backup=N
             with conn.cursor() as cur:
                 schema = metadata(cur)
                 rows = validate_rows(payload, schema)
+                if DATED_MOVEMENTS in rows:
+                    from sme_gend.services.schema_migrations import require_capability
+                    require_capability(settings,'dated_movements')
         backup = Path(_safety_backup or create_backup_to_default_dir(settings))
         inspect_backup(backup)
         try:
             with mysql_import_transaction(settings):
                 with MySQLConnection(settings).connect() as conn:
                     with conn.cursor() as cur:
-                        other_before = other_month_displays(cur, month)
+                        other_before = other_month_displays(cur, month, settings=settings)
                         ids = month_period_ids(cur, month, lock=True)
                         if ids:
                             target_period = ids[0]
@@ -364,6 +438,8 @@ def restore_month_backup(settings, archive, *, confirmed_month, _safety_backup=N
                                 cur.execute(f"DELETE FROM {quote(table)} WHERE TRIM(REPLACE(mois,'-',''))=%s",(month.replace('-',''),))
                         mapping = {}
                         restored_careers = []
+                        new_dated_movements = []
+                        checked_dated_agents = set()
                         def remember(table, original, target):
                             for col in schema[table]['columns']:
                                 if original.get(col) is not None:
@@ -385,11 +461,16 @@ def restore_month_backup(settings, archive, *, confirmed_month, _safety_backup=N
                                     if row[col] is not None: row[col]=mapping[(parent,parent_col,row[col])]
                                 shared = table not in OWNED or (table=='agent_diplome' and original['id'] in payload.get('shared_diplomas', []))
                                 existing = shared_match(cur,table,row,meta,schema) if shared else None
+                                if table == DATED_MOVEMENTS and existing is not None and _movement_evidence(existing) != _movement_evidence(row):
+                                    raise ValueError('Un mouvement réel à la même date contient des valeurs différentes. '
+                                                     'Corrigez explicitement ce fait ; la restauration n’a rien remplacé.')
                                 if table == 'agent_passation_grade':
                                     from sme_gend.services.grade_history_merge import matching_archive_passation
                                     existing = matching_archive_passation(cur, row['agent_id'], row['grade_libelle'],
                                         row['date_passation'], row.get('ndecision'))
                                 if existing is None:
+                                    if table == DATED_MOVEMENTS:
+                                        _check_dated_correction_evidence(cur,row)
                                     if table=='carriere_situation':
                                         cur.execute("SELECT statut FROM sme_periode WHERE id=%s",(target_period,))
                                         row['est_actuelle']=int(str(cur.fetchone()[0] or '').casefold() in ('ouvert','open','r\u00e9ouvert','reouvert'))
@@ -417,7 +498,12 @@ def restore_month_backup(settings, archive, *, confirmed_month, _safety_backup=N
                                     if auto: row[auto]=cur.lastrowid
                                     existing=row
                                     inserted[table]=inserted.get(table,0)+1
+                                    if table == DATED_MOVEMENTS:
+                                        new_dated_movements.append(dict(row))
                                 remember(table,original,existing)
+                                if table == 'agent' and original['id'] in payload.get('dated_movement_agents', []):
+                                    _check_dated_timeline(cur,month,rows,original['id'],existing['id'])
+                                    checked_dated_agents.add(existing['id'])
                                 if table == 'carriere_situation':
                                     restored_careers.append((existing['id'], existing['agent_id']))
                                 progress=True
@@ -427,7 +513,48 @@ def restore_month_backup(settings, archive, *, confirmed_month, _safety_backup=N
                         remap_external_position_links(cur, position_dependencies)
                         from sme_gend.services.grade_history_merge import reconcile_restored_grades
                         grade_corrections = reconcile_restored_grades(settings, restored_careers, month)
-                        if other_month_displays(cur, month) != other_before:
+                        if DATED_MOVEMENTS in rows:
+                            from sme_gend.services.schema_migrations import require_capability
+                            from sme_gend.services.membership_projection import apply_membership_for_agent
+                            from sme_gend.services.temporal_changes import record_source_change
+                            from sme_gend.services.mysql_import_period import first_day_of_month, last_day_of_month
+                            require_capability(settings,'dated_movements')
+                            cur.execute('SELECT DISTINCT agent_id FROM agent_effectif_movement WHERE effective_date<=%s',
+                                        (last_day_of_month(month),))
+                            if {int(value[0]) for value in cur.fetchall()} - checked_dated_agents:
+                                raise ValueError('La cible possède des mouvements réels pour des agents absents de la sauvegarde. '
+                                                 'Vérifiez explicitement ces faits avant de restaurer ce mois.')
+                            expected_membership = {(row['agent_id'],row['sme_periode_id']):
+                                (row['is_member'],row['baseline_member'],row['event_id'])
+                                for row in read_rows(cur,MEMBERSHIP,'sme_periode_id=%s',(target_period,))}
+                            bounds = {aid:first_day_of_month(month) for aid in checked_dated_agents}
+                            from sme_gend.services.access_date_parse import parse_access_date
+                            for row in new_dated_movements:
+                                stamp = parse_access_date(row['effective_date'])
+                                bounds[row['agent_id']] = min(bounds.get(row['agent_id'],stamp),stamp)
+                                record_source_change(settings,row['agent_id'],DATED_MOVEMENTS,row['id'],None,row,
+                                    reason='Restauration du mois '+month,effective_from=stamp,enabled=True)
+                            for aid, since in sorted(bounds.items()):
+                                apply_membership_for_agent(settings,aid,since)
+                            actual_membership = {(row['agent_id'],row['sme_periode_id']):
+                                (row['is_member'],row['baseline_member'],row['event_id'])
+                                for row in read_rows(cur,MEMBERSHIP,'sme_periode_id=%s',(target_period,))}
+                            if expected_membership != actual_membership:
+                                raise ValueError('Les mouvements réels ne reproduisent pas la visibilité mensuelle sauvegardée. '
+                                                 'Restauration annulée ; vérifiez les mouvements et leur observation mensuelle de référence.')
+                        elif DATED_MOVEMENTS in schema and MEMBERSHIP in schema:
+                            # Legacy bundles contain monthly observations, never real
+                            # movement dates. Keep today's durable facts and reapply
+                            # them over the restored observation rather than erase them.
+                            from sme_gend.services.membership_scope import membership_projection_enabled
+                            if membership_projection_enabled(settings,cursor=cur):
+                                from sme_gend.services.membership_projection import apply_membership_for_agent
+                                from sme_gend.services.mysql_import_period import first_day_of_month,last_day_of_month
+                                cur.execute('SELECT DISTINCT agent_id FROM agent_effectif_movement WHERE effective_date<=%s',
+                                            (last_day_of_month(month),))
+                                for (aid,) in cur.fetchall():
+                                    apply_membership_for_agent(settings,aid,first_day_of_month(month))
+                        if other_month_displays(cur, month, settings=settings) != other_before:
                             raise ValueError('La restauration modifierait des données partagees visibles dans un autre mois. Operation annulée ; aucune modification enregistrée.')
                 repo=AppConfigRepository(settings)
                 publish_data_change(settings,reason='month_restored',mois=month)
@@ -439,13 +566,13 @@ def restore_month_backup(settings, archive, *, confirmed_month, _safety_backup=N
     return {'month':month,'backup':str(backup),'inserted':inserted,'grade_history_reapplied':len(grade_corrections)}
 
 
-def other_month_displays(cur, selected):
+def other_month_displays(cur, selected, *, settings=None):
     from sme_gend.repositories.mysql_agent_repository import _select_liste
-    cur.execute("SELECT DISTINCT annee_mois FROM sme_periode WHERE TRIM(REPLACE(annee_mois,'-',''))<>%s",(selected.replace('-',''),))
-    months={normalize_import_mois(r[0]) for r in cur.fetchall()}
+    cur.execute("SELECT DISTINCT annee_mois FROM sme_periode")
+    months={normalize_import_mois(r[0]) for r in cur.fetchall()} - {selected}
     result={}
     for month in months:
-        sql,args=_select_liste(month)
+        sql,args=_select_liste(month, settings=settings, cursor=cur)
         cur.execute(sql,args)
         result[month]=sorted(cur.fetchall(),key=lambda r:r[0])
     return result

@@ -36,6 +36,7 @@ _DOC_TYPE_LABELS: dict[str, str] = {
     "soit_transmis": "Soit transmis",
     "zip": "Archive ZIP",
     "numerique": "Situation numérique",
+    "period_activity": "Mouvements sur une période",
     "detaches": "Détachés",
     "liste_personnel": "Liste personnel",
     "liste_padmin": "Liste par position adm.",

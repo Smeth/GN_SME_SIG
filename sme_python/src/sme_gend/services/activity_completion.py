@@ -9,7 +9,9 @@ ACTIVITIES = {
     'mission': ('agent_mission', 'date_debut', 'date_fin'),
     'conge': ('agent_conge', 'date_debut', 'date_fin'),
     'desertion': ('agent_desertion', 'date_desertion', None),
+    'stage': ('parcours_stage', 'date_debut', 'date_fin'),
 }
+RETURN_TABLES = frozenset({spec[0] for spec in ACTIVITIES.values()} | {'parcours_stage', 'agent_malade'})
 
 
 @dataclass(frozen=True)
@@ -21,7 +23,7 @@ class ActivityCompletionResult:
 
 
 def activity_return_reference(table, event_id):
-    if table not in {spec[0] for spec in ACTIVITIES.values()}:
+    if table not in RETURN_TABLES:
         raise ValueError('Type de retour non autorisé.')
     return f'sgi:auto:activity_return:{table}:{int(event_id)}'
 
@@ -188,7 +190,7 @@ def complete_activity(settings, row, kind, end_date, *, expected):
                     cur.execute(f'UPDATE {table} SET {end_column}=%s WHERE id=%s AND agent_id=%s',
                                 (end, event_id, aid))
                 record_position(settings, aid, expected_position, start, end,
-                                reference=source_reference, baseline='Présent', project=False)
+                                reference=source_reference, baseline='Présent', project=False, automatic_return=False)
                 record_position(settings, aid, 'Présent', end,
                                 reference=activity_return_reference(table, event_id), project=False)
                 project_positions(settings, aid, end)
@@ -201,4 +203,8 @@ def complete_activity(settings, row, kind, end_date, *, expected):
                 record_business_action(settings, action='activity_completed', module=kind,
                                        entity_id=event_id, before=before, after=after, mois=month,
                                        personnel_id=row.satellite_join_key(), personnel_nom=row.noms)
+                from sme_gend.services.temporal_changes import record_source_change, acknowledge_projection
+                request = record_source_change(settings, aid, table, event_id, before, after,
+                    mutation='complete', reason='Fin / retour d’activité', effective_from=end)
+                acknowledge_projection(settings, aid, 'position', request)
                 return ActivityCompletionResult(event_id, end, fresh.position_admin or '')

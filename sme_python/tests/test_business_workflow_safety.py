@@ -128,6 +128,7 @@ def test_gain_gap_batch_starts_only_after_confirmation(monkeypatch,accepted):
 def test_task_failure_warns_without_changing_the_existing_closure_confirmation(monkeypatch):
     from PySide6.QtWidgets import QWidget,QDialog
     from sme_gend.ui.views import sme_workflow_panel as view
+    monkeypatch.setattr('sme_gend.services.document_month_cycle.get_cycle_mode',lambda settings:'legacy')
     application=QApplication.instance() or QApplication([])
     frame=QWidget();frame._settings=Settings(database_path=Path('unused.mdb'))
     monkeypatch.setattr(view,'session_can_perform_action',lambda permission:True)
@@ -153,6 +154,7 @@ def test_task_failure_warns_without_changing_the_existing_closure_confirmation(m
 def test_blocking_closure_checks_are_recorded_as_tasks_without_allowing_closure(monkeypatch,storage_failed):
     from PySide6.QtWidgets import QWidget,QDialog
     from sme_gend.ui.views import sme_workflow_panel as view
+    monkeypatch.setattr('sme_gend.services.document_month_cycle.get_cycle_mode',lambda settings:'legacy')
     application=QApplication.instance() or QApplication([])
     frame=QWidget();frame._settings=Settings(database_path=Path('unused.mdb'))
     monkeypatch.setattr(view,'session_can_perform_action',lambda permission:True)

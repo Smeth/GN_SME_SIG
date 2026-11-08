@@ -109,6 +109,7 @@ def test_ack_read_failure_is_visible(monkeypatch):
 def test_repository_query_uses_legacy_identity_and_list_scope(monkeypatch):
     from sme_gend.repositories import mysql_agent_repository as module
     repo = object.__new__(module.MySQLAgentRepository)
+    repo._settings = Settings(database_path=Path('unused'), mysql_view_mois='2026-09')
     monkeypatch.setattr(module.MySQLAgentRepository, "_scope_mois", property(lambda _: "2026-09"))
     connection = MagicMock()
     repo._connect = MagicMock(return_value=connection)

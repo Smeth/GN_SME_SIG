@@ -73,9 +73,9 @@ class MySQLFonctionStructureRepository(BaseMySQLRepository):
 
     def fetch_observed_usage(self) -> list[tuple[str, str, int]]:
         """(code structure, libellé, nombre de fiches) du mois consulté."""
-        scope, scope_p = carriere_scope_for_settings(self._settings)
         with self._connect(read_only=True) as conn:
             with conn.cursor() as cur:
+                scope, scope_p = carriere_scope_for_settings(self._settings, cursor=cur)
                 cur.execute(
                     f"""
                     SELECT TRIM(COALESCE(rs.code, c.structure_code)) AS code,
@@ -296,10 +296,10 @@ class MySQLFonctionStructureRepository(BaseMySQLRepository):
     def backfill_from_carriere(self) -> int:
         """Rattache (structure, fonction) observés en carrière active."""
         inserted = 0
-        scope, scope_p = carriere_write_scope_for_settings(self._settings)
         with shared_reference_write(self._settings):
             with self._connect() as conn:
                 with conn.cursor() as cur:
+                    scope, scope_p = carriere_write_scope_for_settings(self._settings, cursor=cur)
                     cur.execute(
                         f"""
                         SELECT DISTINCT

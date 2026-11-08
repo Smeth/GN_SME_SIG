@@ -20,7 +20,11 @@ def scenario(tmp_path, monkeypatch):
     monkeypatch.setattr(backup, "_collect_config_paths", lambda: [])
     monkeypatch.setattr(backup, "_iter_personnel_media_files", lambda *a, **kw: [])
     monkeypatch.setattr(backup, "_fetch_audit_journal_by_module", lambda settings: {})
-    monkeypatch.setattr(backup, "_export_mysql_sql", lambda *a, **kw: ("-- synthetic SQL", {}))
+    def snapshot(*args, snapshot_data=None, **kwargs):
+        snapshot_data.update(captured=True,app_config_rows=[],audit_by_module={},
+                             consistency={'sql_and_shared_config':'same_transaction'})
+        return "-- synthetic SQL", {}
+    monkeypatch.setattr(backup, "_export_mysql_sql", snapshot)
     monkeypatch.setattr(backup, "AppConfigRepository", lambda settings: SimpleNamespace(export_all_config_rows=lambda: []))
     monkeypatch.setattr(backup, "default_backup_directory", lambda: tmp_path / "sessions")
     settings = Settings(database_path=tmp_path / "unused.mdb")

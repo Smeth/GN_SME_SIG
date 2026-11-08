@@ -185,6 +185,9 @@ class PersonnelDossierDialog(QDialog):
         self._btn_passation.clicked.connect(self._on_add_passation)
         self._btn_passation.setVisible(self._allow_edit)
         self._btn_passation.setEnabled(self._allow_edit)
+        self._btn_correct_return = QPushButton('Corriger un retour…')
+        self._btn_correct_return.clicked.connect(self._on_correct_return)
+        self._btn_correct_return.setVisible(False)
         self._alerts_label = QLabel()
         self._alerts_label.setObjectName("CareerAlertsBanner")
         self._alerts_label.setStyleSheet(
@@ -199,6 +202,7 @@ class PersonnelDossierDialog(QDialog):
         btn_row.addWidget(self._btn_actualiser)
         btn_row.addWidget(self._btn_conge)
         btn_row.addWidget(self._btn_passation)
+        btn_row.addWidget(self._btn_correct_return)
         btn_row.addStretch()
         hl.addLayout(btn_row)
         hl.addWidget(self._alerts_label)
@@ -1737,6 +1741,38 @@ class PersonnelDossierDialog(QDialog):
         self._refresh_all()
         self._liste_generale_changed = True
 
+    def _on_correct_return(self) -> None:
+        from sme_gend.services.auth_guard import session_has_admin_role, session_has_permission
+        if not session_has_admin_role() or not session_has_permission('effectifs.history_correction'):
+            QMessageBox.warning(self, 'Correction', 'La correction historique exige un administrateur autorisé.')
+            return
+        from sme_gend.services.agent_dossier_service import AgentDossierService
+        from sme_gend.ui.activity_return_correction_dialog import run_activity_return_correction
+        try:
+            aid = AgentDossierService(self._settings).agent_id_for_row(self._row)
+        except Exception as exc:
+            QMessageBox.warning(self, 'Correction', str(exc))
+            return
+        if run_activity_return_correction(self, self._settings, aid):
+            self._liste_generale_changed = True
+            # A background-prepared read-only dossier must not keep showing its
+            # old cached history after an explicitly authorized correction.
+            if self._readonly_snapshot is not None:
+                self._readonly_snapshot = None
+                self._initial_tables_pending = None
+                self._ref = ReferentielService(self._settings)
+                self._events_svc = AgentDossierEventsService(self._settings)
+                self._dossier_svc = AgentDossierService(self._settings)
+            if self._historical_context is not None:
+                try:
+                    refreshed = self._service.dossier_row_for_legacy_id(self._row.satellite_join_key())
+                    if refreshed is not None:
+                        self._row, self._historical_context = refreshed
+                except Exception as exc:
+                    QMessageBox.warning(self, 'Correction enregistrée',
+                        'Le retour a été corrigé, mais la fiche doit être rouverte pour relire sa situation.\n' + str(exc))
+            self._refresh_all()
+
     def _refresh_all(self) -> None:
         self._reload_row_from_carriere()
         self._refresh_header_and_media()
@@ -1750,8 +1786,13 @@ class PersonnelDossierDialog(QDialog):
 
     def _sync_history_edit_controls(self) -> None:
         from sme_gend.services.auth_guard import session_has_admin_role
+        from sme_gend.services.auth_guard import session_has_permission
 
         can_hist = self._allow_edit and session_has_admin_role()
+        if hasattr(self, '_btn_correct_return'):
+            can_correct = session_has_admin_role() and session_has_permission('effectifs.history_correction')
+            self._btn_correct_return.setVisible(can_correct)
+            self._btn_correct_return.setEnabled(can_correct)
         hist_widgets = (
             self._btn_stage_add,
             self._btn_stage_edit,

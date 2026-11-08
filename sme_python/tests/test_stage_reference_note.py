@@ -59,7 +59,10 @@ def test_stage_note_is_read_without_changing_write_token(monkeypatch):
     from sme_gend.repositories import temporal_reads
     cur = Mock()
     cur.fetchall.return_value = [('42', 'Formation', 'École', None, date(2026,11,1), None, 'NOTE/42', 'SESSION TEST', 12, 2, 'rev')]
-    repo = SimpleNamespace(_settings=object(), _connect=lambda **kwargs: nullcontext(SimpleNamespace(cursor=lambda: nullcontext(cur))))
+    from pathlib import Path
+    from sme_gend.config.settings import Settings
+    cur.fetchone.return_value = (0,)
+    repo = SimpleNamespace(_settings=Settings(database_path=Path('unused'), mysql_view_mois='2026-11'), _connect=lambda **kwargs: nullcontext(SimpleNamespace(cursor=lambda: nullcontext(cur))))
     monkeypatch.setattr(temporal_reads, 'eligibility', lambda *args, **kwargs: ('1=1', ()))
     result = temporal_reads.load_details(repo, 'stage', type_code='EXTERIEUR')['42']
     assert result.reference_dossier == 'NOTE/42'

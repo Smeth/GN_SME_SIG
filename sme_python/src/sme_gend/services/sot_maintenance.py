@@ -253,7 +253,9 @@ def project_carriere_from_dossier_batch(
             elif ym:
                 from sme_gend.config.liste_generale_scope import carriere_scope_sql
 
-                scope_sql, scope_params = carriere_scope_sql(ym, alias="c")
+                from sme_gend.services.membership_scope import membership_projection_enabled
+                scope_sql, scope_params = carriere_scope_sql(ym, alias="c",
+                    membership=membership_projection_enabled(settings, cursor=cur))
                 cur.execute(
                     f"SELECT c.id, c.agent_id FROM carriere_situation c "
                     f"WHERE {scope_sql} ORDER BY c.id",

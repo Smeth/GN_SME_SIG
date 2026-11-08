@@ -147,6 +147,9 @@ def test_all_database_identities_are_protected_from_export_and_retrieval(tmp_pat
 
 @pytest.mark.parametrize("failure", ["unconfirmed", "mirror", "disk"])
 def test_saved_file_and_revision_return_a_warning_when_history_fails(tmp_path, monkeypatch, failure):
+    monkeypatch.setattr("sme_gend.services.schema_migrations.require_capability", lambda *a: None)
+    monkeypatch.setattr("sme_gend.services.sme_publication_registry.register_export",
+                        lambda *a: SimpleNamespace(id=1, revision_no=1, status="brouillon", operation_warning=""))
     from openpyxl import Workbook
     from sme_gend.config.settings import Settings
     from sme_gend.services import numerique_excel_export as export
@@ -157,7 +160,7 @@ def test_saved_file_and_revision_return_a_warning_when_history_fails(tmp_path, m
     wb.active.title = "NUMERIQUE"
     wb.save(template)
     wb.close()
-    monkeypatch.setattr(export, "_capture_numerique_workbook_data", lambda *a: (
+    monkeypatch.setattr(export, "_capture_publication_inputs", lambda *a: (
         {"mois": "2026-11", "rows": [], "detaches_config": {}},
         {"captured_at_utc": "2026-11-06T10:00:00+00:00"}))
     monkeypatch.setattr(revisions, "revision_root", lambda settings: tmp_path / "history")

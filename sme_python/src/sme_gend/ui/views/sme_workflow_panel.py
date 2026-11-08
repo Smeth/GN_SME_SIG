@@ -12,6 +12,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -38,6 +39,7 @@ from sme_gend.services.dashboard_service import DashboardSnapshot
 from sme_gend.services.sme_editing_policy import reopen_closed_month_for_corrections
 from sme_gend.services.pre_closure_service import finalize_pre_closure_report, run_pre_closure_checks
 from sme_gend.services.sme_month_closure import (
+    canonical_sme_mois_yyyy_mm,
     extract_yyyy_mm,
     run_piste_a_month_closure,
     sme_archives_dir,
@@ -152,6 +154,17 @@ class SmeWorkflowPanel(QFrame):
         self._sme_workflow.setObjectName("dashSmeWorkflow")
         sw_lay = QVBoxLayout(self._sme_workflow)
         sw_lay.setSpacing(8)
+        self._cycle_mode = None
+        mode_bar = QHBoxLayout()
+        self._mode_label = QLabel("Mode de clôture : à charger")
+        self._btn_document_mode = QPushButton("Activer le cycle documentaire…")
+        self._btn_document_mode.clicked.connect(self._activate_document_mode)
+        self._btn_publications = QPushButton("Versions et validations SME…")
+        self._btn_publications.clicked.connect(self._open_publications)
+        mode_bar.addWidget(self._mode_label, 1)
+        mode_bar.addWidget(self._btn_publications)
+        mode_bar.addWidget(self._btn_document_mode)
+        sw_lay.addLayout(mode_bar)
 
         row_primary = QGridLayout()
         row_primary.setSpacing(8)
@@ -245,10 +258,15 @@ class SmeWorkflowPanel(QFrame):
             )
 
     def _apply_workflow_permissions(self) -> None:
-        from sme_gend.services.auth_guard import session_has_permission
+        from sme_gend.services.auth_guard import session_has_permission, session_has_admin_role
         from sme_gend.services.month_fill import can_fill_month
         self._btn_sme_fill.setEnabled(can_fill_month())
-        self._btn_sme_close.setEnabled(session_can_perform_action("workflow.close_month"))
+        self._btn_publications.setEnabled(session_has_permission("publications.view"))
+        self._btn_document_mode.setEnabled(session_has_admin_role() and session_has_permission("workflow.cycle_mode") and self._cycle_mode != "publications")
+        can_close = session_can_perform_action("workflow.close_month")
+        if self._cycle_mode == "publications":
+            can_close = can_close and session_has_permission("publications.view") and session_has_permission("publications.verify")
+        self._btn_sme_close.setEnabled(can_close)
         self._btn_sme_reopen.setEnabled(session_can_perform_action("workflow.reopen_month"))
         self._btn_sme_import.setEnabled(session_can_perform_action("workflow.import_archive"))
         self._btn_sme_export_access.setEnabled(
@@ -286,6 +304,13 @@ class SmeWorkflowPanel(QFrame):
         """Met à jour le tableau périodes SME depuis un DashboardSnapshot."""
         from sme_gend.services.dashboard_snapshot_compat import coerce_dashboard_snapshot
 
+        mode = getattr(s, "document_mode", None)
+        if mode is not None:
+            self._cycle_mode = mode
+            self._mode_label.setText("Mode : cycle documentaire" if mode == "publications" else "Mode : cycle historique avec archives")
+            self._btn_document_mode.setVisible(mode != "publications")
+            self._apply_workflow_permissions()
+            self._btn_sme_close.setText("Clôturer avec la version validée…" if mode == "publications" else "Clôturer le mois…")
         s = coerce_dashboard_snapshot(s)
         if s.sme_table_ok:
             self._period_rows = list(s.sme_rows)
@@ -308,9 +333,9 @@ class SmeWorkflowPanel(QFrame):
             for col, value in enumerate((row.codsme, row.mois, row.statut)):
                 item = QTableWidgetItem(str(value or "—"))
                 if col == 0:
-                    item.setData(Qt.ItemDataRole.UserRole, extract_yyyy_mm(row.mois))
+                    item.setData(Qt.ItemDataRole.UserRole, canonical_sme_mois_yyyy_mm(row.mois))
                 self._sme_table.setItem(index, col, item)
-            if extract_yyyy_mm(row.mois) == selected:
+            if canonical_sme_mois_yyyy_mm(row.mois) == selected:
                 self._sme_table.selectRow(index)
         self._sme_table.resizeColumnsToContents()
         self._sme_hint.setText(f"{len(rows)} période(s) affichée(s) sur {len(self._period_rows)}." if self._period_rows else "Aucune période enregistrée.")
@@ -322,12 +347,14 @@ class SmeWorkflowPanel(QFrame):
         return item.data(Qt.ItemDataRole.UserRole) if item else None
 
     def _period_selection_changed(self):
-        self._btn_consult_period.setEnabled(bool(self._selected_period()) and session_can_perform_action("workflow.set_active_month"))
+        from sme_gend.services.auth_guard import session_has_permission
+        self._btn_consult_period.setEnabled(bool(self._selected_period()) and session_has_permission("workflow.pilotage"))
         self._btn_period_record.setEnabled(bool(self._selected_period()))
 
     def _consult_period(self):
+        from sme_gend.services.auth_guard import require_permission
         month = self._selected_period()
-        if not month or not session_can_perform_action("workflow.set_active_month"):
+        if not month or not require_permission(self, "workflow.pilotage"):
             return
         window = self.window()
         if hasattr(window, "_activate_period"):
@@ -373,11 +400,119 @@ class SmeWorkflowPanel(QFrame):
     def _on_sme_cloture_dialog(self) -> None:
         self.open_closure_dialog()
 
+    def _open_publications(self) -> None:
+        from sme_gend.ui.publication_registry_dialog import open_publication_registry
+        open_publication_registry(self, self._settings, month=self._selected_period())
+
+    def _document_context(self, host):
+        from sme_gend.services.sme_workspace_service import SmeWorkspaceService
+        from sme_gend.services.sme_publication_registry import list_publications
+        def work():
+            snapshot = SmeWorkspaceService(self._settings).load_active_month_snapshot()
+            if not snapshot.active_month:
+                raise ValueError("Définissez un mois de travail unique avant de continuer.")
+            versions = list_publications(self._settings, mois=snapshot.active_month, status="valide", limit=2)
+            if len(versions) != 1:
+                raise ValueError("Générez puis validez une version SME du mois de travail dans « Versions et validations SME ».")
+            return snapshot, versions[0]
+        return run_with_progress(host, "Cycle documentaire", "Lecture du mois de travail et de sa version validée…", work)
+
+    def _activate_document_mode(self) -> None:
+        from sme_gend.services.auth_guard import require_permission
+        if not require_permission(self, "workflow.cycle_mode"):
+            return
+        context = self._document_context(self)
+        if context is None:
+            return
+        snapshot, publication = context
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Activer le cycle documentaire")
+        dialog.setMinimumWidth(540)
+        layout = QVBoxLayout(dialog)
+        message = QLabel(f"Mois de travail : {snapshot.active_month} · version validée {publication.revision_no}.\n"
+            "Les prochaines clôtures s’appuieront sur une version SME validée. Le mois suivant sera projeté "
+            "depuis la situation et les événements datés ; les anciennes archives restent conservées.")
+        message.setWordWrap(True)
+        layout.addWidget(message)
+        clients_updated = QCheckBox("Tous les postes utilisent la version 0.2 ou ultérieure et les anciens exécutables sont fermés")
+        clients_updated.setObjectName("clientsUpdatedConfirmation")
+        clients_updated.setToolTip("N’utilisez pas simultanément les anciens exécutables 0.1.x et le nouveau cycle documentaire.")
+        layout.addWidget(clients_updated)
+        reason = QLineEdit()
+        reason.setPlaceholderText("Motif de l’activation *")
+        layout.addWidget(reason)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Activer ce cycle")
+        def accept():
+            if not clients_updated.isChecked():
+                QMessageBox.warning(dialog, "Mise à jour des postes obligatoire", "Mettez tous les postes à jour et fermez les anciens exécutables avant d’activer ce cycle.")
+                return
+            if not reason.text().strip():
+                QMessageBox.warning(dialog, "Motif obligatoire", "Indiquez le motif d’activation.")
+                return
+            dialog.accept()
+        buttons.accepted.connect(accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        from sme_gend.services.document_month_cycle import activate_document_cycle
+        result = run_with_progress(self, "Activation du cycle", "Contrôle de la version validée et activation…",
+            lambda: activate_document_cycle(self._settings, expected_month=snapshot, publication_id=publication.id,
+                expected_publication_version=publication.version, reason=reason.text(),
+                clients_updated_confirmed=clients_updated.isChecked()))
+        if result is not None:
+            self._cycle_mode = result.mode
+            self._mode_label.setText("Mode : cycle documentaire")
+            self._btn_document_mode.hide()
+            self._trigger_after_workflow()
+            if result.operation_warning:
+                QMessageBox.warning(self, "Cycle activé", result.operation_warning)
+
+    def _open_document_closure(self, host):
+        from sme_gend.services.auth_guard import require_permission
+        if not require_permission(host, "workflow.close_month"):
+            return
+        context = self._document_context(host)
+        if context is None:
+            return
+        snapshot, publication = context
+        source = snapshot.active_month
+        target = _next_yyyy_mm(source)
+        if not confirm_destructive_with_ack(host, "Clôture documentaire",
+            f"Clôturer {source} avec sa version SME validée {publication.revision_no} et ouvrir {target} ?\n\n"
+            "Les données du mois et les fichiers validés seront contrôlés avant la clôture. "
+            "Le mois suivant recevra la situation projetée ; une période déjà remplie ou archivée ne sera pas remplacée.",
+            ack_label="J’ai vérifié la version validée du mois", confirm_label="Clôturer et ouvrir le mois suivant"):
+            return
+        from sme_gend.services.document_month_cycle import close_document_month
+        result = run_with_progress(host, "Clôture documentaire", "Contrôle de la version et préparation du mois suivant…",
+            lambda: close_document_month(self._settings, source, target, expected_month=snapshot,
+                publication_id=publication.id, expected_publication_version=publication.version))
+        if result is None:
+            return
+        self._trigger_after_workflow()
+        self._refresh_shell_period_banner()
+        message = (f"{source} clôturé · {target} ouvert.\n"
+                   f"{result.projected_agents} agent(s) projeté(s). Version validée conservée : {result.revision_id}.")
+        if result.operation_warning:
+            QMessageBox.warning(host, "Mois clôturé", message + "\n\n" + result.operation_warning)
+        else:
+            QMessageBox.information(host, "Mois clôturé", message)
+
     def open_closure_dialog(self, parent: QWidget | None = None) -> None:
         """Assistant clôture + activation du mois suivant (Pilotage ou raccourci sidebar)."""
         host = parent or self
         if not session_can_perform_action("workflow.close_month"):
             QMessageBox.warning(host, "Droits", "Vous n'avez pas la permission de clôturer un mois.")
+            return
+        from sme_gend.services.document_month_cycle import get_cycle_mode
+        mode = run_with_progress(host, "Cycle mensuel", "Vérification du mode de clôture…",
+                                 lambda: get_cycle_mode(self._settings))
+        if mode is None:
+            return
+        if mode == "publications":
+            self._open_document_closure(host)
             return
         ctx0 = load_sme_context()
         if ctx0._month_snapshot is None:
@@ -389,7 +524,8 @@ class SmeWorkflowPanel(QFrame):
         dlg.setMinimumWidth(480)
         lay = QVBoxLayout(dlg)
         intro = QLabel(
-            "Archive le mois choisi, marque la période « Fermé » en base et active le mois suivant."
+            "Cycle historique : conserve la référence Access configurée et une sauvegarde SQL de sécurité avant transition, "
+            "puis ferme le mois et ouvre le suivant. La référence Access ne représente pas nécessairement l’état MySQL du mois."
         )
         intro.setWordWrap(True)
         lay.addWidget(intro)
@@ -481,8 +617,8 @@ class SmeWorkflowPanel(QFrame):
             "Confirmer la clôture",
             pre_msg + "\n\n"
             f"Clôturer « {cloture} » et activer « {suivant} » ?\n\n"
-            "Archive JSON de mise en page, sauvegarde MySQL (.sql) "
-            "(+ bundle Access si configuré) ; "
+            "Archive de mise en page, sauvegarde SQL de sécurité avant transition "
+            "et référence source Access si configurée ; "
             "mise à jour sme_periode (Fermé / Ouvert) en MySQL.",
             ack_label="J'ai vérifié les contrôles ci-dessus",
             confirm_label="Clôturer le mois",
@@ -507,7 +643,7 @@ class SmeWorkflowPanel(QFrame):
             + ".",
         ]
         if result.data_archive:
-            parts.append(f"Archive bundle Access : {result.data_archive}")
+            parts.append(f"Référence source Access conservée : {result.data_archive}")
         if result.layout_archive:
             parts.append(f"Archive mise en page : {result.layout_archive}")
         if result.mysql_archive:

@@ -143,7 +143,7 @@ def load_career_provenance(settings, legacy_ids) -> CareerProvenance:
                 if lot is not None:
                     lot_links.append((key, career_id, str(ym or "Sans mois"), int(lot)))
             if month:
-                sql, params = _select_liste(resolve_carriere_scope_mois(settings))
+                sql, params = _select_liste(resolve_carriere_scope_mois(settings), settings=settings, cursor=cursor)
                 cursor.execute(f"{sql} WHERE a.legacy_access_id IN ({marks})", params + tuple(ids))
                 visible = {str(row[1]).strip() for row in cursor.fetchall()}
                 for key, fiche in fiches.items():

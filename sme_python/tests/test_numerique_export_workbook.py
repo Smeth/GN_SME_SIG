@@ -50,6 +50,10 @@ def test_settings_for_chosen_export_mois_overrides_view() -> None:
 
 
 def test_export_numerique_workbook_uses_chosen_mois(monkeypatch, tmp_path: Path) -> None:
+    from types import SimpleNamespace
+    monkeypatch.setattr("sme_gend.services.schema_migrations.require_capability", lambda *a: None)
+    monkeypatch.setattr("sme_gend.services.sme_publication_registry.register_export",
+                        lambda *a: SimpleNamespace(id=1, revision_no=1, status="brouillon", operation_warning=""))
     from sme_gend.services import numerique_excel_export as export
     from sme_gend.models.detaches_file_config import DetachesFileConfig
     tpl = Path(__file__).resolve().parents[2] / "SME_GEND_model.xlsx"
@@ -61,7 +65,7 @@ def test_export_numerique_workbook_uses_chosen_mois(monkeypatch, tmp_path: Path)
                                 "stages_internal", "conges", "conges_by_type", "positions")},
             "detaches": [], "previous_counts": [None] * 10, "movements": [],
             "detaches_config": DetachesFileConfig().to_dict()}, {"captured_at_utc": "2026-11-06T10:00:00+00:00"}
-    monkeypatch.setattr(export, "_capture_numerique_workbook_data", capture)
+    monkeypatch.setattr(export, "_capture_publication_inputs", capture)
     monkeypatch.setattr("sme_gend.services.sme_export_revision.revision_root", lambda settings: tmp_path / "revisions")
     logs = []
     monkeypatch.setattr("sme_gend.services.doc_gen_log.log_doc_generation", lambda **kw: logs.append(kw))

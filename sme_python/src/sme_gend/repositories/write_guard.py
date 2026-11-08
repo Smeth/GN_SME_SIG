@@ -61,15 +61,18 @@ def atomic_repository_write(*, agent_arg=None, legacy_arg=None, event_table=None
             from sme_gend.services.personnel_service import _personnel_write
             bound = contract.bind(self, *args, **kwargs).arguments
             with _personnel_write(self._settings, reason="repository_write"):
+                aid = None
                 if row_arg or carriere_arg:
                     career = bound[row_arg].id if row_arg else bound[carriere_arg]
-                    lock_agent(self._settings, carriere_id=career)
+                    aid = lock_agent(self._settings, carriere_id=career)
                 elif agent_arg:
-                    lock_agent(self._settings, agent_id=bound[agent_arg])
+                    aid = lock_agent(self._settings, agent_id=bound[agent_arg])
                 elif legacy_arg:
-                    lock_agent(self._settings, legacy_id=bound[legacy_arg])
+                    aid = lock_agent(self._settings, legacy_id=bound[legacy_arg])
                 elif event_table:
-                    lock_agent(self._settings, event_table=event_table, event_id=bound[id_arg])
-                return method(self, *args, **kwargs)
+                    aid = lock_agent(self._settings, event_table=event_table, event_id=bound[id_arg])
+                from sme_gend.services.temporal_changes import journal_repository_mutation
+                with journal_repository_mutation(self._settings, aid, method.__name__):
+                    return method(self, *args, **kwargs)
         return write
     return decorate

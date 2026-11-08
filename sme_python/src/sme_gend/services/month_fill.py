@@ -71,10 +71,16 @@ def _months(source, target):
 
 def list_month_sources(settings):
     _authorize()
+    from sme_gend.services.document_month_cycle import assert_legacy_month_fill
+    assert_legacy_month_fill(settings)
     with MySQLConnection(settings).connect(read_only=True) as conn:
         with conn.cursor() as cur:
+            from sme_gend.services.membership_scope import membership_projection_enabled
+            member_filter = (' AND NOT EXISTS(SELECT 1 FROM sme_month_membership workforce_member '
+                'WHERE workforce_member.agent_id=c.agent_id AND workforce_member.sme_periode_id=p.id '
+                'AND workforce_member.is_member=0)') if membership_projection_enabled(settings, cursor=cur) else ''
             cur.execute('SELECT p.annee_mois,COUNT(DISTINCT c.agent_id) FROM sme_periode p '
-                        'JOIN carriere_situation c ON c.sme_periode_id=p.id '
+                        'JOIN carriere_situation c ON c.sme_periode_id=p.id ' + member_filter +
                         'GROUP BY p.annee_mois ORDER BY p.annee_mois DESC')
             return tuple((normalize_import_mois(str(m)), int(n)) for m, n in cur.fetchall())
 
@@ -217,11 +223,14 @@ def _build(settings, source, target, options, state):
 def preview_month_fill(settings, source, target, options=FillOptions()):
     from sme_gend.services.active_month_guard import load_active_month_snapshot
     _authorize()
+    from sme_gend.services.document_month_cycle import assert_legacy_month_fill
+    assert_legacy_month_fill(settings)
     source, target = _months(source, target)
     if not isinstance(options, FillOptions) or any(type(value) is not bool for value in vars(options).values()):
         raise ValueError('Options de reprise invalides.')
     from sme_gend.repositories.mysql_connection import mysql_import_transaction
     with mysql_import_transaction(settings):
+        assert_legacy_month_fill(settings)
         with MySQLConnection(settings).connect(read_only=True) as conn:
             snapshot = load_active_month_snapshot(settings)
             state = _read_state(conn, source, target, periods=snapshot.rows, period_revision=snapshot.revision)
@@ -244,6 +253,8 @@ def apply_month_fill(settings, plan, *, progress=None):
     _authorize()
     if not isinstance(plan, MonthFillPlan) or plan.owner != mysql_database_key(settings):
         raise ValueError('Le contexte a changé. Relancez l’aperçu de reprise.')
+    from sme_gend.services.document_month_cycle import assert_legacy_month_fill, legacy_month_transition
+    assert_legacy_month_fill(settings)
     _months(plan.source, plan.target)
     if plan.conflicts:
         raise ValueError('La reprise comporte des conflits. Aucune donnée n’a été modifiée.')
@@ -255,7 +266,8 @@ def apply_month_fill(settings, plan, *, progress=None):
         raise RuntimeError('Reprise annulée : la sauvegarde préalable a échoué.')
     report('Sauvegarde préalable vérifiée')
     _authorize()
-    with period_state_write(settings, reason='month_fill', mois=plan.target) as change:
+    with legacy_month_transition(settings), period_state_write(settings, reason='month_fill', mois=plan.target) as change:
+        assert_legacy_month_fill(settings)
         with MySQLConnection(settings).connect() as conn:
             state = _read_state(conn, plan.source, plan.target, periods=change.before.rows,
                                 period_revision=change.before.revision, lock=True)

@@ -10,6 +10,8 @@ def reset_local_paths(settings, *, keep_document_history):
     from sme_gend.services.backup_restore_service import _collect_personnel_media_roots
     from sme_gend.config.settings import project_root
     roots = [(sme_archives_dir(), ('sme_bundle_*.mdb', 'sme_bundle_*.accdb', 'liste_present_layout_*.json'))]
+    if not keep_document_history:
+        roots.append((sme_archives_dir()/'publications_sme', ('**/*',)))
     for root in _collect_personnel_media_roots(settings):
         roots.extend((root / sub, ('**/*',)) for sub in ('photos', 'grades'))
     paths = set()

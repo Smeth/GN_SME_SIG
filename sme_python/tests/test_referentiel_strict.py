@@ -157,6 +157,9 @@ def test_fonctions_fetch_usage_counts_split_query(monkeypatch) -> None:
                 return [("ORPHELIN", 2)]
             return []
 
+        def fetchone(self):
+            return (0,)
+
         def __enter__(self):
             return self
 

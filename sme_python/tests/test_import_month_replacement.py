@@ -63,7 +63,7 @@ def test_purge_month_covers_dossier_history_without_deleting_agents(monkeypatch)
     monkeypatch.setattr(periods, "MySQLConnection", lambda settings: factory)
     monkeypatch.setattr("sme_gend.services.liste_generale_cache.invalidate_liste_cache", lambda s: None)
     result = periods.purge_sme_periode_for_reimport(object(), "202604", imported_only=False)
-    statements = [(call.args[0], call.args[1]) for call in cursor.execute.call_args_list]
+    statements = [(call.args[0], call.args[1] if len(call.args)>1 else ()) for call in cursor.execute.call_args_list]
     deleted = {table for table in (
         "agent_mission", "agent_malade", "agent_desertion", "parcours_stage",
         "mouvement_effectif", "agent_conge", "carriere_situation",
@@ -78,6 +78,7 @@ def test_purge_month_covers_dossier_history_without_deleting_agents(monkeypatch)
             continue
         assert "WHERE" in sql
         assert sql.strip() != "DELETE FROM agent"
+        assert "DELETE FROM agent_effectif_movement" not in sql
         assert 51 in params or "202604" in params or "2026-04" in params or "Import archive 202604" in params
         if "date_obtention" in sql or "date_attribution" in sql or "date_passation" in sql:
             assert date(2026, 4, 1) in params

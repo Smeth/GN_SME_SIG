@@ -30,11 +30,11 @@ class MySQLOrganigramRepository(BaseMySQLRepository):
     def load_order_subdivisions_snapshot(self,structure_id):
         return load_collection(self._settings,"order_subdivisions",structure_id)
 
-    def _scope(self) -> tuple[str, tuple]:
-        return carriere_scope_for_settings(self._settings)
+    def _scope(self, *, cursor=None) -> tuple[str, tuple]:
+        return carriere_scope_for_settings(self._settings, cursor=cursor)
 
-    def _write_scope(self) -> tuple[str, tuple]:
-        return carriere_write_scope_for_settings(self._settings)
+    def _write_scope(self, *, cursor=None) -> tuple[str, tuple]:
+        return carriere_write_scope_for_settings(self._settings, cursor=cursor)
 
     def fetch_organigram(self) -> list[StructureOrganigramNode]:
         """
@@ -45,9 +45,9 @@ class MySQLOrganigramRepository(BaseMySQLRepository):
         Le regroupement Python ci-dessous reproduit exactement la correspondance
         structure_id = X OU code texte = X de la version précédente.
         """
-        scope, scope_p = self._scope()
         with self._connect(read_only=True) as conn:
             with conn.cursor() as cur:
+                scope, scope_p = self._scope(cursor=cur)
                 cur.execute(
                     f"""
                     SELECT rs.id, rs.code, rs.designation, rs.ordre_tri,
@@ -220,10 +220,10 @@ class MySQLOrganigramRepository(BaseMySQLRepository):
         to_code = (to_structure_code or "").strip()
         if not to_code:
             raise ValueError("Code structure cible requis.")
-        scope, scope_p = self._write_scope()
         with shared_reference_write(self._settings):
             with self._connect() as conn:
                 with conn.cursor() as cur:
+                    scope, scope_p = self._write_scope(cursor=cur)
                     cur.execute(
                         """
                         SELECT COALESCE(MAX(ordre_tri), 0) FROM ref_subdivision_arme
@@ -268,7 +268,7 @@ class MySQLOrganigramRepository(BaseMySQLRepository):
                                 (structure_id, leaf_id, libelle, order))
                     rsa_id = int(cur.lastrowid)
                     mark_reference_write(True)
-                    scope, scope_p = self._write_scope()
+                    scope, scope_p = self._write_scope(cursor=cur)
                     cur.execute(f'UPDATE carriere_situation c SET c.subdivision_arme_id=%s '
                                 f'WHERE {scope} AND TRIM(c.subdivision_arme_libelle)=%s '
                                 'AND (c.structure_id=%s OR UPPER(TRIM(c.structure_code))='
@@ -313,7 +313,7 @@ class MySQLOrganigramRepository(BaseMySQLRepository):
                         (lib, nxt, int(rsa_id)),
                     )
                     mark_reference_write(cur.rowcount > 0)
-                    scope, scope_p = self._write_scope()
+                    scope, scope_p = self._write_scope(cursor=cur)
                     cur.execute(
                         f"""
                         UPDATE carriere_situation c
@@ -362,7 +362,7 @@ class MySQLOrganigramRepository(BaseMySQLRepository):
                         (new_l, int(rsa_id)),
                     )
                     mark_reference_write(cur.rowcount > 0)
-                    scope, scope_p = self._write_scope()
+                    scope, scope_p = self._write_scope(cursor=cur)
                     cur.execute(
                         f"""
                         UPDATE carriere_situation c
@@ -403,7 +403,7 @@ class MySQLOrganigramRepository(BaseMySQLRepository):
         c = (code or "").strip()
         with self._connect(read_only=True) as conn:
             with conn.cursor() as cur:
-                scope, scope_p = self._scope()
+                scope, scope_p = self._scope(cursor=cur)
                 cur.execute(
                     f"""
                     SELECT COUNT(*) FROM carriere_situation c
@@ -431,7 +431,7 @@ class MySQLOrganigramRepository(BaseMySQLRepository):
         c = (code or "").strip()
         with self._connect(read_only=True) as conn:
             with conn.cursor() as cur:
-                scope, scope_p = self._scope()
+                scope, scope_p = self._scope(cursor=cur)
                 cur.execute("SELECT id FROM ref_structure WHERE code = %s", (c,))
                 row = cur.fetchone()
                 sid = int(row[0]) if row else None
@@ -469,7 +469,7 @@ class MySQLOrganigramRepository(BaseMySQLRepository):
                     return ReferentielUsage()
                 lib = str(row[0] or "").strip()
                 sc = str(row[1] or "").strip()
-                scope, scope_p = self._scope()
+                scope, scope_p = self._scope(cursor=cur)
                 cur.execute(
                     f"""
                     SELECT COUNT(*) FROM carriere_situation c

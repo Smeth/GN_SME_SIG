@@ -133,11 +133,11 @@ def fetch_dossier_gap_carriere_ids(settings: Settings) -> set[str]:
     """
     from sme_gend.config.liste_generale_scope import carriere_scope_for_settings
 
-    scope_sql, scope_params = carriere_scope_for_settings(settings, alias="c")
     ids: set[str] = set()
     mc = MySQLConnection(settings)
     with mc.connect(read_only=True) as conn:
         with conn.cursor() as cur:
+            scope_sql, scope_params = carriere_scope_for_settings(settings, alias="c", cursor=cur)
             cur.execute(
                 f"""
                 SELECT c.id FROM carriere_situation c

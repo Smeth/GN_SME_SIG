@@ -36,8 +36,10 @@ def test_shared_snapshot_has_explicit_isolation_and_always_ends(monkeypatch, fai
     try:
         with mysql.mysql_read_snapshot(settings) as shared:
             assert mysql.has_import_transaction(settings)
+            mysql.transaction_local_cache("probe")["value"] = 1
             with mysql.mysql_read_snapshot(settings) as nested:
                 assert nested is shared
+                assert mysql.transaction_local_cache("probe")["value"] == 1
             shared.commit()  # Repository commits cannot end the snapshot.
             if failure:
                 raise ValueError("load failed")
@@ -48,6 +50,7 @@ def test_shared_snapshot_has_explicit_isolation_and_always_ends(monkeypatch, fai
     assert connection.rollbacks == 1
     assert not mysql.has_import_transaction(settings)
     assert mysql.current_transaction_settings() is None
+    assert mysql.transaction_local_cache("probe") is None
 
 
 def test_snapshot_cannot_publish_uncommitted_business_data():

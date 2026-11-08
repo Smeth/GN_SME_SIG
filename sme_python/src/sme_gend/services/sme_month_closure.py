@@ -204,6 +204,7 @@ def _commit_closure_transition(settings, source, target, *, action, audit_payloa
     """
     from sme_gend.services.action_permissions import assert_any_permission
     assert_any_permission("workflow.close_month")
+    from sme_gend.services.document_month_cycle import assert_legacy_closure, legacy_month_transition
     from sme_gend.repositories.mysql_connection import MySQLConnection, mysql_import_transaction
     from sme_gend.services.active_month_guard import period_state_write,check_month_snapshot
     from sme_gend.repositories.reference_write_guard import ReferenceConflictError
@@ -214,8 +215,10 @@ def _commit_closure_transition(settings, source, target, *, action, audit_payloa
     from sme_gend.services.sme_editing_policy import invalidate_editing_state_cache
 
     source, target = _validated_closure_months(source, target)
+    assert_legacy_closure(settings)
     try:
-        with period_state_write(settings,reason="month_closure",mois=target or source) as change:
+        with legacy_month_transition(settings), period_state_write(settings,reason="month_closure",mois=target or source) as change:
+            assert_legacy_closure(settings)
             with MySQLConnection(settings).connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT id,annee_mois,statut FROM sme_periode ORDER BY id FOR UPDATE")
@@ -278,9 +281,11 @@ def run_piste_a_month_closure(
     """
     from sme_gend.services.action_permissions import assert_any_permission
     assert_any_permission("workflow.close_month")
+    from sme_gend.services.document_month_cycle import assert_legacy_closure
     ym_cloture, ym_suivant = _validated_closure_months(mois_cloture, mois_suivant)
     if ym_suivant is None:
         raise ValueError("Le mois suivant est requis pour cette clôture.")
+    assert_legacy_closure(settings)
 
     from sme_gend.services.active_month_guard import load_active_month_snapshot
     if expected is None:
@@ -378,6 +383,9 @@ def import_existing_db_for_month(
     assert_any_permission("workflow.import_archive")
     if archive_and_close:
         assert_any_permission("workflow.close_month")
+        from sme_gend.services.document_month_cycle import assert_legacy_closure, LegacyCycleDisabledError
+        _validated_closure_months(mois, mois_suivant)
+        assert_legacy_closure(settings)
     warnings: list[str] = []
     data_archive: Path | None = None
     n_closed = n_open = 0
@@ -451,9 +459,11 @@ def import_existing_db_for_month(
                     "data_archive": str(data_archive) if data_archive else None,
                     "mysql_bundle": mysql_bundle_result},
             )
-        except (ReferenceConflictError, PermissionError) as exc:
+        except (ReferenceConflictError, PermissionError, LegacyCycleDisabledError) as exc:
             if mysql_bundle_result is not None:
-                cause = "vos droits ont changé" if isinstance(exc, PermissionError) else "les périodes ont changé"
+                cause = ("vos droits ont changé" if isinstance(exc, PermissionError) else
+                         "le cycle documentaire est maintenant actif" if isinstance(exc, LegacyCycleDisabledError) else
+                         "les périodes ont changé")
                 raise type(exc)(
                     "L'import MySQL est enregistré, mais la clôture ou l'activation est refusée : "
                     f"{cause}. Rechargez et vérifiez le mois actif avant de clôturer. "

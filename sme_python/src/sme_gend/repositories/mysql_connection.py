@@ -15,6 +15,7 @@ from sme_gend.config.settings import Settings
 
 
 _initialization_scope = threading.local()
+_schema_metadata_scope = threading.local()
 
 _import_transaction: ContextVar[tuple[tuple[str, int, str], Any] | None] = ContextVar(
     "mysql_import_transaction", default=None,
@@ -22,6 +23,7 @@ _import_transaction: ContextVar[tuple[tuple[str, int, str], Any] | None] = Conte
 _transaction_settings: ContextVar[Settings | None] = ContextVar("mysql_transaction_settings", default=None)
 _commit_hooks: ContextVar[list | None] = ContextVar("mysql_commit_hooks", default=None)
 _read_snapshot: ContextVar[bool] = ContextVar("mysql_read_snapshot", default=False)
+_transaction_cache: ContextVar[dict | None] = ContextVar("mysql_transaction_cache", default=None)
 
 
 class CommittedMirrorError(RuntimeError):
@@ -42,9 +44,19 @@ def current_transaction_settings() -> Settings | None:
     return _transaction_settings.get()
 
 
+def transaction_local_cache(namespace: str):
+    """A cache owned by this transaction only; never survives restore/next write."""
+    cache = _transaction_cache.get()
+    return cache.setdefault(namespace, {}) if cache is not None else None
+
+
 def has_import_transaction(settings: Settings) -> bool:
     active = _import_transaction.get()
     return active is not None and active[0] == mysql_database_key(settings)
+
+
+def has_read_snapshot(settings: Settings) -> bool:
+    return _read_snapshot.get() and has_import_transaction(settings)
 
 
 class _DeferredCommitConnection:
@@ -85,9 +97,11 @@ def mysql_read_snapshot(settings: Settings):
         ))
         settings_token = _transaction_settings.set(settings)
         snapshot_token = _read_snapshot.set(True)
+        cache_token = _transaction_cache.set({})
         try:
             yield _import_transaction.get()[1]
         finally:
+            _transaction_cache.reset(cache_token)
             _read_snapshot.reset(snapshot_token)
             _transaction_settings.reset(settings_token)
             _import_transaction.reset(transaction_token)
@@ -96,13 +110,16 @@ def mysql_read_snapshot(settings: Settings):
 
 
 @contextmanager
-def mysql_import_transaction(settings: Settings, *, read_committed: bool = False):
+def mysql_import_transaction(settings: Settings, *, read_committed: bool = False, business_gate: str = 'shared'):
     """Partage une transaction entre les dépôts synchrones du remplacement."""
     if has_import_transaction(settings):
+        if business_gate == 'exclusive':
+            from sme_gend.services.publication_write_barrier import assert_exclusive_publication_barrier
+            assert_exclusive_publication_barrier(settings)
         yield
         return
     callbacks = []
-    with MySQLConnection(settings).connect() as connection:
+    with MySQLConnection(settings).connect(business_gate=None) as connection:
         if read_committed:
             # Consume this one-transaction setting immediately. It must never
             # leak into the next operation on a pooled connection.
@@ -112,17 +129,24 @@ def mysql_import_transaction(settings: Settings, *, read_committed: bool = False
             with connection.cursor() as cur:
                 cur.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
                 cur.execute("START TRANSACTION")
-        token = _import_transaction.set((
-            mysql_database_key(settings), _DeferredCommitConnection(connection),
-        ))
-        settings_token = _transaction_settings.set(settings)
-        hooks_token = _commit_hooks.set(callbacks)
-        try:
-            yield
-        finally:
-            _import_transaction.reset(token)
-            _transaction_settings.reset(settings_token)
-            _commit_hooks.reset(hooks_token)
+        from sme_gend.services.publication_write_barrier import connection_business_gate
+        if business_gate not in ('shared', 'exclusive'):
+            raise ValueError('Mode de barrière métier invalide.')
+        with connection_business_gate(settings, connection, exclusive=business_gate == 'exclusive',
+                                      required=business_gate == 'exclusive'):
+            token = _import_transaction.set((
+                mysql_database_key(settings), _DeferredCommitConnection(connection),
+            ))
+            settings_token = _transaction_settings.set(settings)
+            hooks_token = _commit_hooks.set(callbacks)
+            cache_token = _transaction_cache.set({})
+            try:
+                yield
+            finally:
+                _transaction_cache.reset(cache_token)
+                _import_transaction.reset(token)
+                _transaction_settings.reset(settings_token)
+                _commit_hooks.reset(hooks_token)
     # Reached only after the owning connection has really committed. A nested
     # commit is deferred; an exception/rollback discards the entire callback list.
     failures = []
@@ -148,7 +172,49 @@ def mysql_database_key(settings: Settings) -> tuple[str, int, str]:
 
 
 @contextmanager
+def schema_metadata_lock(settings: Settings):
+    """Serialize explicit/legacy DDL against a consistent backup, not RH writes."""
+    key = mysql_database_key(settings)
+    held = getattr(_schema_metadata_scope, "held", None)
+    if held is None:
+        held = _schema_metadata_scope.held = set()
+    if key in held:
+        yield
+        return
+    name = "sme_schema_" + hashlib.sha256(settings.mysql_database.strip().casefold().encode()).hexdigest()[:40]
+    params = MySQLConnection(settings).connect_params()
+    params.update(autocommit=True, read_timeout=65)
+    connection = pymysql.connect(**params)
+    acquired = False
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT GET_LOCK(%s,%s)", (name, 60))
+            acquired = cursor.fetchone()[0] == 1
+        if not acquired:
+            raise TimeoutError("Le schéma est déjà utilisé par une migration ou une sauvegarde.")
+        held.add(key)
+        try:
+            yield
+        finally:
+            held.discard(key)
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT RELEASE_LOCK(%s)", (name,))
+                if cursor.fetchone()[0] != 1:
+                    raise RuntimeError("Verrou de schéma perdu ; vérifiez la fin de l'opération.")
+    finally:
+        connection.close()
+
+
+@contextmanager
 def mysql_initialization_lock(settings: Settings) -> Generator[None, None, None]:
+    # DDL paths (migration, backup, legacy initialization) always acquire the
+    # metadata lock first. Reversing these two locks can deadlock two processes.
+    with schema_metadata_lock(settings), _mysql_initialization_lock(settings):
+        yield
+
+
+@contextmanager
+def _mysql_initialization_lock(settings: Settings) -> Generator[None, None, None]:
     """Sérialise les initialisations de schéma/config entre processus clients."""
     key = mysql_database_key(settings)
     held = getattr(_initialization_scope, "held", None)
@@ -214,7 +280,7 @@ class MySQLConnection:
         }
 
     @contextmanager
-    def connect(self, *, read_only: bool = False) -> Generator[Connection, None, None]:
+    def connect(self, *, read_only: bool = False, business_gate: str | None = 'shared') -> Generator[Connection, None, None]:
         active = _import_transaction.get()
         if active is not None and active[0] == mysql_database_key(self._settings):
             # Les lectures doivent voir les lignes non encore validées de l'import.
@@ -223,7 +289,15 @@ class MySQLConnection:
         from sme_gend.repositories.mysql_pool import pooled_connection
 
         with pooled_connection(self._settings, read_only=read_only) as conn:
-            yield conn
+            if read_only or business_gate is None:
+                yield conn
+            else:
+                from sme_gend.services.publication_write_barrier import connection_business_gate
+                if business_gate not in ('shared', 'exclusive'):
+                    raise ValueError('Mode de barrière métier invalide.')
+                with connection_business_gate(self._settings, conn, exclusive=business_gate == 'exclusive',
+                                              required=business_gate == 'exclusive'):
+                    yield conn
 
     def test_connection(self) -> tuple[bool, str]:
         try:

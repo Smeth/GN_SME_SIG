@@ -24,6 +24,10 @@ def load_details(repo,family,*,legacy_id=None,type_code=None,by_type=False):
         with conn.cursor() as cur:
             manual="e.source_code='saisie'" if family=='conge' else None
             where,params=eligibility(repo._settings,cur,'e',start,end,manual=manual)
+            from sme_gend.services.membership_scope import visible_agent_clause
+            visible, visible_params = visible_agent_clause(repo._settings, cursor=cur, agent_column='e.agent_id')
+            where += visible
+            params += visible_params
             if legacy_id is not None:
                 aid=repo._agent_id(cur,legacy_id)
                 if not aid:return {}
@@ -59,8 +63,12 @@ def load_positions(repo):
     if not month:return {}
     with repo._connect(read_only=True) as conn:
         with conn.cursor() as cur:
+            from sme_gend.services.membership_scope import visible_agent_clause
+            visible, params = visible_agent_clause(repo._settings, cursor=cur, agent_column='e.agent_id', month=month)
             query="SELECT a.legacy_access_id,e.position_admin,e.date_debut,e.date_fin,e.lieu,e.reference_decision,e.observation,e.mois_sme FROM agent_position_event e JOIN agent a ON a.id=e.agent_id WHERE e.date_debut<=%s AND (e.date_fin IS NULL OR e.date_fin>=%s) AND (e.reference_decision IS NULL OR e.reference_decision NOT LIKE 'sgi:auto:%%') ORDER BY e.date_debut DESC,e.id DESC"
-            cur.execute(query,(last_day_of_month(month),first_day_of_month(month)))
+            head, order = query.rsplit(' ORDER BY ', 1)
+            cur.execute(head + visible + ' ORDER BY ' + order,
+                        (last_day_of_month(month),first_day_of_month(month)) + params)
             result={}
             for legacy,label,start,end,place,reference,obs,owner in cur.fetchall():
                 key=(str(legacy),str(label).strip().casefold().replace(' ',''))

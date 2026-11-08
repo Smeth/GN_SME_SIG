@@ -575,6 +575,9 @@ class GainPerteView(QWidget):
         self._btn_edit = QPushButton("Modifier la sélection…")
         self._btn_del = QPushButton("Supprimer la sélection")
         self._btn_refresh = QPushButton("Rafraîchir")
+        self._btn_dated = QPushButton("Mouvements datés…")
+        self._btn_dated.setToolTip("Déclarer les dates réelles des gains et pertes dans un registre distinct des observations Access.")
+        self._btn_dated.clicked.connect(self._open_dated_movements)
         self._btn_export = QPushButton("Exporter vers Excel…")
 
         self._btn_add.setToolTip(
@@ -596,6 +599,7 @@ class GainPerteView(QWidget):
         tb_lay.addWidget(self._btn_record_gaps)
         tb_lay.addWidget(self._btn_edit)
         tb_lay.addWidget(self._btn_del)
+        tb_lay.addWidget(self._btn_dated)
         tb_lay.addStretch()
         tb_lay.addWidget(self._btn_refresh)
         tb_lay.addWidget(self._btn_export)
@@ -1259,6 +1263,10 @@ class GainPerteView(QWidget):
             if not mois_ym:
                 return False
         return evaluate_editing_state(self._settings, view_mois=mois_ym).locked
+
+    def _open_dated_movements(self) -> None:
+        from sme_gend.ui.dated_effectif_movement_dialog import open_dated_effectif_movements
+        open_dated_effectif_movements(self, self._settings, month=self._current_mois_ym())
 
     def _on_add(self) -> None:
         from sme_gend.services.auth_guard import require_permission

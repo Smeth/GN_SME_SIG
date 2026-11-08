@@ -13,6 +13,11 @@ from sme_gend.config.settings import Settings
 from sme_gend.services import pre_closure_service as pre
 
 
+@pytest.fixture(autouse=True)
+def legacy_database_without_dated_movements(monkeypatch):
+    monkeypatch.setattr('sme_gend.services.document_month_cycle._has_dated_movements', lambda settings: False)
+
+
 @pytest.fixture(scope="module")
 def app():
     return QApplication.instance() or QApplication([])
@@ -313,6 +318,7 @@ def test_control_report_is_saved_with_task_batch_and_failure_propagates(task_sto
 
 
 def test_successful_closure_includes_full_control_report_in_existing_audit(tmp_path,monkeypatch):
+    monkeypatch.setattr("sme_gend.services.document_month_cycle.get_cycle_mode", lambda settings: "legacy")
     from sme_gend.services import sme_month_closure as service
     settings = Settings(database_path=tmp_path/"missing.mdb")
     sql = tmp_path/"mysql_2026-01.sql"

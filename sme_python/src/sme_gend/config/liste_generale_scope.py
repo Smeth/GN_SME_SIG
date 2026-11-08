@@ -117,7 +117,7 @@ def reference_date_for_mois(view_mois: str) -> date:
     return last_day_of_month(view_mois)
 
 
-def carriere_scope_sql(view_mois: str | None, *, alias: str = "c") -> tuple[str, tuple]:
+def carriere_scope_sql(view_mois: str | None, *, alias: str = "c", membership: bool = False) -> tuple[str, tuple]:
     """Select the registered month snapshot, including an empty snapshot.
 
     Date intervals are a compatibility fallback only for unregistered months.
@@ -126,10 +126,16 @@ def carriere_scope_sql(view_mois: str | None, *, alias: str = "c") -> tuple[str,
     ym = (view_mois or "").strip()
     a = (alias or "").strip()
     col = f"{a}." if a else ""
+    outer = col or 'carriere_situation.'
+    member = (f" AND NOT EXISTS (SELECT 1 FROM sme_month_membership workforce_member "
+              f"WHERE workforce_member.agent_id={outer}agent_id "
+              f"AND workforce_member.sme_periode_id={outer}sme_periode_id "
+              "AND workforce_member.is_member=0)") if membership else ''
     if ym:
         ref = reference_date_for_mois(ym)
         token = ym.replace('-', '')
-        period = "TRIM(REPLACE(annee_mois, '-', '')) = %s"
+        reverse_token = token[4:] + token[:4]
+        period = "TRIM(REPLACE(annee_mois, '-', '')) IN (%s,%s)"
         period_match = f"{col}sme_periode_id IN (SELECT id FROM sme_periode WHERE {period})"
         # A registered month owns its snapshot, including an intentionally empty
         # snapshot. An older open-ended segment must never repopulate that month.
@@ -139,8 +145,8 @@ def carriere_scope_sql(view_mois: str | None, *, alias: str = "c") -> tuple[str,
             f"AND ({col}sme_periode_id IS NOT NULL OR {col}est_actuelle = 1) "
             f"AND NOT EXISTS (SELECT 1 FROM sme_periode WHERE {period})"
         )
-        return f"(({period_match}) OR ({legacy_interval}))", (token, ref, ref, token)
-    return (f"{col}est_actuelle = 1", ())
+        return f"((({period_match}) OR ({legacy_interval})){member})", (token, reverse_token, ref, ref, token, reverse_token)
+    return (f"({col}est_actuelle = 1{member})", ())
 
 
 def resolve_carriere_scope_mois(settings: Settings) -> str | None:
@@ -153,12 +159,15 @@ def resolve_carriere_scope_mois(settings: Settings) -> str | None:
     return view_mois
 
 
-def carriere_scope_for_settings(settings: Settings, *, alias: str = "c") -> tuple[str, tuple]:
+def carriere_scope_for_settings(settings: Settings, *, alias: str = "c", membership: bool = False, cursor=None) -> tuple[str, tuple]:
     """Périmètre carrière aligné liste / exports / organigramme."""
-    return carriere_scope_sql(resolve_carriere_scope_mois(settings), alias=alias)
+    if cursor is not None:
+        from sme_gend.services.membership_scope import membership_projection_enabled
+        membership = membership_projection_enabled(settings, cursor=cursor)
+    return carriere_scope_sql(resolve_carriere_scope_mois(settings), alias=alias, membership=membership)
 
 
-def carriere_scope_for_numerique(settings: Settings, *, alias: str = "c") -> tuple[str, tuple]:
+def carriere_scope_for_numerique(settings: Settings, *, alias: str = "c", membership: bool = False) -> tuple[str, tuple]:
     """
     Périmètre carrière pour matrice / indispo / export numérique.
 
@@ -167,8 +176,8 @@ def carriere_scope_for_numerique(settings: Settings, *, alias: str = "c") -> tup
     """
     ym = resolve_export_mois(settings)
     if not ym:
-        return carriere_scope_sql(None, alias=alias)
-    return carriere_scope_for_explicit_export_mois(ym, alias=alias)
+        return carriere_scope_sql(None, alias=alias, membership=membership)
+    return carriere_scope_for_explicit_export_mois(ym, alias=alias, membership=membership)
 
 
 def settings_for_numerique_data(base: Settings) -> Settings:
@@ -189,7 +198,7 @@ def settings_for_numerique_data(base: Settings) -> Settings:
     return replace(base, mysql_view_mois=ym)
 
 
-def carriere_scope_for_explicit_export_mois(mois_ym: str, *, alias: str = "c") -> tuple[str, tuple]:
+def carriere_scope_for_explicit_export_mois(mois_ym: str, *, alias: str = "c", membership: bool = False) -> tuple[str, tuple]:
     """
     Périmètre carrière pour un export où l'utilisateur a choisi un mois précis.
 
@@ -202,8 +211,8 @@ def carriere_scope_for_explicit_export_mois(mois_ym: str, *, alias: str = "c") -
     raw = (mois_ym or "").strip()
     ym = canonical_sme_mois_yyyy_mm(raw) or normalize_import_mois(raw) if raw else ""
     if not ym:
-        return carriere_scope_sql(None, alias=alias)
-    return carriere_scope_sql(ym, alias=alias)
+        return carriere_scope_sql(None, alias=alias, membership=membership)
+    return carriere_scope_sql(ym, alias=alias, membership=membership)
 
 
 def resolve_mutation_view_mois(settings: Settings) -> str:
@@ -270,7 +279,7 @@ def format_export_mois_choice_label(mois_ym: str) -> str:
 
 
 
-def carriere_write_scope_for_settings(settings: Settings) -> tuple[str, tuple]:
+def carriere_write_scope_for_settings(settings: Settings, *, membership: bool = False, cursor=None) -> tuple[str, tuple]:
     """Keep the read scope while allowing MySQL to update the same table.
 
     DISTINCT prevents derived-table merging (including with derived_merge=on),
@@ -278,10 +287,13 @@ def carriere_write_scope_for_settings(settings: Settings) -> tuple[str, tuple]:
     No optimizer/session setting, separate ID read or Python-side ID list.
     The UPDATE target must use alias c.
     """
+    if cursor is not None:
+        from sme_gend.services.membership_scope import membership_projection_enabled
+        membership = membership_projection_enabled(settings, cursor=cursor)
     month = resolve_carriere_scope_mois(settings)
     if not month:
-        return carriere_scope_sql(None)
-    selected, params = carriere_scope_sql(month, alias="cs_write")
+        return carriere_scope_sql(None, membership=membership)
+    selected, params = carriere_scope_sql(month, alias="cs_write", membership=membership)
     return (
         "c.id IN (SELECT scoped.id FROM ("
         "SELECT DISTINCT cs_write.id FROM carriere_situation cs_write "

@@ -86,7 +86,12 @@ class NumeriqueCombinedView(QWidget):
         self._tabs.addTab(tab_s, "Listes détaillées")
 
         btn_export = QPushButton("Exporter le classeur Excel complet…")
+        self._btn_export = btn_export
         btn_export.clicked.connect(self._export)
+        self._btn_publications = QPushButton("Versions et validations SME…")
+        self._btn_publications.clicked.connect(self._open_publications)
+        self._btn_period_report = QPushButton("Mouvements sur une période…")
+        self._btn_period_report.clicked.connect(self._open_period_report)
 
         self._export_banner = QLabel()
         self._export_banner.setWordWrap(True)
@@ -98,6 +103,8 @@ class NumeriqueCombinedView(QWidget):
         top.addWidget(self._export_banner)
         bar = QHBoxLayout()
         bar.addWidget(btn_export)
+        bar.addWidget(self._btn_publications)
+        bar.addWidget(self._btn_period_report)
         bar.addStretch()
         top.addLayout(bar)
 
@@ -136,8 +143,22 @@ class NumeriqueCombinedView(QWidget):
         self.mark_dirty()
 
     def on_page_activated(self) -> None:
+        from sme_gend.services.auth_guard import session_has_permission
+        self._btn_publications.setEnabled(session_has_permission("publications.view"))
+        self._btn_export.setEnabled(session_has_permission("effectifs.export") and session_has_permission("publications.create"))
+        self._btn_period_report.setEnabled(session_has_permission("situation.numerique") and session_has_permission("effectifs.export"))
         if not self._loaded:
             self._refresh_all_previews(silent=True)
+
+    def _open_publications(self) -> None:
+        from sme_gend.config.liste_generale_scope import resolve_export_mois
+        from sme_gend.ui.publication_registry_dialog import open_publication_registry
+        open_publication_registry(self, self._preview.liste_settings,
+                                  month=resolve_export_mois(self._preview.liste_settings))
+
+    def _open_period_report(self) -> None:
+        from sme_gend.ui.period_activity_dialog import open_period_activity_export
+        open_period_activity_export(self,self._preview.liste_settings)
 
     def apply_runtime_settings(self, settings: Settings) -> None:
         self._settings = settings
@@ -236,7 +257,7 @@ class NumeriqueCombinedView(QWidget):
     def _export(self) -> None:
         from sme_gend.services.auth_guard import require_permission
 
-        if not require_permission(self, "effectifs.export"):
+        if not require_permission(self, "effectifs.export") or not require_permission(self, "publications.create"):
             return
         tpl = self._settings.template_numerique_path
         if tpl is None or not tpl.is_file():

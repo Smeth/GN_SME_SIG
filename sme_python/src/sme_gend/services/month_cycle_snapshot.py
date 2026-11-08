@@ -9,6 +9,7 @@ class MonthCycleSnapshot:
     sme_rows: tuple
     active_month: str
     sme_table_ok: bool = True
+    document_mode: str | None = None
 
 
 def load_month_cycle(settings):
@@ -17,4 +18,5 @@ def load_month_cycle(settings):
         raise RuntimeError("Les périodes ne sont pas disponibles. Vérifiez la connexion et l’initialisation des données.")
     rows = tuple(repository.fetch_all())
     active = SmeWorkspaceService(settings).load_active_month_snapshot().active_month
-    return MonthCycleSnapshot(rows, active or "")
+    from sme_gend.services.document_month_cycle import get_cycle_mode
+    return MonthCycleSnapshot(rows, active or "", document_mode=get_cycle_mode(settings))

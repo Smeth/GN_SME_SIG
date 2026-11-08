@@ -82,7 +82,7 @@ def test_month_empty_backups_before_database_and_preserves_other_files(tmp_path,
             assert zf.read(target.name) == b"septembre"
         for call in cursor.execute.call_args_list:
             assert "WHERE" in call.args[0]
-            assert call.args[1] in ((51,), ("2026-09",), ("202609",))
+            assert call.args[1] in ((51,), ("2026-09",), ("202609",), ("202609", "092026"))
     else:
         with pytest.raises(RuntimeError):
             empty_sme_month(object(), "2026-09")

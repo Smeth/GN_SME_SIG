@@ -117,14 +117,10 @@ class MySQLAvancementRepository(BaseMySQLRepository):
     def load_agents(self, *, on: date | None = None) -> list[AgentAvancementInput]:
         from sme_gend.services.avancement_reference_date import avancement_reference_date
         on = avancement_reference_date(self._settings, on=on)
-        sql, params = _select_liste(self._scope_mois())
-        sql = sql.replace(
-            "c.id AS carriere_id",
-            "a.id AS agent_id, c.id AS carriere_id",
-            1,
-        )
         with self._connect(read_only=True) as conn:
             with conn.cursor() as cur:
+                sql, params = _select_liste(self._scope_mois(), settings=self._settings, cursor=cur)
+                sql = sql.replace("c.id AS carriere_id", "a.id AS agent_id, c.id AS carriere_id", 1)
                 cur.execute(f"{sql} ORDER BY a.noms, c.id", params)
                 people = list(cur.fetchall())
                 if not people:

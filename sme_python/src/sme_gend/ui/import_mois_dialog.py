@@ -133,7 +133,7 @@ class ImportOptions:
     preserve_manual: bool = True
 
 
-def pick_import_options(parent=None, *, default_ym: str | None = None) -> ImportOptions | None:
+def pick_import_options(parent=None, *, default_ym: str | None = None, allow_legacy_cycle: bool = True) -> ImportOptions | None:
     """
     Dialogue modal : mois de l'import + option d'archivage/clôture + mois suivant.
 
@@ -261,6 +261,10 @@ def pick_import_options(parent=None, *, default_ym: str | None = None) -> Import
     cb_c.currentIndexChanged.connect(lambda _index: _fill_suivant())
     sp_c.valueChanged.connect(lambda _value: _fill_suivant())
     _toggle_archive(chk_archive.isChecked())
+    if not allow_legacy_cycle:
+        chk_archive.setChecked(False)
+        chk_archive.setEnabled(False)
+        info.setText("Cycle documentaire actif : import historique uniquement. Le mois de travail et les statuts de clôture sont conservés.")
 
     bb = QDialogButtonBox(
         QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel

@@ -152,8 +152,8 @@ def sql_repo(cls,settings,responses):
 
 def test_function_counts_and_observations_use_selected_month(settings,monkeypatch):
     from sme_gend.repositories import mysql_fonction_structure_repository as links, mysql_bundle_repositories as catalog
-    monkeypatch.setattr('sme_gend.config.liste_generale_scope.carriere_scope_for_settings',lambda settings:('c.sme_periode_id = %s',(7,)))
-    monkeypatch.setattr(links,'carriere_scope_for_settings',lambda settings:('c.sme_periode_id = %s',(7,)))
+    monkeypatch.setattr('sme_gend.config.liste_generale_scope.carriere_scope_for_settings',lambda settings,**kwargs:('c.sme_periode_id = %s',(7,)))
+    monkeypatch.setattr(links,'carriere_scope_for_settings',lambda settings,**kwargs:('c.sme_periode_id = %s',(7,)))
     repo,cur=sql_repo(links.MySQLFonctionStructureRepository,settings,[[('A','FICTIF',1)]])
     assert repo.fetch_observed_usage()==[('A','FICTIF',1)]
     assert cur.execute.call_args.args[1]==(7,) and 'sme_periode_id' in cur.execute.call_args.args[0]
@@ -164,7 +164,7 @@ def test_function_counts_and_observations_use_selected_month(settings,monkeypatc
 
 def test_backfill_uses_consulted_month(settings,monkeypatch):
     from sme_gend.repositories import mysql_fonction_structure_repository as links
-    monkeypatch.setattr(links,'carriere_write_scope_for_settings',lambda settings:('c.sme_periode_id = %s',(7,)))
+    monkeypatch.setattr(links,'carriere_write_scope_for_settings',lambda settings,**kwargs:('c.sme_periode_id = %s',(7,)))
     monkeypatch.setattr(links,'shared_reference_write',lambda settings:nullcontext())
     repo,cur=sql_repo(links.MySQLFonctionStructureRepository,settings,[[]])
     assert repo.backfill_from_carriere()==0

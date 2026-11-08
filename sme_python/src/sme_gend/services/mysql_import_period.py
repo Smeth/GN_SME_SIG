@@ -582,6 +582,12 @@ def purge_sme_periode_for_reimport(settings: Settings, mois: str, *, imported_on
             counts["sme_periode_id"] = ids[0]
             counts["sme_periode_ids"] = list(ids)
             for pid in ids:
+                # This cache belongs to the selected snapshot; actual dated
+                # movements remain durable global facts across imports/purges.
+                cur.execute("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() "
+                            "AND TABLE_NAME='sme_month_membership'")
+                if cur.fetchone():
+                    cur.execute('DELETE FROM sme_month_membership WHERE sme_periode_id=%s',(pid,))
                 plan = month_purge_plan(pid, ym, imported_only=imported_only, target_period_ids=ids)
                 if preserve_manual_passations:
                     from dataclasses import replace

@@ -17,6 +17,11 @@ from sme_gend.ui import paths_config_form as config_ui
 from sme_gend.ui.shell_window import ShellWindow
 
 
+@pytest.fixture(autouse=True)
+def legacy_database_without_dated_movements(monkeypatch):
+    monkeypatch.setattr('sme_gend.services.document_month_cycle._has_dated_movements', lambda settings: False)
+
+
 @pytest.fixture(scope="module")
 def app():
     return QApplication.instance() or QApplication([])
@@ -25,6 +30,7 @@ def app():
 @pytest.fixture(autouse=True)
 def no_auth_or_dialogs(monkeypatch):
     monkeypatch.setattr("sme_gend.services.auth_context.get_app_auth", lambda: None)
+    monkeypatch.setattr("sme_gend.services.document_month_cycle.get_cycle_mode", lambda settings: "legacy")
     monkeypatch.setattr(QMessageBox, "warning", Mock())
 
 
@@ -192,6 +198,7 @@ def test_valid_month_labels_keep_access_archive_compatibility(value, expected):
 
 
 def test_lost_closure_right_after_import_reports_what_is_already_committed(monkeypatch, tmp_path):
+    monkeypatch.setattr("sme_gend.services.document_month_cycle.get_cycle_mode", lambda settings: "legacy")
     settings = Settings(database_path=tmp_path / "source.mdb")
     settings.database_path.write_bytes(b"SYNTHETIC ACCESS")
     monkeypatch.setattr(guard, "load_active_month_snapshot", lambda *args, **kwargs: object())

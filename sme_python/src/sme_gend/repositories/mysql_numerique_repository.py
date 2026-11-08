@@ -577,11 +577,11 @@ class MySQLNumeriqueRepository(BaseMySQLRepository):
         ym = (resolve_export_mois(self._settings) or "").strip()
         if not ym:
             return None
-        cur.execute("SELECT id FROM sme_periode WHERE annee_mois = %s LIMIT 1", (ym,))
-        row = cur.fetchone()
-        if not row:
+        from sme_gend.services.month_period_scope import month_period_ids
+        matching = month_period_ids(cur, ym)
+        if len(matching) != 1:
             raise ValueError("La période demandée n'existe pas. Rechargez les périodes avant d'enregistrer.")
-        return int(row[0])
+        return matching[0]
 
     @atomic_repository_write(legacy_arg="person_id")
     def upsert_mission(self, person_id: str, detail: MissionDetail, *, expected=UNSET) -> None:

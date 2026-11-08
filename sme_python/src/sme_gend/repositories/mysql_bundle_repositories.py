@@ -668,10 +668,10 @@ class MySQLFonctionsRepository(BaseMySQLRepository):
         """
         out: dict[int, int] = {}
         from sme_gend.config.liste_generale_scope import carriere_scope_for_settings
-        scope, scope_p = carriere_scope_for_settings(self._settings)
         libelle_to_id: dict[str, int] = {}
         with self._connect(read_only=True) as conn:
             with conn.cursor() as cur:
+                scope, scope_p = carriere_scope_for_settings(self._settings, cursor=cur)
                 cur.execute("SELECT id, libelle FROM ref_fonction")
                 for fid, lib in cur.fetchall():
                     lb = str(lib or "").strip()

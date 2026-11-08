@@ -12,7 +12,8 @@ from sme_gend.repositories.mysql_connection import MySQLConnection, mysql_import
 from sme_gend.services.restore_files import RestoreFiles, write_recovery, digest
 
 _profile_lock = RLock()
-_PROTECTED = ('shared_personnel_media','shared_data_revision','migration_v2_complete')
+_PROTECTED = ('shared_personnel_media','shared_data_revision','migration_v2_complete',
+              'active_month_revision','sme_document_cycle')
 _PREFIXES = ('audit_mirror:','configuration_restore:')
 
 
@@ -24,6 +25,10 @@ class ConfigurationRestoreCommittedError(RuntimeError):
     committed = True
 
 
+class IncompatibleRestoreError(ValueError):
+    """The archive cannot form a coherent database at the requested scope."""
+
+
 def _fold(key):
     return ''.join(c for c in unicodedata.normalize('NFKD',key).casefold()
                    if unicodedata.category(c) not in ('Mn','Cf')).strip()
@@ -32,6 +37,92 @@ def _fold(key):
 def operational_key(key):
     key = _fold(key)
     return key in _PROTECTED or key.startswith(_PREFIXES)
+
+
+def _operational_predicate(column, collation):
+    if not re.fullmatch(r'[A-Za-z0-9_]+', collation or ''):
+        raise ValueError('Collation des clés de configuration non prise en charge.')
+    predicates = [f'{column} COLLATE {collation} = %s' for _ in _PROTECTED]
+    predicates += [f'LEFT({column},{len(prefix)}) COLLATE {collation} = %s' for prefix in _PREFIXES]
+    return '(' + ' OR '.join(predicates) + ')', (*_PROTECTED, *_PREFIXES)
+
+
+def apply_prepared_configuration(prepared, rows, local_auth, *, created_tables,
+                                 preserve_audit, full_requested):
+    """Keep live operational state unless the SQL actually restores the whole schema.
+
+    This runs on the maintenance-owned staging connection. Filtering JSON alone
+    cannot protect keys imported by the SQL dump, or preserve a live key's absence.
+    """
+    from types import SimpleNamespace
+    from sme_gend.services.database_maintenance import check_owned_barrier
+    from sme_gend.services.mysql_restore_staging import identifier
+    from sme_gend.services.schema_migrations import LEDGER, PUBLICATION_TABLES, migrations
+    check_owned_barrier(prepared.settings, prepared.conn)
+    original = set(prepared.original)
+    created_tables = set(created_tables)
+    installed_extensions = {table for migration in migrations() for table in migration.tables} & original
+    if full_requested and installed_extensions - created_tables:
+        raise IncompatibleRestoreError('Sauvegarde complète incompatible avec les extensions installées : '
+                         'elle ne contient pas toutes les données du nouveau système. '
+                         'Restaurez cette ancienne sauvegarde dans une base séparée, ou sélectionnez '
+                         'explicitement les référentiels à reprendre.')
+    required = original - ({'audit_journal'} if preserve_audit else set())
+    preserve_runtime = not required <= created_tables
+    protocol_tables = {LEDGER, *PUBLICATION_TABLES, 'sme_temporal_change', 'sme_projection_dirty'}
+    if preserve_runtime and created_tables & protocol_tables:
+        raise IncompatibleRestoreError('Les registres centraux et les métadonnées système ne peuvent '
+            'pas être restaurés séparément des données. Utilisez une sauvegarde complète cohérente ; '
+            'les capacités et les données actuelles ont été conservées.')
+    membership_tables = {'agent_effectif_movement', 'sme_month_membership'}
+    cohort_sources = {'agent', 'sme_periode', 'carriere_situation', 'import_lot', 'mouvement_effectif'}
+    if (preserve_runtime and original & membership_tables and created_tables & cohort_sources
+            and not membership_tables <= created_tables):
+        raise IncompatibleRestoreError('Une restauration partielle des effectifs ne peut pas conserver '
+            'les mouvements datés et leur projection actuels. Utilisez la restauration mensuelle dédiée '
+            'ou une sauvegarde complète cohérente.')
+    if membership_tables & set(prepared.prepared):
+        from sme_gend.services.schema_contracts import inspect_schema, errors
+        shape_errors = errors(tuple(sorted(membership_tables)), inspect_schema(prepared.conn))
+        if shape_errors:
+            raise IncompatibleRestoreError('La famille des mouvements datés ne respecte pas son contrat : '
+                                          + '; '.join(shape_errors[:10]))
+        from dataclasses import replace
+        from sme_gend.services.membership_projection import validate_membership_snapshot
+        try:
+            validate_membership_snapshot(replace(prepared.settings, mysql_database=prepared.new))
+        except ValueError as exc:
+            raise IncompatibleRestoreError('Sauvegarde des effectifs incohérente ; aucune bascule effectuée. '
+                                           + str(exc)) from exc
+    if preserve_runtime and rows:
+        rows = _filter_database_keys(SimpleNamespace(connection=prepared.conn), rows)
+    prepared.apply_config(rows, local_auth)
+    if not preserve_runtime or 'app_config' not in prepared.prepared:
+        return preserve_runtime
+    with prepared.conn.cursor() as cur:
+        live = identifier(prepared.live)
+        new = identifier(prepared.new)
+        schemas = (prepared.new, prepared.live) if 'app_config' in original else (prepared.new,)
+        predicates = []
+        values = []
+        for schema in schemas:
+            cur.execute('SELECT COLLATION_NAME,CHARACTER_SET_NAME FROM information_schema.COLUMNS '
+                        "WHERE TABLE_SCHEMA=%s AND TABLE_NAME='app_config' AND COLUMN_NAME='config_key'", (schema,))
+            row = cur.fetchone()
+            if not row or not re.fullmatch(r'[A-Za-z0-9_]+', row[1] or ''):
+                raise ValueError('Définition de clé de configuration incompatible avec une restauration partielle.')
+            collation, charset = row
+            condition, args = _operational_predicate(f'CONVERT(config_key USING {charset})', collation)
+            predicates.append(condition)
+            values.extend(args)
+        cur.execute(f'DELETE FROM {new}.app_config WHERE ' + ' OR '.join(predicates), values)
+        if 'app_config' in original:
+            # The last predicate is evaluated using the original database's key
+            # collation. Preserve the exact key spelling, payload and metadata.
+            cur.execute(f'INSERT INTO {new}.app_config(config_key,payload,updated_by,updated_at) '
+                        f'SELECT config_key,payload,updated_by,updated_at FROM {live}.app_config WHERE '
+                        + predicates[-1], (*_PROTECTED, *_PREFIXES))
+    return preserve_runtime
 
 
 @contextmanager

@@ -3,8 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from contextlib import nullcontext
+import pytest
 
 from sme_gend.services import mysql_backup_service as mbs
+
+
+@pytest.fixture(autouse=True)
+def isolated_schema_mutex(monkeypatch):
+    monkeypatch.setattr(mbs,'schema_metadata_lock',lambda settings:nullcontext())
+    monkeypatch.setattr("sme_gend.services.document_month_cycle.get_cycle_mode", lambda settings: "legacy")
+    monkeypatch.setattr("sme_gend.services.document_month_cycle._has_dated_movements", lambda settings: False)
 
 
 def test_find_mysqldump_respects_env(monkeypatch, tmp_path: Path) -> None:
@@ -16,14 +25,22 @@ def test_find_mysqldump_respects_env(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_mysql_password_is_not_a_process_argument(monkeypatch, tmp_path):
+    from contextlib import contextmanager
     from types import SimpleNamespace
     from sme_gend.config.settings import Settings
     secret="SYNTHETIC-ONLY-DO-NOT-PRINT"
     settings=Settings(database_path=tmp_path/"unused.mdb",mysql_password=secret)
     monkeypatch.setattr(mbs,"_find_mysqldump",lambda:"mysqldump.exe")
     monkeypatch.setattr(mbs,"_check_native_snapshot",lambda settings:None)
+    @contextmanager
+    def synthetic_options(config):
+        # This test checks argv; private-file ACLs have their own tests.
+        assert config.mysql_password == secret
+        yield tmp_path / 'synthetic-options.cnf', {}
+    monkeypatch.setattr(mbs, 'private_mysql_options', synthetic_options)
     def run(command,**kwargs):
         assert not any(secret in part for part in command), "Connection password exposed in process arguments"
+        assert any(part.startswith('--defaults-file=') for part in command)
         out=kwargs["stdout"];out.write(b"-- synthetic dump\n" if "b" in out.mode else "-- synthetic dump\n")
         return SimpleNamespace(returncode=0,stderr="")
     monkeypatch.setattr(mbs.subprocess,"run",run)

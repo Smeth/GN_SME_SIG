@@ -89,6 +89,8 @@ def test_export_retains_model_provenance_snapshot_exact_file_and_journal(isolate
     from sme_gend.services.numerique_excel_export import export_numerique_workbook
     from sme_gend.services.sme_export_revision import read_export_dataset
     settings, connect, params = seed(isolated_mysql)
+    from test_publication_registry_mysql import install_registry
+    install_registry(settings, tmp_path, monkeypatch)
     template = Path(__file__).resolve().parents[3] / "SME_GEND_model.xlsx"
     monkeypatch.setattr("sme_gend.services.sme_export_revision.revision_root", lambda settings: tmp_path / "versions")
     # Any old Access configured for import remains untouched.

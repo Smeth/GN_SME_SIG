@@ -51,6 +51,7 @@ def test_full_bundle_requires_preview_before_backup_or_database(monkeypatch):
 
 @pytest.mark.parametrize('preserve,accepted', [(True, True), (False, True), (False, False)])
 def test_wizard_preview_and_mode_reach_the_importer(monkeypatch, tmp_path, preserve, accepted):
+    monkeypatch.setattr('sme_gend.services.document_month_cycle.get_cycle_mode', lambda settings: 'legacy')
     from PySide6.QtWidgets import QWidget
     from sme_gend.config.settings import Settings
     from sme_gend.ui import import_liste_generale_wizard as wizard

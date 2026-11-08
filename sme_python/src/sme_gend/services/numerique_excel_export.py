@@ -405,7 +405,7 @@ def fill_gains_pertes_sheet(
     grade_abbrev_map: dict[str, str] | None = None,
 ) -> None:
     """Feuille « GAIN PERTE » du gabarit — mouvements du mois SME consulté."""
-    from sme_gend.repositories.gain_perte_repository import GainPerteRepository
+    from sme_gend.services.monthly_movements import export_month_movements
 
     gp_settings = gain_perte_settings or settings
     ws = _workbook_sheet(wb, SHEET_GAIN_PERTE)
@@ -417,7 +417,7 @@ def fill_gains_pertes_sheet(
     rows_gp: list = []
     if ma:
         try:
-            rows_gp = GainPerteRepository(gp_settings).fetch_for_month(ma)
+            rows_gp = export_month_movements(gp_settings, ma)
         except Exception as exc:
             raise RuntimeError(
                 f"Export annulé : lecture des gains et pertes impossible pour {ma}. "
@@ -1421,7 +1421,7 @@ def fill_indispo_sheet(
         write_cell_value(ws, INDISPO_TOTAL_ROW, c, t)
 
 
-def _capture_numerique_workbook_data(settings, mois, grade_order, movement_settings):
+def _capture_numerique_workbook_data(settings, mois, grade_order, movement_settings, *, join_transaction=False):
     """All report inputs share one fresh MySQL snapshot, never the UI cache."""
     from datetime import timezone
     from sme_gend.repositories.mysql_connection import mysql_read_snapshot
@@ -1433,7 +1433,14 @@ def _capture_numerique_workbook_data(settings, mois, grade_order, movement_setti
     from sme_gend.services.detaches_config_service import DetachesConfigService
     from sme_gend.services.export_workbook_tables import export_details
 
-    with mysql_read_snapshot(settings) as connection:
+    if join_transaction:
+        from sme_gend.services.publication_write_barrier import assert_exclusive_publication_barrier
+        from sme_gend.repositories.mysql_connection import MySQLConnection
+        assert_exclusive_publication_barrier(settings)
+        snapshot = MySQLConnection(settings).connect()
+    else:
+        snapshot = mysql_read_snapshot(settings)
+    with snapshot as connection:
         with connection.cursor() as cursor:
             cursor.execute("SELECT DATABASE(), @@hostname, UTC_TIMESTAMP(6)")
             database, server, captured = cursor.fetchone()
@@ -1462,13 +1469,33 @@ def _capture_numerique_workbook_data(settings, mois, grade_order, movement_setti
             "previous_counts": previous, "movements": _movements(movement_settings, mois, rows),
             "detaches_config": DetachesConfigService(settings).load().to_dict(),
         }
+        from sme_gend.services.data_sync import read_data_revision
+        captured_revision = read_data_revision(settings)
     source = {
         "kind": "mysql_monthly_snapshot", "database": database, "server": server,
         "captured_at_utc": captured.replace(tzinfo=timezone.utc).isoformat(),
         "imports": imports,
+        "captured_data_revision": captured_revision,
         "history_policy": "Imported monthly observations retained; no dates inferred between archives.",
     }
     return dataset, source
+
+
+def _capture_publication_inputs(settings, mois, grade_order, movement_settings):
+    """Refresh projections and capture under a short exclusive source barrier."""
+    from sme_gend.services.publication_write_barrier import publication_write_barrier
+    from sme_gend.services.month_projection import refresh_month_projection
+    from sme_gend.repositories.mysql_connection import CommittedMirrorError
+    captured = None
+    try:
+        with publication_write_barrier(settings, exclusive=True):
+            refresh_month_projection(settings, mois)
+            captured = _capture_numerique_workbook_data(settings, mois, grade_order, movement_settings, join_transaction=True)
+    except CommittedMirrorError:
+        if captured is None:
+            raise
+        captured[1]["projection_warning"] = "Projection confirmée dans MySQL ; sa copie locale du journal reste à vérifier."
+    return captured
 
 
 def export_numerique_workbook(
@@ -1492,14 +1519,16 @@ def export_numerique_workbook(
     from sme_gend.models.detaches_file_config import DetachesFileConfig
     from sme_gend.services.numerique_model_export import build_from_model
     from sme_gend.services.doc_gen_log import log_doc_generation
-    from sme_gend.services.auth_guard import session_can_export_documents
+    from sme_gend.services.auth_guard import session_can_export_documents, session_has_permission
     from sme_gend.services.auth_context import resolve_audit_actor
     from sme_gend.services.sme_export_revision import (
         revision_root, validate_export_destination, save_export_revision, retrieve_export_revision,
     )
 
-    if not session_can_export_documents():
+    if not session_can_export_documents() or not session_has_permission("publications.create"):
         raise PermissionError("Le droit d'exporter les effectifs est nécessaire.")
+    from sme_gend.services.schema_migrations import require_capability
+    require_capability(settings, "publication_registry")
     tpl = Path(template_path)
     if not tpl.is_file():
         raise FileNotFoundError(f"Gabarit situation numérique introuvable :\n{tpl}")
@@ -1521,7 +1550,7 @@ def export_numerique_workbook(
         grade_order = _parse_grade_columns(model["NUMERIQUE"])[0] if "NUMERIQUE" in model.sheetnames else []
     finally:
         model.close()
-    dataset, source = _capture_numerique_workbook_data(data_settings, eff_mois, grade_order, movement_settings)
+    dataset, source = _capture_publication_inputs(data_settings, eff_mois, grade_order, movement_settings)
     actor = resolve_audit_actor()
 
     def render(model_path, workbook_path):
@@ -1533,11 +1562,23 @@ def export_numerique_workbook(
         root=root, mois=eff_mois, template_bytes=template_bytes, dataset=dataset,
         source=source, actor=actor, renderer=render,
     )
+    from sme_gend.services.sme_publication_registry import register_export
+    try:
+        publication = register_export(data_settings, revision)
+    except Exception as exc:
+        raise RuntimeError("La version locale est conservée, mais son enregistrement central n'est pas confirmé. "
+                           "Ne régénérez pas le document ; reprenez l'import de cette même version : "
+                           + str(revision.folder)) from exc
+    revision = replace(revision, publication_id=publication.id, revision_no=publication.revision_no,
+                       publication_status=publication.status,
+                       journal_warning="\n".join(message for message in (
+                           source.get("projection_warning"), publication.operation_warning) if message))
     try:
         retrieve_export_revision(revision.folder, dest, expected=revision.journal_metadata())
     except Exception as exc:
         raise RuntimeError("La version SME a été conservée, mais la copie vers le fichier choisi a échoué. "
-                           f"Version récupérable : {revision.workbook}") from exc
+                           f"Révision centrale {publication.revision_no}, identifiant {publication.id}. "
+                           f"Version locale récupérable : {revision.workbook}") from exc
     try:
         log_doc_generation(settings=data_settings, doc_type="numerique", format="xlsx",
                            count=len(dataset["rows"]), dest_path=str(dest), mois=eff_mois,
@@ -1551,8 +1592,9 @@ def export_numerique_workbook(
         warning = ("Historique confirmé dans MySQL ; sa copie locale reste à vérifier."
                    if isinstance(exc, CommittedMirrorError) else
                    "L'enregistrement dans l'historique central n'a pas pu être confirmé.")
-        revision = replace(revision, journal_warning=warning + " Le fichier et sa version sont conservés ; "
-                           "aucune nouvelle génération n'est nécessaire.")
+        revision = replace(revision, journal_warning="\n".join(message for message in (
+                           revision.journal_warning, warning + " Le fichier et sa version sont conservés ; "
+                           "aucune nouvelle génération n'est nécessaire.") if message))
     return revision
 
 

@@ -1783,6 +1783,8 @@ class StagesView(QWidget):
         dossier_svc = AgentDossierService(self._scoped_settings) if diploma_payload else None
         type_code = _stage_type_code(kind)
         details_map = self._details_for(kind)
+        from sme_gend.services.temporal_changes import temporal_capability_enabled
+        modern_temporal = temporal_capability_enabled(self._scoped_settings)
         for row in rows:
             cur = personnel_snapshots[row.id]
             sat_key = cur.satellite_join_key()
@@ -1791,7 +1793,23 @@ class StagesView(QWidget):
             existing_diploma = None
             try:
                 with _personnel_write(self._scoped_settings, reason="end_stage"):
-                    if not already_present:
+                    stage_source_id = None
+                    if modern_temporal:
+                        from sme_gend.repositories.write_guard import lock_agent
+                        from sme_gend.repositories.mysql_connection import MySQLConnection
+                        from sme_gend.services.activity_completion import _read_source
+                        aid = lock_agent(self._scoped_settings, carriere_id=cur.id)
+                        if aid is None:
+                            raise ValueError('Agent introuvable. Rechargez les données.')
+                        if personnel.get_by_id(cur.id) != cur:
+                            raise ValueError('La situation de cet agent a changé. Rechargez les données avant de terminer son stage.')
+                        if not already_present and _norm_padmin(cur.position_admin) != _norm_padmin(padmin_for_stage_kind(kind)):
+                            raise ValueError('Cet agent possède maintenant une autre position. Sa nouvelle activité a été conservée.')
+                        with MySQLConnection(self._scoped_settings).connect() as connection:
+                            with connection.cursor() as cursor:
+                                stage_source_id = int(_read_source(self._scoped_settings, cursor, aid, 'stage',
+                                                                  detail_snapshots[row.id])['id'])
+                    if not already_present and not modern_temporal:
                         personnel.update_personnel(
                             cur,
                             replace(cur, position_admin="Présent"),
@@ -1828,7 +1846,11 @@ class StagesView(QWidget):
                             raise ValueError('Agent introuvable. Actualisez les données.')
                         existing_diploma = find_identical_diploma(dossier_svc.list_diplomes(cur), diploma_payload)
                         diploma_id = existing_diploma.id if existing_diploma else dossier_svc.add_diplome(cur, **diploma_payload)
-                    if not already_present:
+                    if modern_temporal and stage_closed:
+                        from sme_gend.services.stage_completion import normalize_validated_stage_return
+                        normalize_validated_stage_return(self._scoped_settings, aid, type_code, fin_ref,
+                                                         source_id=stage_source_id)
+                    elif not already_present:
                         from sme_gend.services.temporal_events import record_position
                         from sme_gend.services.access_date_parse import parse_access_date
                         record_position(self._scoped_settings,AgentDossierService(self._scoped_settings).agent_id_for_row(cur), 'Présent',parse_access_date(fin_ref),

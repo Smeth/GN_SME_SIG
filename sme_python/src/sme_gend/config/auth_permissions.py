@@ -36,10 +36,16 @@ ADMIN_ONLY_PERMISSIONS: frozenset[str] = frozenset(
         "admin.edit_age",
         "admin.users",
         "effectifs.restore",
+        "effectifs.history_correction",
         "workflow.reopen_month",
         "workflow.resolve_task",
+        "workflow.cycle_mode",
+        "workflow.correct_movement",
+        "publications.validate",
+        "publications.replace",
         "avancement.regles",
         "system.restore",
+        "system.migrate",
     }
 )
 
@@ -109,6 +115,8 @@ def default_permission_catalog() -> tuple[PermissionDef, ...]:
         ("situation.desertion", "Désertions", "Suivi administratif et activités", ""),
         ("situation.conges", "Congés", "Suivi administratif et activités", ""),
         ("workflow.pilotage", "Cycle mensuel", "Piloter le mois", "Onglet Cycle mensuel de Gestion des mois et archives."),
+        ("workflow.correct_movement", "Corriger les mouvements datés", "Piloter le mois",
+         "Administrateur : corriger ou supprimer un gain ou une perte datée, et déclarer un mouvement historique avec motif."),
         ("system.archives", "Fichiers d’archive", "Piloter le mois", ""),
         (
             "attestations.doc_log",
@@ -169,6 +177,7 @@ def default_permission_catalog() -> tuple[PermissionDef, ...]:
         ("system.settings", "Paramètres & données", "Administration et outils", ""),
         ("system.backup", "Créer et consulter des sauvegardes", "Administration et outils", "N'autorise pas la restauration."),
         ("system.restore", "Restaurer une sauvegarde", "Administration et outils", "Remplace des données et déclenche la maintenance. Réservé aux administrateurs."),
+        ("system.migrate", "Mettre à niveau le schéma MySQL", "Administration et outils", "Migrations explicites contrôlées, réservées aux administrateurs."),
         ("system.import", "Importer des mises à jour CSV (Édition SME)", "Administration et outils", ""),
         ("admin.users", "Utilisateurs & droits (accès complet)", "Administration", ""),
         (
@@ -212,6 +221,14 @@ def default_permission_catalog() -> tuple[PermissionDef, ...]:
         ("workflow.reopen_month", "Réouvrir un mois (exception)", "Workflow", ""),
         ("workflow.import_archive", "Importer une archive", "Workflow", ""),
         ("workflow.resolve_task", "Traiter les tâches workflow", "Workflow", ""),
+        ("workflow.cycle_mode", "Activer le cycle documentaire", "Workflow", "Choix explicite du mode de clôture pour cette base, réservé aux administrateurs."),
+        ("publications.view", "Consulter les versions SME", "Publications SME", "Registre partagé des brouillons, validations et remplacements."),
+        ("publications.create", "Créer une version SME", "Publications SME", "Enregistrer un nouveau classeur figé dans le registre partagé."),
+        ("publications.verify", "Vérifier une version SME", "Publications SME", "Contrôler l’intégrité des fichiers conservés."),
+        ("publications.validate", "Valider une version SME", "Publications SME", "Désigner la version validée du mois ; réservé aux administrateurs."),
+        ("publications.replace", "Remplacer une version validée", "Publications SME", "Nouvelle validation avec motif, en conservant la version précédente ; réservé aux administrateurs."),
+        ("publications.download", "Télécharger une version SME", "Publications SME", "Copier le classeur conservé ; le droit d’export des effectifs est également requis."),
+        ("effectifs.history_correction", "Corriger un retour d’activité validé", "Administration", "Correction datée et motivée de l’historique des retours ; réservée aux administrateurs."),
         ("effectifs.export", "Exporter et imprimer listes / documents", "Production SME", "Exports de fichiers, aperçus d'impression et impression des listes et documents métier."),
     ]
     return tuple(PermissionDef(id=r[0], label=r[1], group=r[2], description=r[3]) for r in rows)
@@ -245,6 +262,8 @@ def lecteur_role_permissions() -> list[str]:
         "structures.effectifs",
         "situation.numerique",
         "avancement.view",
+        "publications.view",
+        "publications.verify",
     ]
 
 

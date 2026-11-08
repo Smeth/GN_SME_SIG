@@ -46,3 +46,5 @@ sme_python/modeles/*.mdb
 sme_python/modeles/*.docx
 sme_python/modeles/ordre_general.txt
 **/publications_sme/
+**/migration_reports/
+*.reconciliation.json

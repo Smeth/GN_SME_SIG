@@ -16,7 +16,7 @@ def automatic_source(reference):
         return parts[2], int(parts[3]), 'sgi:auto:' + parts[2] + ':', ''
     if len(parts) == 4 and parts[2] == 'position':
         return 'agent_position_event', int(parts[3]), 'sgi:auto:position:', ''
-    if len(parts) == 5 and parts[2] == 'activity_return' and parts[3] in {'agent_mission', 'agent_conge', 'agent_desertion'}:
+    if len(parts) == 5 and parts[2] == 'activity_return' and parts[3] in {'agent_mission', 'agent_conge', 'agent_desertion', 'parcours_stage', 'agent_malade'}:
         return parts[3], int(parts[4]), 'sgi:auto:activity_return:' + parts[3] + ':', ''
     if len(parts) == 6 and parts[2] == 'stage_end' and parts[4] in {'LOCAL', 'INTERNE', 'EXTERIEUR'}:
         from sme_gend.services.access_date_parse import parse_access_date
@@ -44,7 +44,7 @@ def external_position_links(cur, plan, month):
         if table not in SOURCE_TABLES:
             continue
         matches = [f"pe.reference_decision=CONCAT('sgi:auto:{table}:',d.id)"]
-        if table in {'agent_mission', 'agent_conge', 'agent_desertion'}:
+        if table in {'agent_mission', 'agent_conge', 'agent_desertion', 'parcours_stage', 'agent_malade'}:
             matches.append(f"pe.reference_decision=CONCAT('sgi:auto:activity_return:{table}:',d.id)")
         if table == 'agent_position_event':
             matches.append("pe.reference_decision=CONCAT('sgi:auto:position:',d.id)")

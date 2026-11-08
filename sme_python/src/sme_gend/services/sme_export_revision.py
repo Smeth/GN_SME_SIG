@@ -121,6 +121,9 @@ class ExportRevision:
     folder: Path
     manifest: dict
     journal_warning: str = ""
+    publication_id: int | None = None
+    revision_no: int | None = None
+    publication_status: str | None = None
 
     @property
     def workbook(self) -> Path:
@@ -128,6 +131,8 @@ class ExportRevision:
 
     def journal_metadata(self) -> dict:
         return {
+            "publication_id": self.publication_id, "revision_no": self.revision_no,
+            "publication_status": self.publication_status,
             "revision_id": self.revision_id, "revision_folder": str(self.folder),
             "dataset_sha256": self.manifest["artifacts"]["donnees.json"]["sha256"],
             "workbook_sha256": self.manifest["artifacts"]["classeur.xlsx"]["sha256"],

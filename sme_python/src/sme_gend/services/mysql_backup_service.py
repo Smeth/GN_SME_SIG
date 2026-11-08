@@ -9,7 +9,7 @@ from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 from sme_gend.config.settings import Settings
-from sme_gend.repositories.mysql_connection import MySQLConnection, has_import_transaction
+from sme_gend.repositories.mysql_connection import MySQLConnection, has_import_transaction, schema_metadata_lock
 from sme_gend.services.safe_paths import atomic_destination, file_key
 from sme_gend.services.mysql_private_options import private_mysql_options
 
@@ -54,18 +54,27 @@ def _literal(value):
     return "_utf8mb4 0x"+text.encode("utf-8").hex() if text else "''"
 
 
-def _python_sql_dump(settings: Settings, dest: Path, *, selected_tables: list[str] | None = None) -> dict[str, int]:
+def _python_sql_dump(settings: Settings, dest: Path, *, selected_tables: list[str] | None = None,
+                     snapshot_reader=None) -> dict[str, int]:
+    if has_import_transaction(settings):
+        raise RuntimeError("La sauvegarde doit précéder la transaction d'écriture.")
+    with schema_metadata_lock(settings):
+        return _python_sql_dump_locked(settings,dest,selected_tables=selected_tables,snapshot_reader=snapshot_reader)
+
+
+def _python_sql_dump_locked(settings: Settings, dest: Path, *, selected_tables=None,snapshot_reader=None):
     """One InnoDB snapshot; stream rows rather than retaining the whole dump."""
     if has_import_transaction(settings):
         raise RuntimeError("La sauvegarde doit précéder la transaction d'écriture.")
     from pymysql.cursors import SSCursor
     from pymysql.constants.SERVER_STATUS import SERVER_STATUS_IN_TRANS
-    with MySQLConnection(settings).connect() as conn:
+    with MySQLConnection(settings).connect(read_only=True) as conn:
         if conn.server_status & SERVER_STATUS_IN_TRANS:
             raise RuntimeError("Transaction préexistante : sauvegarde annulée.")
         with conn.cursor() as cur:
             cur.execute("SELECT TABLE_NAME,ENGINE,TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() ORDER BY TABLE_NAME")
             tables = cur.fetchall()
+            all_tables = tuple(str(row[0]) for row in tables)
             from sme_gend.services.database_maintenance import INTERNAL_TABLES
             tables = [row for row in tables if row[0] not in INTERNAL_TABLES]
             if selected_tables:
@@ -90,7 +99,9 @@ def _python_sql_dump(settings: Settings, dest: Path, *, selected_tables: list[st
         try:
             with conn.cursor() as cur:
                 cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-                cur.execute("START TRANSACTION WITH CONSISTENT SNAPSHOT")
+                cur.execute("START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY")
+            if snapshot_reader is not None:
+                snapshot_reader(conn, all_tables)
             with Path(dest).open("w",encoding="utf-8",newline="\n") as file:
                 file.write("-- SME closure backup (consistent InnoDB snapshot)\nSET NAMES utf8mb4;\nSET SESSION SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';\nSET FOREIGN_KEY_CHECKS=0;\n")
                 for table,engine,kind in tables:
@@ -126,6 +137,16 @@ def _check_native_snapshot(settings):
 
 
 def backup_mysql_database(settings: Settings, dest_dir: Path, slug: str) -> tuple[Path | None,list[str]]:
+    if has_import_transaction(settings):
+        return None,["La sauvegarde doit être créée avant toute transaction d'écriture."]
+    try:
+        with schema_metadata_lock(settings):
+            return _backup_mysql_database_locked(settings,dest_dir,slug)
+    except Exception:
+        return None,["Sauvegarde non créée : une migration ou une sauvegarde utilise le schéma, ou la connexion est indisponible."]
+
+
+def _backup_mysql_database_locked(settings: Settings, dest_dir: Path, slug: str):
     warnings = []
     if has_import_transaction(settings):
         return None,["La sauvegarde doit être créée avant toute transaction d'écriture."]

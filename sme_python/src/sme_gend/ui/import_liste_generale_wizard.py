@@ -67,7 +67,12 @@ def run_import_liste_generale_from_access(
             description="Choisissez la période à remplacer. Le mois de travail et les statuts de clôture seront conservés. Un aperçu et une confirmation précèdent toute écriture.")
         opts = ImportOptions(mois=month, mois_suivant=None, archive_and_close=False) if month else None
     else:
-        opts = pick_import_options(parent)
+        from sme_gend.services.document_month_cycle import get_cycle_mode
+        mode = run_with_progress(parent, "Import historique", "Vérification du mode mensuel…",
+                                 lambda: get_cycle_mode(settings))
+        if mode is None:
+            return False
+        opts = pick_import_options(parent, allow_legacy_cycle=False) if mode == "publications" else pick_import_options(parent)
     if not opts:
         return False
     mois = opts.mois
