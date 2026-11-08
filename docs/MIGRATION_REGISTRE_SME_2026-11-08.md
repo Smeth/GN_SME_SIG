@@ -1,5 +1,7 @@
 Registre partagé des publications SME — migration du 8 novembre 2026
 
+L’export courant « Situation numérique → Exporter le classeur Excel complet » est indépendant de ce registre. Il demande le mois et le fichier de destination, remplit le modèle officiel `SME_GEND_model.xlsx` et journalise le document. Le droit `effectifs.export` suffit ; aucune validation, clôture ou migration 0001–0003 n’est nécessaire à cet export. Le bouton de versions et validations a été retiré de cet écran. Les mécanismes décrits ci-dessous restent réservés au circuit documentaire avancé, activé explicitement ; ils ne sont pas un préalable à la production du classeur.
+
 Le registre conserve dans MySQL les quatre composants exacts de chaque version : classeur, modèle, données typées et manifeste. Ils sont découpés en fragments de 1 Mo, avec taille et empreinte SHA-256. Un poste peut vérifier ou récupérer un document même si le dossier local du poste producteur est absent. Les copies locales du 6 novembre restent conservées et importables ; leur import crée un brouillon sans inventer une validation historique.
 
 Chaque mois possède une numérotation centrale indépendante. Deux postes créant simultanément une version obtiennent deux numéros distincts. Réimporter la même version est idempotent ; le même identifiant avec un contenu différent est refusé.

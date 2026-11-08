@@ -30,6 +30,22 @@ class DetachesConfigService:
 
         return load_config_model(self._settings, KEY_DETACHES, default_factory=_factory)
 
+    def load_for_export(self) -> DetachesFileConfig:
+        """Read optional presentation settings without initialization or writes.
+
+        A legacy database may not have shared settings yet. Its absent layout
+        uses an in-memory default; an unreadable existing configuration remains
+        an error rather than silently changing the exported presentation.
+        """
+        from sme_gend.repositories.app_config_repository import AppConfigRepository
+        from sme_gend.services.app_config_store import KEY_DETACHES
+        from sme_gend.services.shared_config_write import load_shared_payload
+
+        if not AppConfigRepository(self._settings).table_exists('app_config'):
+            return DetachesFileConfig()
+        raw = load_shared_payload(self._settings, KEY_DETACHES)
+        return DetachesFileConfig.from_dict(raw) if raw is not None else DetachesFileConfig()
+
     def save(self, cfg: DetachesFileConfig) -> None:
         from sme_gend.services.app_config_store import KEY_DETACHES, save_config_model
 

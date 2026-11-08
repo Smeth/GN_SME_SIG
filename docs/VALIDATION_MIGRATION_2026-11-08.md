@@ -1,5 +1,15 @@
 # Vérification du lot de migration — 8 novembre 2026
 
+## Export courant simplifié
+
+Le parcours « Situation numérique → Exporter le classeur Excel complet » demande uniquement le mois puis le fichier de destination. Il remplit le modèle officiel `SME_GEND_model.xlsx` avec les états du mois : liste générale, présents, missions, stages, malades, autres indisponibilités, mouvements et détachés. Toutes les feuilles du modèle, y compris celles masquées, conservent leur ordre et leur état. Les formules, résultats mis en cache, fusions et paramètres d’impression suivent le moteur fidèle existant.
+
+Cet export ne demande ni registre, ni validation, ni clôture, ni migration 0001–0003. Le droit `effectifs.export` suffit. La lecture des données utilise une transaction MySQL cohérente et ne rafraîchit pas les projections. Le modèle est lu une seule fois et le fichier final est remplacé atomiquement après la génération complète. Un échec avant cette fin préserve le fichier précédent. Le journal standard du document reste enregistré après sauvegarde ; un échec de journal produit un avertissement avec un fichier utilisable, sans inviter à régénérer.
+
+L’ancien export avec version centrale reste accessible explicitement au niveau service sous `export_numerique_publication`. Il conserve ses droits, migrations et tests propres ; ce circuit ne bloque plus l’export courant et son bouton a été retiré de Situation numérique. Aucun schéma, document archivé ou historique existant n’a été supprimé.
+
+Validation de cette simplification : **2 778 tests hors intégration uniques réussis**, sans échec, erreur ni test ignoré, après comparaison des inventaires des lots. **8 tests MySQL ciblés réussis** : configuration en lecture seule (4), export complet sans migrations avec le seul droit d’export (1), instantané concurrent et maintien de l’export avancé (3). Le classeur produit contient les 17 feuilles du modèle réel ; les essais couvrent aussi les feuilles masquées/très masquées, toutes les catégories, les détails et totaux, les droits et les erreurs de capture, de rendu et de journal. L’instance jetable a été arrêtée après contrôle du dossier et des transactions. Aucune base réelle modifiée et aucun exécutable généré.
+
 Version de développement : `0.2.0.dev1`. Branche : `migration/cycle-publications-2026-11-08`.
 
 Les essais ont utilisé des profils synthétiques distincts et une instance MySQL jetable sur le port 33329. Les fixtures contrôlent le port et le dossier de données avant de créer leurs bases temporaires ; elles refusent le port de production. L’instance a été arrêtée après vérification de son dossier et de l’absence de transaction active.

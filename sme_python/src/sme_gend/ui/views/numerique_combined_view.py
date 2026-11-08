@@ -88,8 +88,6 @@ class NumeriqueCombinedView(QWidget):
         btn_export = QPushButton("Exporter le classeur Excel complet…")
         self._btn_export = btn_export
         btn_export.clicked.connect(self._export)
-        self._btn_publications = QPushButton("Versions et validations SME…")
-        self._btn_publications.clicked.connect(self._open_publications)
         self._btn_period_report = QPushButton("Mouvements sur une période…")
         self._btn_period_report.clicked.connect(self._open_period_report)
 
@@ -103,7 +101,6 @@ class NumeriqueCombinedView(QWidget):
         top.addWidget(self._export_banner)
         bar = QHBoxLayout()
         bar.addWidget(btn_export)
-        bar.addWidget(self._btn_publications)
         bar.addWidget(self._btn_period_report)
         bar.addStretch()
         top.addLayout(bar)
@@ -144,17 +141,10 @@ class NumeriqueCombinedView(QWidget):
 
     def on_page_activated(self) -> None:
         from sme_gend.services.auth_guard import session_has_permission
-        self._btn_publications.setEnabled(session_has_permission("publications.view"))
-        self._btn_export.setEnabled(session_has_permission("effectifs.export") and session_has_permission("publications.create"))
+        self._btn_export.setEnabled(session_has_permission("effectifs.export"))
         self._btn_period_report.setEnabled(session_has_permission("situation.numerique") and session_has_permission("effectifs.export"))
         if not self._loaded:
             self._refresh_all_previews(silent=True)
-
-    def _open_publications(self) -> None:
-        from sme_gend.config.liste_generale_scope import resolve_export_mois
-        from sme_gend.ui.publication_registry_dialog import open_publication_registry
-        open_publication_registry(self, self._preview.liste_settings,
-                                  month=resolve_export_mois(self._preview.liste_settings))
 
     def _open_period_report(self) -> None:
         from sme_gend.ui.period_activity_dialog import open_period_activity_export
@@ -257,22 +247,41 @@ class NumeriqueCombinedView(QWidget):
     def _export(self) -> None:
         from sme_gend.services.auth_guard import require_permission
 
-        if not require_permission(self, "effectifs.export") or not require_permission(self, "publications.create"):
+        if not require_permission(self, "effectifs.export"):
             return
-        tpl = self._settings.template_numerique_path
+        settings = self._settings
+        data_settings = self._preview.liste_settings
+        movement_settings = self._preview.gain_perte_settings
+        def context_is_current():
+            return (self._settings == settings
+                    and self._preview.liste_settings == data_settings
+                    and self._preview.gain_perte_settings == movement_settings)
+        def confirm_context():
+            if context_is_current():
+                return True
+            QMessageBox.information(self, 'Export Excel',
+                'Le mois consulté ou la source de données a changé. Relancez l’export depuis le contexte courant.')
+            return False
+        tpl = settings.template_numerique_path
         if tpl is None or not tpl.is_file():
             QMessageBox.warning(
                 self, "Gabarit manquant",
-                "Indiquez le fichier « numerique.xlsx » (Fichier → Chemins…) ou "
-                f"placez-le dans le dossier modeles/ à côté de l'application.\n\n"
+                "Indiquez le modèle « SME_GEND_model.xlsx » dans Paramètres & données → Modèles Excel, "
+                "ou placez-le à la racine du projet ou dans le dossier modeles/ de l’application.\n\n"
                 f"{user_paths_config_file_hint()}",
             )
             return
 
-        dlg = NumeriqueExportDialog(self._preview.liste_settings, self)
+        dlg = NumeriqueExportDialog(data_settings, self)
         if dlg.exec() != NumeriqueExportDialog.DialogCode.Accepted:
             return
-        export_mois = dlg.chosen_export_mois()
+        if not require_permission(self, 'effectifs.export') or not confirm_context():
+            return
+        from sme_gend.services.sme_month_closure import canonical_sme_mois_yyyy_mm
+        export_mois = canonical_sme_mois_yyyy_mm(dlg.chosen_export_mois() or '')
+        if not export_mois:
+            QMessageBox.warning(self, 'Mois SME', 'Choisissez un mois SME avant de générer le classeur.')
+            return
         mois_slug = (export_mois or "export").replace("-", "_")
         default_name = f"Situation_numerique_{mois_slug}.xlsx"
 
@@ -283,26 +292,31 @@ class NumeriqueCombinedView(QWidget):
         )
         if not dest:
             return
+        if not require_permission(self, 'effectifs.export') or not confirm_context():
+            return
+        if not dest.lower().endswith('.xlsx'):
+            dest += '.xlsx'
         if not confirm_overwrite_file(self, dest):
+            return
+        if not require_permission(self, 'effectifs.export') or not confirm_context():
             return
         dest_p = Path(dest)
 
         def _work():
             return export_numerique_workbook(
-                self._preview.liste_settings,
+                data_settings,
                 tpl,
                 dest_p,
                 export_mois=export_mois,
-                gain_perte_settings=self._preview.gain_perte_settings,
+                gain_perte_settings=movement_settings,
             )
-        revision = run_with_progress(self, "Export Excel", "Génération du classeur…", _work)
-        if revision is None:
+        result = run_with_progress(self, "Export Excel", "Génération du classeur…", _work)
+        if result is None:
             return
-        month_lbl = month_title_de_lowercase(export_mois) or export_mois or "—"
-        receipt = (f"Fichier enregistré :\n{dest}\n\nMois SME : {month_lbl}"
-                   f"\nVersion : {revision.revision_id}\nDossier conservé : {revision.folder}")
-        if revision.journal_warning:
+        month_lbl = month_title_de_lowercase(result.month) or result.month or "—"
+        receipt = f"Fichier enregistré :\n{result.path}\n\nMois SME : {month_lbl}"
+        if result.journal_warning:
             QMessageBox.warning(self, "Export enregistré — historique à vérifier",
-                                receipt + "\n\n" + revision.journal_warning)
+                                receipt + "\n\n" + result.journal_warning)
         else:
             QMessageBox.information(self, "Export enregistré", receipt)

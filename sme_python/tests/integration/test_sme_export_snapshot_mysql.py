@@ -86,7 +86,7 @@ def test_capture_ignores_ui_cache_and_does_not_mix_two_instants(isolated_mysql, 
 
 
 def test_export_retains_model_provenance_snapshot_exact_file_and_journal(isolated_mysql, monkeypatch, tmp_path):
-    from sme_gend.services.numerique_excel_export import export_numerique_workbook
+    from sme_gend.services.numerique_excel_export import export_numerique_publication
     from sme_gend.services.sme_export_revision import read_export_dataset
     settings, connect, params = seed(isolated_mysql)
     from test_publication_registry_mysql import install_registry
@@ -96,7 +96,7 @@ def test_export_retains_model_provenance_snapshot_exact_file_and_journal(isolate
     # Any old Access configured for import remains untouched.
     settings.database_path.write_bytes(b"ARCHIVE ACCESS ORIGINALE")
     dest = tmp_path / "sme.xlsx"
-    revision = export_numerique_workbook(settings, template, dest, export_mois="2026-11")
+    revision = export_numerique_publication(settings, template, dest, export_mois="2026-11")
     assert dest.read_bytes() == revision.workbook.read_bytes()
     assert (revision.folder / "modele.xlsx").read_bytes() == template.read_bytes()
     assert settings.database_path.read_bytes() == b"ARCHIVE ACCESS ORIGINALE"

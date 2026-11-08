@@ -1,8 +1,9 @@
-"""Export classeur situation numérique : gabarit Excel rempli depuis Access (liste + matrices)."""
+"""Export du classeur situation numérique depuis les données mensuelles MySQL."""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -1422,7 +1423,8 @@ def fill_indispo_sheet(
         write_cell_value(ws, INDISPO_TOTAL_ROW, c, t)
 
 
-def _capture_numerique_workbook_data(settings, mois, grade_order, movement_settings, *, join_transaction=False):
+def _capture_numerique_workbook_data(settings, mois, grade_order, movement_settings, *, join_transaction=False,
+                                     include_revision=True):
     """All report inputs share one fresh MySQL snapshot, never the UI cache."""
     from datetime import timezone
     from sme_gend.repositories.mysql_connection import mysql_read_snapshot
@@ -1468,10 +1470,12 @@ def _capture_numerique_workbook_data(settings, mois, grade_order, movement_setti
             "details": export_details(NumeriqueSatelliteRepository(settings)),
             "detaches": sorted((row for row in rows if in_detaches_scope(row)), key=_sort_key_detaches),
             "previous_counts": previous, "movements": _movements(movement_settings, mois, rows),
-            "detaches_config": DetachesConfigService(settings).load().to_dict(),
+            "detaches_config": DetachesConfigService(settings).load_for_export().to_dict(),
         }
-        from sme_gend.services.data_sync import read_data_revision
-        captured_revision = read_data_revision(settings)
+        captured_revision = None
+        if include_revision:
+            from sme_gend.services.data_sync import read_data_revision
+            captured_revision = read_data_revision(settings)
     source = {
         "kind": "mysql_monthly_snapshot", "database": database, "server": server,
         "captured_at_utc": captured.replace(tzinfo=timezone.utc).isoformat(),
@@ -1499,6 +1503,92 @@ def _capture_publication_inputs(settings, mois, grade_order, movement_settings):
     return captured
 
 
+@dataclass(frozen=True, slots=True)
+class NumeriqueWorkbookExport:
+    path: Path
+    month: str
+    journal_warning: str = ""
+
+
+@tracked_export(steps=(
+    ('prepare', 'Vérifier le mois, les droits et le modèle SME'),
+    ('capture', 'Lire les effectifs et les mouvements du mois'),
+    ('render', 'Remplir toutes les feuilles du modèle SME'),
+    ('write', 'Enregistrer le classeur Excel'),
+    ('finalize', 'Journaliser le document'),
+))
+def export_numerique_workbook(
+    settings: Settings,
+    template_path: Path,
+    destination: Path,
+    *,
+    month_title: str | None = None,
+    mois_actif: str | None = None,
+    export_mois: str | None = None,
+    gain_perte_settings: Settings | None = None,
+) -> NumeriqueWorkbookExport:
+    """Fill the complete model for one month without publication prerequisites.
+
+    Source data is read from a consistent snapshot. Only the document journal
+    is written after the destination has been saved successfully.
+    """
+    from dataclasses import replace
+    from hashlib import sha256
+    from io import BytesIO
+    from sme_gend.repositories.mysql_connection import mysql_database_key, CommittedMirrorError
+    from sme_gend.models.detaches_file_config import DetachesFileConfig
+    from sme_gend.services.numerique_model_export import build_from_model
+    from sme_gend.services.doc_gen_log import log_doc_generation
+    from sme_gend.services.auth_guard import session_can_export_documents
+    from sme_gend.services.sme_export_revision import revision_root, validate_export_destination
+    from sme_gend.services.export_progress import export_phase
+
+    if not session_can_export_documents():
+        raise PermissionError("Le droit d'exporter les effectifs est nécessaire.")
+    tpl = Path(template_path)
+    if not tpl.is_file():
+        raise FileNotFoundError(f"Modèle SME introuvable :\n{tpl}")
+    # The UI supplies the chosen month. Do not initialise shared configuration
+    # or change the active session merely to generate a file.
+    chosen = export_mois or settings.mysql_view_mois or mois_actif
+    eff_mois = canonical_sme_mois_yyyy_mm(chosen or "")
+    if not eff_mois:
+        raise ValueError("Choisissez le mois SME avant l'export.")
+    data_settings = replace(settings, mysql_view_mois=eff_mois)
+    movement_settings = replace(gain_perte_settings, mysql_view_mois=eff_mois) if gain_perte_settings else data_settings
+    if mysql_database_key(movement_settings) != mysql_database_key(data_settings):
+        raise ValueError("Le classeur SME doit lire les effectifs et les mouvements dans la même base.")
+    dest = validate_export_destination(destination, template=tpl, root=revision_root(data_settings))
+    template_bytes = tpl.read_bytes()
+    model = load_workbook(BytesIO(template_bytes), read_only=True, data_only=True)
+    try:
+        grade_order = _parse_grade_columns(model["NUMERIQUE"])[0] if "NUMERIQUE" in model.sheetnames else []
+    finally:
+        model.close()
+    export_phase('capture', detail='Lecture cohérente des données du mois ' + eff_mois)
+    dataset, source = _capture_numerique_workbook_data(
+        data_settings, eff_mois, grade_order, movement_settings, include_revision=False)
+    values = dict(dataset)
+    values["detaches_config"] = DetachesFileConfig.from_dict(values["detaches_config"])
+    export_phase('render', detail=f'{len(dataset["rows"])} personnels ; feuilles visibles et masquées')
+    sheets = build_from_model(BytesIO(template_bytes), dest, **values)
+    export_phase('finalize', detail='Enregistrement dans l’historique des documents')
+    warning = ""
+    try:
+        log_doc_generation(settings=data_settings, doc_type="numerique", format="xlsx",
+                           count=len(dataset["rows"]), dest_path=str(dest), mois=eff_mois,
+                           meta={"export_mode": "direct", "template_sha256": sha256(template_bytes).hexdigest(),
+                                 "sheets": list(sheets), "captured_at_utc": source.get("captured_at_utc")})
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Export SME enregistré ; journal à vérifier.", exc_info=True)
+        warning = ("Historique confirmé dans MySQL ; sa copie locale reste à vérifier."
+                   if isinstance(exc, CommittedMirrorError) else
+                   "L'enregistrement dans l'historique central n'a pas pu être confirmé.")
+        warning += " Le fichier Excel est enregistré et utilisable ; aucune nouvelle génération n'est nécessaire."
+    return NumeriqueWorkbookExport(path=dest, month=eff_mois, journal_warning=warning)
+
+
 @tracked_export(steps=(
     ('prepare', 'Vérifier le mois, les droits et le modèle SME'),
     ('capture', 'Lire les effectifs et les mouvements du mois'),
@@ -1507,7 +1597,7 @@ def _capture_publication_inputs(settings, mois, grade_order, movement_settings):
     ('write', 'Copier le classeur vers le fichier choisi'),
     ('finalize', 'Journaliser et confirmer le document'),
 ))
-def export_numerique_workbook(
+def export_numerique_publication(
     settings: Settings,
     template_path: Path,
     destination: Path,

@@ -50,30 +50,34 @@ def test_settings_for_chosen_export_mois_overrides_view() -> None:
 
 
 def test_export_numerique_workbook_uses_chosen_mois(monkeypatch, tmp_path: Path) -> None:
-    from types import SimpleNamespace
-    monkeypatch.setattr("sme_gend.services.schema_migrations.require_capability", lambda *a: None)
+    def forbidden(*a, **kw):
+        pytest.fail("L'export direct ne doit exiger ni migration ni publication.")
+    monkeypatch.setattr("sme_gend.services.schema_migrations.require_capability", forbidden)
     monkeypatch.setattr("sme_gend.services.sme_publication_registry.register_export",
-                        lambda *a: SimpleNamespace(id=1, revision_no=1, status="brouillon", operation_warning=""))
+                        forbidden)
     from sme_gend.services import numerique_excel_export as export
     from sme_gend.models.detaches_file_config import DetachesFileConfig
     tpl = Path(__file__).resolve().parents[2] / "SME_GEND_model.xlsx"
     seen_mois = []
-    def capture(settings, mois, grade_order, movement_settings):
+    def capture(settings, mois, grade_order, movement_settings, *, include_revision):
+        assert include_revision is False
         seen_mois.append((settings.mysql_view_mois, mois, movement_settings.mysql_view_mois))
         return {"mois": mois, "rows": [], "grades": [], "details": {
             key: {} for key in ("missions", "malades", "deserteurs", "stages_loc", "stages_ex",
                                 "stages_internal", "conges", "conges_by_type", "positions")},
             "detaches": [], "previous_counts": [None] * 10, "movements": [],
             "detaches_config": DetachesFileConfig().to_dict()}, {"captured_at_utc": "2026-11-06T10:00:00+00:00"}
-    monkeypatch.setattr(export, "_capture_publication_inputs", capture)
+    monkeypatch.setattr(export, "_capture_numerique_workbook_data", capture)
+    monkeypatch.setattr(export, "_capture_publication_inputs", forbidden)
     monkeypatch.setattr("sme_gend.services.sme_export_revision.revision_root", lambda settings: tmp_path / "revisions")
     logs = []
     monkeypatch.setattr("sme_gend.services.doc_gen_log.log_doc_generation", lambda **kw: logs.append(kw))
     dest = tmp_path / "out.xlsx"
-    revision = export_numerique_workbook(_settings(), tpl, dest, export_mois="2025-06", mois_actif="2026-04")
+    result = export_numerique_workbook(_settings(), tpl, dest, export_mois="2025-06", mois_actif="2026-04")
     assert seen_mois == [("2025-06", "2025-06", "2025-06")]
-    assert dest.read_bytes() == revision.workbook.read_bytes()
-    assert logs[0]["meta"]["revision_id"] == revision.revision_id
+    assert result.path == dest and result.month == "2025-06"
+    assert not (tmp_path / "revisions").exists()
+    assert logs[0]["meta"]["export_mode"] == "direct"
     assert logs[0]["mois"] == "2025-06"
     wb = load_workbook(dest)
     original = load_workbook(tpl)

@@ -176,7 +176,7 @@ def test_saved_file_and_revision_return_a_warning_when_history_fails(tmp_path, m
         raise DocumentJournalError("history not confirmed")
     monkeypatch.setattr("sme_gend.services.doc_gen_log.log_doc_generation", fail)
     dest = tmp_path / "result.xlsx"
-    revision = export.export_numerique_workbook(Settings(database_path=tmp_path / "unused.mdb"),
+    revision = export.export_numerique_publication(Settings(database_path=tmp_path / "unused.mdb"),
                                                template, dest, export_mois="2026-11")
     assert revision.journal_warning
     assert "aucune nouvelle génération" in revision.journal_warning
@@ -210,11 +210,11 @@ def test_history_retrieval_checks_central_receipt_and_copies_exact_file(tmp_path
 
 @pytest.mark.parametrize("warning", ["", "Historique non confirmé ; fichier conservé."])
 def test_export_screen_shows_receipt_and_distinguishes_journal_warning(tmp_path, monkeypatch, warning):
-    from dataclasses import replace
     from PySide6.QtWidgets import QDialog
     from sme_gend.config.settings import Settings
+    from sme_gend.services.numerique_excel_export import NumeriqueWorkbookExport
     from sme_gend.ui.views import numerique_combined_view as ui
-    revision = replace(save(tmp_path / "history"), journal_warning=warning)
+    result = NumeriqueWorkbookExport(tmp_path / "selected.xlsx", "2026-11", warning)
     template = tmp_path / "template.xlsx"
     template.write_bytes(b"model")
     settings = Settings(database_path=tmp_path / "unused", template_numerique_path=template)
@@ -229,7 +229,7 @@ def test_export_screen_shows_receipt_and_distinguishes_journal_warning(tmp_path,
     monkeypatch.setattr("sme_gend.services.auth_guard.require_permission", lambda *a, **kw: True)
     monkeypatch.setattr(ui, "confirm_overwrite_file", lambda *a: True)
     monkeypatch.setattr(ui.QFileDialog, "getSaveFileName", lambda *a: (str(tmp_path / "selected.xlsx"), ""))
-    monkeypatch.setattr(ui, "export_numerique_workbook", lambda *a, **kw: revision)
+    monkeypatch.setattr(ui, "export_numerique_workbook", lambda *a, **kw: result)
     monkeypatch.setattr(ui, "run_with_progress", lambda parent, title, label, work: work())
     messages = []
     monkeypatch.setattr(ui.QMessageBox, "information", lambda *a: messages.append(("info", a[-1])))
@@ -238,4 +238,5 @@ def test_export_screen_shows_receipt_and_distinguishes_journal_warning(tmp_path,
     assert len(messages) == 1
     kind, message = messages[0]
     assert kind == ("warning" if warning else "info")
-    assert revision.revision_id in message and str(revision.folder) in message
+    assert str(result.path) in message and "novembre 2026" in message.casefold()
+    assert "version" not in message.casefold()

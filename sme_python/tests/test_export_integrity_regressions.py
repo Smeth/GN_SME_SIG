@@ -71,23 +71,21 @@ def scenario(monkeypatch):
 
 
 def test_complete_sme_has_selected_period_details_and_no_template_records(monkeypatch, tmp_path):
-    monkeypatch.setattr("sme_gend.services.schema_migrations.require_capability", lambda *a: None)
-    monkeypatch.setattr("sme_gend.services.sme_publication_registry.register_export",
-                        lambda *a: SimpleNamespace(id=1, revision_no=1, status="brouillon", operation_warning=""))
     from sme_gend.services.numerique_excel_export import export_numerique_workbook
     settings, rows, detail = scenario(monkeypatch)
     from sme_gend.models.detaches_file_config import DetachesFileConfig
     from sme_gend.services import numerique_excel_export as export
-    def capture(st, mois, grade_order, movement_settings):
+    def capture(st, mois, grade_order, movement_settings, *, include_revision):
+        assert include_revision is False
         assert mois == st.mysql_view_mois == "2026-09"
         return {"mois": mois, "rows": rows, "grades": [], "details": detail,
                 "detaches": [rows[5]], "previous_counts": [0] * 10, "movements": [],
                 "detaches_config": DetachesFileConfig().to_dict()}, {"captured_at_utc": "2026-11-06T10:00:00+00:00"}
-    monkeypatch.setattr(export, "_capture_publication_inputs", capture)
+    monkeypatch.setattr(export, "_capture_numerique_workbook_data", capture)
     monkeypatch.setattr("sme_gend.services.sme_export_revision.revision_root", lambda st: tmp_path / "revisions")
     target = tmp_path / "SME.xlsx"
     template = Path(__file__).resolve().parents[2] / "SME_GEND_model.xlsx"
-    revision = export_numerique_workbook(settings, template, target, export_mois="2026-09", mois_actif="2026-02")
+    result = export_numerique_workbook(settings, template, target, export_mois="2026-09", mois_actif="2026-02")
     wb = load_workbook(target)
     cached = load_workbook(target, data_only=True)
     original = load_workbook(template)
@@ -101,7 +99,7 @@ def test_complete_sme_has_selected_period_details_and_no_template_records(monkey
         assert cached["NUMERIQUE"]["T8"].value == len(rows)
         assert wb.sheetnames == original.sheetnames
         assert wb["NUMERIQUE"]["B8"].data_type == "f"
-        assert target.read_bytes() == revision.workbook.read_bytes()
+        assert result.path == target and result.month == "2026-09"
     finally:
         wb.close()
         cached.close()
