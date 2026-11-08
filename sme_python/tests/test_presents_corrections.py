@@ -54,10 +54,10 @@ def snapshot(tmp_path):
     from test_liste_present_populate import _row
     settings = Settings(database_path=tmp_path/'unused.mdb', mysql_view_mois='2026-09')
     rows = [_row(id=str(n), nom=f'UNIQUE AGENT {n}') for n in range(3)]
-    rows[0].position_admin = ''
+    rows[0].position_admin = 'Présent au corps'
     rows[1].position_admin = 'Présent'; rows[2].position_admin = 'Présent'
     return PresentsExportSnapshot(settings, mysql_database_key(settings), '', 'present', config(),
-        [('TITLE', '', 'A', [('UNIT', rows)])], [], [], '2026-09', PresentsAnomalies(positions_vides=[rows[0]]))
+        [('TITLE', '', 'A', [('UNIT', rows)])], [], [], '2026-09', PresentsAnomalies())
 
 
 def test_detailed_export_renders_all_snapshot_rows_without_database_read(tmp_path):
@@ -70,10 +70,10 @@ def test_detailed_export_renders_all_snapshot_rows_without_database_read(tmp_pat
     assert 'Aperçu synthétique' in summary
     assert 'Aperçu synthétique' not in full
     assert all(f'UNIQUE AGENT {n}' in full for n in range(3))
-    assert 'position(s) administrative(s) vide(s)' in full and 'pointage quotidien' in full
+    assert 'positions vides' in full and 'sont exclues' in full and 'pointage quotidien' in full
 
 
-def test_excel_keeps_warning_and_logs_persons_and_ids(tmp_path, monkeypatch):
+def test_excel_keeps_strict_presence_rule_and_logs_persons_and_ids(tmp_path, monkeypatch):
     from sme_gend.services.liste_present_service import ListePresentService
     from openpyxl import load_workbook
     snap = snapshot(tmp_path)
@@ -83,7 +83,8 @@ def test_excel_keeps_warning_and_logs_persons_and_ids(tmp_path, monkeypatch):
     dest = tmp_path/'presents.xlsx'; service.export_excel(dest, snapshot=snap)
     with closing(load_workbook(dest)) as workbook:
         checks = workbook['Contrôles de présence']
-        assert checks['A4'].value == '0' and checks['B4'].value == 'UNIQUE AGENT 0'
+        assert 'positions vides' in checks['A2'].value and 'exclues' in checks['A2'].value
+        assert checks.max_row==3
     assert traces[0]['count'] == 3 and len(traces[0]['persons']) == 3
     assert traces[0]['meta']['personnel_ids'] == ['0', '1', '2']
 

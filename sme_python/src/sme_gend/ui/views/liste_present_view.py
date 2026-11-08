@@ -58,7 +58,8 @@ from sme_gend.ui.theme import apply_paper_preview_palette, status_semantic_color
 # ─── Zoom steps ────────────────────────────────────────────────────────────────
 _ZOOM_STEPS = [0.5, 0.67, 0.75, 0.80, 0.90, 1.0, 1.10, 1.25, 1.50, 1.75, 2.0, 2.50, 3.0]
 
-# Mode fixe : cette vue ne gère que les présents (Padmin « compte comme présent »).
+# Mode fixe : position administrative explicitement Présent, indépendamment
+# des autres positions configurées comme présence au corps dans la SME.
 _PRESENCES_MODE = "present"
 
 
@@ -699,12 +700,8 @@ class _QuickEditPanel(QWidget):
         labels = self._sub_labels_from_list()
         if not sec or len(labels) < 2:
             return
-        counts: dict[str, int] = {}
         try:
-            for lbl in labels:
-                counts[lbl] = self._svc.count_subarme_occurrences(
-                    lbl, sec.structure_code
-                )
+            counts = self._svc.present_counts_by_subdivision(sec.structure_code, labels)
         except Exception as exc:
             QMessageBox.warning(self, "Effectifs", str(exc))
             return
@@ -1075,7 +1072,7 @@ class ListePresentView(QWidget):
         self._btn_refresh.setObjectName("listePresentRefreshBtn")
         self._btn_refresh.setDefault(True)
         self._btn_refresh.setToolTip(
-            "Génère et affiche la liste des présents depuis la base (F5). "
+            "Affiche uniquement les agents dont la position administrative est Présent (F5). "
             "À utiliser après ouverture de l'écran ou changement de mois."
         )
         self._btn_refresh.clicked.connect(self._do_refresh)
@@ -1585,7 +1582,7 @@ class ListePresentView(QWidget):
             return
         try:
             self._service.validate_snapshot(snapshot, search_filter=snapshot.search,
-                                            presences_mode=snapshot.presence)
+                                            presences_mode=_PRESENCES_MODE)
             html_content = run_with_progress(
                 self, "PDF détaillé", "Préparation de la liste complète…",
                 lambda: self._service.render_snapshot_html(snapshot, detailed=True, for_print=True))
@@ -1597,7 +1594,7 @@ class ListePresentView(QWidget):
                 QMessageBox.information(self, 'PDF', 'Le contexte a changé. Actualisez la liste avant de l’exporter.')
                 return
             self._service.validate_snapshot(snapshot, search_filter=snapshot.search,
-                                            presences_mode=snapshot.presence)
+                                            presences_mode=_PRESENCES_MODE)
             doc = QTextDocument()
             doc.setHtml(html_content)
             from sme_gend.services.liste_generale_print import sync_document_to_printer

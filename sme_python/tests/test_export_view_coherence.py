@@ -150,7 +150,7 @@ def test_present_export_uses_preview_snapshot_without_any_source_reread(tmp_path
     layout=ListeLayoutConfig();service._layout_config=SimpleNamespace(load=lambda **kw:layout)
     from contextlib import nullcontext
     monkeypatch.setattr(mod,'mysql_read_snapshot',lambda settings:nullcontext())
-    row=person(noms='ORIGINAL PREVIEW')
+    row=person(noms='ORIGINAL PREVIEW',position_admin='Présent')
     service._fetch_all_data=lambda **kw:SimpleNamespace(flat=[],st_idx={},presents=[row],rows_all=[row])
     service.build_sections_data=lambda *a,**kw:[('SYN TITLE','','SYN',[('SYN UNIT',[row])])]
     service.collect_anomalies=lambda *a,**kw:mod.PresentsAnomalies()

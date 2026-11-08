@@ -158,15 +158,25 @@ class LayoutConfigService:
         return {s.code: (s.designation or s.code) for s in self._structures.fetch_all()}
 
     def present_counts_by_structure(self) -> dict[str, int]:
-        """Nombre de présents par code structure (pour affichage dans l'éditeur de mise en page)."""
+        """Compteurs de la liste : position Présent explicite, pour le mois affiché."""
         from sme_gend.config.liste_generale_scope import resolve_export_mois
         counts: dict[str, int] = {}
         for r in self._liste_generale.fetch_for_presence_mode(
-                'present', mois_ym=resolve_export_mois(self._settings)):
+                'present_strict', mois_ym=resolve_export_mois(self._settings)):
             code = (r.structure or "").strip()
             if code:
                 counts[code] = counts.get(code, 0) + 1
         return counts
+
+    def present_counts_by_subdivision(self, structure_code: str, labels: list[str]) -> dict[str, int]:
+        """One monthly strict read; use the document's subdivision matching rules."""
+        from sme_gend.config.liste_generale_scope import resolve_export_mois
+        from sme_gend.services.liste_present_populate import find_people, group_personnel, person_key
+        rows = self._liste_generale.fetch_for_presence_mode(
+            'present_strict', mois_ym=resolve_export_mois(self._settings))
+        groups = group_personnel(rows)
+        return {label: len({person_key(person) for person in find_people(groups, structure_code, label)})
+                for label in labels}
 
     def count_subarme_occurrences(
         self, subarme: str, structure_code: str | None = None

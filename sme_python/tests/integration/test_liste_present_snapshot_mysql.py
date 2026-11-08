@@ -95,3 +95,32 @@ def test_export_of_preview_keeps_captured_rows_after_later_database_edits(isolat
         assert 'AGENT INITIAL' in values and 'APRES APERCU' not in values
         assert '2026-11' in book.worksheets[0].oddHeader.center.text
     finally:book.close()
+
+
+def test_module_never_includes_empty_unknown_stage_or_custom_present_flags(isolated_mysql,monkeypatch,tmp_path):
+    from sme_gend.services.liste_present_service import ListePresentService
+    from sme_gend.services.layout_config_service import LayoutConfigService
+    settings,connect,params,_,_=seed(isolated_mysql)
+    labels=['Présent au corps',' PRESENT ',None,'','À vérifier','Mission','StageInterne',
+        'Malade','CongéAdmin','Détaché','Service spécial','Présent exceptionnel']
+    with connect(**params) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("INSERT INTO ref_position_admin(libelle,compte_comme_present) VALUES"
+                "('Service spécial',1),('Présent exceptionnel',1)")
+            for aid,label in enumerate(labels,2):
+                cursor.execute('INSERT INTO agent(id,legacy_access_id,noms) VALUES(%s,%s,%s)',
+                    (aid,f'SYNTHETIC_ID_{aid}',f'SYNTHETIC {aid:03}'))
+                cursor.execute("INSERT INTO carriere_situation(agent_id,sme_periode_id,structure_code,"
+                    "position_admin_libelle,date_debut,date_fin) VALUES(%s,1,'PRESENT_TEST',%s,'2026-11-01','2026-11-30')",(aid,label))
+    service=ListePresentService(settings,LayoutConfigService(settings))
+    snapshots=[];html=service.build_preview_html(on_snapshot=snapshots.append)
+    assert 'AGENT INITIAL' in html and 'SYNTHETIC 002' in html and 'SYNTHETIC 003' in html
+    assert all(f'SYNTHETIC {aid:03}' not in html for aid in range(4,len(labels)+2))
+    monkeypatch.setattr('sme_gend.services.doc_gen_log.log_doc_generation',lambda **kw:None)
+    destination=tmp_path/'strict.xlsx';service.export_excel(destination,snapshot=snapshots[0])
+    book=load_workbook(destination,data_only=True)
+    try:
+        names=[row[2] for row in book.worksheets[0].values if len(row)>2]
+        assert 'AGENT INITIAL' in names and 'SYNTHETIC 002' in names and 'SYNTHETIC 003' in names
+        assert all(f'SYNTHETIC {aid:03}' not in names for aid in range(4,len(labels)+2))
+    finally:book.close()

@@ -32,6 +32,7 @@ def synthetic_service(monkeypatch,tmp_path):
         return cfg
     service._layout_config=SimpleNamespace(load=load,resolve_subdivision_order_labels=lambda sec:None)
     def fetch(mode,*,mois_ym):
+        assert mode=='present_strict'
         assert mois_ym=='2026-11'
         month[0]='2026-12'  # A different month is activated during the read.
         return [_row(id='1',nom='SYNTHETIC',structure='SYN',sub='UNIT')]
@@ -78,3 +79,53 @@ def test_reference_read_failure_never_returns_an_incomplete_snapshot(monkeypatch
     with pytest.raises(OSError,match='SYNTHETIC GRADE'):
         service.build_preview_html(on_snapshot=captured.append)
     assert not captured
+
+
+def test_capture_preview_and_excel_keep_only_explicit_present_positions(monkeypatch,tmp_path):
+    from openpyxl import load_workbook
+    service,_=synthetic_service(monkeypatch,tmp_path)
+    service._settings=replace(service._settings,mysql_view_mois='2026-11')
+    labels=['Présent',' PRESENT ','présent au corps',None,'','À vérifier','StageInterne',
+        'Mission','Malade','CongéAdmin','Détaché','Service spécial','Agent présent spécial']
+    people=[]
+    for index,label in enumerate(labels):
+        person=_row(id=str(index),nom=f'SYNTHETIC {index:03}',structure='SYN',sub='UNIT')
+        person.position_admin=label;people.append(person)
+    service._liste.fetch_for_presence_mode=lambda mode,**kw:people
+    snap=service.capture_snapshot()
+    displayed=[row for _,_,_,blocks in snap.sections for _,rows in blocks for row in rows]
+    assert [row.id for row in displayed]==['0','1','2']
+    html=service.render_snapshot_html(snap,detailed=True)
+    assert all(person.noms in html for person in people[:3])
+    assert all(person.noms not in html for person in people[3:])
+    traces=[]
+    monkeypatch.setattr('sme_gend.services.doc_gen_log.log_doc_generation',lambda **kw:traces.append(kw))
+    destination=tmp_path/'explicit.xlsx';service.export_excel(destination,snapshot=snap)
+    book=load_workbook(destination,data_only=True)
+    try:
+        values=[str(value) for row in book.worksheets[0].values for value in row if value is not None]
+        assert all(person.noms in values for person in people[:3])
+        assert all(person.noms not in values for person in people[3:])
+    finally:book.close()
+    assert traces[0]['count']==3
+
+
+@pytest.mark.parametrize('label',[None,'','À vérifier','Mission','StageInterne','Service spécial','Présent exceptionnel'])
+def test_old_or_injected_nonpresent_snapshot_cannot_be_rendered_or_exported(tmp_path,label):
+    snap=snapshot(tmp_path)
+    snap.sections[0][3][0][1][0].position_admin=label
+    service=module.ListePresentService.__new__(module.ListePresentService)
+    service._settings=snap.settings
+    with pytest.raises(ValueError,match='Actualisez'):
+        service.render_snapshot_html(snap,detailed=True)
+    destination=tmp_path/'keep.xlsx';destination.write_bytes(b'UNCHANGED')
+    with pytest.raises(ValueError,match='Actualisez'):
+        service.export_excel(destination,snapshot=snap)
+    assert destination.read_bytes()==b'UNCHANGED'
+
+
+@pytest.mark.parametrize('mode',['stage_interne','les_deux'])
+def test_module_refuses_other_presence_modes_before_reading_data(tmp_path,mode):
+    service=module.ListePresentService.__new__(module.ListePresentService)
+    with pytest.raises(ValueError,match='uniquement'):
+        service.capture_snapshot(presences_mode=mode)

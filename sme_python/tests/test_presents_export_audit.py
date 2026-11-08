@@ -114,14 +114,28 @@ def test_faithful_excel_keeps_template_print_setup_but_uses_generated_area(tmp_p
         output.close()
 
 
-def test_layout_counts_use_the_monthly_reference_aware_presence_query(tmp_path):
+def test_layout_counts_use_the_monthly_strict_presence_query(tmp_path):
     service=LayoutConfigService.__new__(LayoutConfigService)
     service._settings=Settings(database_path=tmp_path/'unused',mysql_view_mois='2026-09')
     rows=[_row(id='1',structure=' U1 '),_row(id='2',structure='U1'),_row(id='3',structure='')]
-    rows[0].position_admin='Activité au corps'  # A custom label marked present in the reference.
+    rows[0].position_admin='Présent au corps'
     repository=Mock()
     repository.fetch_for_presence_mode.return_value=rows
     service._liste_generale=repository
     assert service.present_counts_by_structure()=={'U1':2}
-    repository.fetch_for_presence_mode.assert_called_once_with('present',mois_ym='2026-09')
+    repository.fetch_for_presence_mode.assert_called_once_with('present_strict',mois_ym='2026-09')
+    repository.fetch_all.assert_not_called()
+
+
+def test_layout_subdivision_counts_use_strict_month_query_and_rg_aliases_once(tmp_path):
+    service=LayoutConfigService.__new__(LayoutConfigService)
+    service._settings=Settings(database_path=tmp_path/'unused',mysql_view_mois='2026-09')
+    row=_row(id='1',structure='RG-BZV',sub='COMMANDEMENT')
+    rows=[row,replace(row),_row(id='2',structure='RG-BZV',sub='DETACHEMENT ONU'),
+          _row(id='3',structure='OTHER',sub='COMMANDEMENT')]
+    repository=Mock();repository.fetch_for_presence_mode.return_value=rows
+    service._liste_generale=repository
+    labels=['COMMANDEMENT RG-BZV','ONU','VIDE']
+    assert service.present_counts_by_subdivision('RG-BZV',labels)==dict(zip(labels,[1,1,0]))
+    repository.fetch_for_presence_mode.assert_called_once_with('present_strict',mois_ym='2026-09')
     repository.fetch_all.assert_not_called()

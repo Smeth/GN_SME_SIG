@@ -25,7 +25,7 @@ from sme_gend.services.excel_template_exporter import (
     export_simple_fallback,
 )
 from sme_gend.services.layout_config_service import LayoutConfigService
-from sme_gend.padmin_present import padmin_counts_as_present
+from sme_gend.padmin_present import is_explicit_present_position
 from sme_gend.services.resultat_format import (
     RESULTAT_DOCUMENT_TITLE,
     RESULTAT_HEADER_HTML,
@@ -184,10 +184,24 @@ class ListePresentService:
                 or snapshot.search != (search_filter or '').strip()
                 or snapshot.presence != presences_mode):
             raise ValueError("L’aperçu ne correspond plus à cette source, à ce mois ou à ces filtres. Actualisez-le.")
+        self._validate_present_people(snapshot)
+
+    @staticmethod
+    def _require_present_mode(mode):
+        if mode != 'present':
+            raise ValueError('La Liste des présents accepte uniquement la position Présent. Actualisez l’aperçu.')
+
+    @staticmethod
+    def _validate_present_people(snapshot):
+        ListePresentService._require_present_mode(snapshot.presence)
+        if any(not is_explicit_present_position(row.position_admin)
+               for _, _, _, blocks in snapshot.sections for _, people in blocks for row in people):
+            raise ValueError('L’aperçu contient des positions autres que Présent. Actualisez-le avant de l’exporter.')
 
     def capture_snapshot(self, search_filter=None, presences_mode='present', *, on_progress=None):
         """Capture rows, layout and references in one read-only database instant."""
         from sme_gend.config.liste_generale_scope import resolve_export_mois
+        self._require_present_mode(presences_mode)
         settings = self._settings
         month = resolve_export_mois(settings)
         pinned = replace(settings, mysql_view_mois=month)
@@ -237,7 +251,9 @@ class ListePresentService:
         """
         _call_progress(on_progress, 5)
         from sme_gend.config.liste_generale_scope import resolve_export_mois
-        presents = self._liste.fetch_for_presence_mode(presences_mode, mois_ym=resolve_export_mois(self._settings))
+        self._require_present_mode(presences_mode)
+        presents = self._liste.fetch_for_presence_mode('present_strict', mois_ym=resolve_export_mois(self._settings))
+        presents = [row for row in presents if is_explicit_present_position(row.position_admin)]
         _call_progress(on_progress, 38)
         needle = (search_filter or "").strip().lower()
         filtered = [r for r in presents if _row_matches(r, needle)] if needle else presents
@@ -345,6 +361,7 @@ class ListePresentService:
         Moteur : ``populate_liste`` (ALGORITHME_LISTE_PRESENTS.md) — matching RG,
         anti-doublons, CS-DPF fusionné, en-tête COMMANDEMENT sous compagnies RG.
         """
+        self._require_present_mode(presences_mode)
         if layout is None:
             layout = self._layout_config.load()
         if fetched is None:
@@ -358,6 +375,7 @@ class ListePresentService:
             if needle
             else fetched.presents
         )
+        rows = [row for row in rows if is_explicit_present_position(row.position_admin)]
 
         from sme_gend.services.liste_present_populate import populate_liste_sections
 
@@ -458,6 +476,7 @@ class ListePresentService:
     @tracked_export(steps=HTML_STEPS)
     def render_snapshot_html(self, snapshot, *, detailed=False, on_progress=None, for_print=False):
         """Render the captured personnel without reading the database again."""
+        self._validate_present_people(snapshot)
         sections, flat, grade_rows = snapshot.sections, snapshot.flat, snapshot.grades
         presences_mode = snapshot.presence
         anomalies = snapshot.anomalies or PresentsAnomalies()
@@ -693,13 +712,11 @@ class ListePresentService:
     @staticmethod
     def _presence_note(anomalies, *, month=None):
         import html
-        note = "Personnel compté présent selon la situation administrative du mois ; ce document ne constitue pas un pointage quotidien."
+        note = ('Personnel explicitement en position Présent ou Présent au corps pour le mois consulté. '
+                'Les positions vides, À vérifier et toutes les autres positions sont exclues. '
+                'Ce document ne constitue pas un pointage quotidien.')
         if month:
             note = f"Mois SME : {month}. " + note
-        if anomalies.positions_vides:
-            names = ", ".join(r.noms or str(r.id) for r in anomalies.positions_vides[:8])
-            extra = "…" if len(anomalies.positions_vides) > 8 else ""
-            note += f" ⚠ {len(anomalies.positions_vides)} position(s) administrative(s) vide(s), comptée(s) comme présence au corps : {names}{extra}."
         return "<p class='note'>" + html.escape(note) + "</p>"
 
     @tracked_export
@@ -766,15 +783,8 @@ class ListePresentService:
             checks = workbook.create_sheet("Contrôles de présence")
             checks.append([(f'Mois SME : {snapshot.month}. ' if snapshot.month else '')+
                 "Présence administrative du mois ; ce document ne constitue pas un pointage quotidien."])
-            checks.append(["Les positions administratives vides restent comptées comme présence au corps."])
+            checks.append(['Uniquement Présent / Présent au corps ; positions vides, À vérifier et autres positions exclues.'])
             checks.append(["N° carrière", "Nom", "Structure", "Avertissement"])
-            for _, _, _, blocks in sections:
-                for _, people in blocks:
-                    for row in people:
-                        if not (row.position_admin or "").strip():
-                            checks.append([str(row.id), row.noms or "", row.structure or "", "Position administrative vide — compté présent"])
-                            for cell in checks[checks.max_row]:
-                                cell.data_type = 's'
             checks.column_dimensions['A'].width = 24
             checks.column_dimensions['B'].width = 42
             checks.column_dimensions['C'].width = 24

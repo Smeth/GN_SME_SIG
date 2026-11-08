@@ -222,3 +222,10 @@ def padmin_counts_as_present(
     if mode == "present":
         return present
     return present or _is_stage_interne(padmin)
+
+
+def is_explicit_present_position(padmin: str | None) -> bool:
+    """Strict list-of-present rule, independent from legacy/reference flags."""
+    from sme_gend.services.position_codes import position_code
+
+    return position_code(padmin) == 'present'

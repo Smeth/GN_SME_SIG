@@ -122,13 +122,21 @@ def _norm_padmin_sql(column: str | None = None) -> str:
 
 
 def _padmin_where_clause(mode: str) -> tuple[str, tuple]:
-    """Same reference priority and text fallback as padmin_counts_as_present."""
+    """Presence modes, with an explicit-only option for Liste des présents."""
     from sme_gend.padmin_present import _non_present_exact_codes
 
-    norm = _norm_padmin_sql()
+    label = ("COALESCE(IF(c.position_admin_id IS NOT NULL, rpa.libelle, c.position_admin_libelle), '')"
+             if mode == 'present_strict' else None)
+    norm = _norm_padmin_sql(label)
     # Collapse pasted tabs/newlines/NBSP before trimming their replacement
     # spaces, just like Python's strip/split normalization.
     norm = f"TRIM(REGEXP_REPLACE({norm}, '[[:space:]]+', ' '))"
+    if mode == 'present_strict':
+        from sme_gend.services.position_codes import LABELS, normalized_label
+
+        labels = ', '.join("'" + normalized_label(value).replace("'", "''") + "'"
+                           for value in LABELS['present'])
+        return f"({norm} COLLATE utf8mb4_unicode_ci IN ({labels}))", ()
     stage = f"({norm} IN ('stageinterne', 'stage interne'))"
     codes = ', '.join("'" + code.replace("'", "''") + "'" for code in sorted(_non_present_exact_codes()))
     excluded = (f"({norm} REGEXP '(^|[^a-z])(non[ -]*present|pas[ -]+present|absent)([^a-z]|$)' "
