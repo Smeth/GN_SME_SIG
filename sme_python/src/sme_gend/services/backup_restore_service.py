@@ -578,8 +578,17 @@ def _capture_backup_sidecars(connection, table_names, result):
 
 
 def _backup_file_inventory(archive):
+    from sme_gend.services.operation_progress import operation_progress
+    with operation_progress((('hash', 'Calcul des empreintes des fichiers'),)) as operation:
+        return _backup_file_inventory_with_progress(archive, operation)
+
+
+def _backup_file_inventory_with_progress(archive, operation):
     from copy import copy
     result = {}
+    total = sum(info.file_size for info in archive.infolist() if info.filename != MANIFEST_NAME)
+    operation.start('hash', total=total)
+    processed = 0
     for info in archive.infolist():
         if info.filename == MANIFEST_NAME:
             continue
@@ -592,16 +601,30 @@ def _backup_file_inventory(archive):
         with archive.open(read_info) as stream:
             for block in iter(lambda: stream.read(1024 * 1024), b""):
                 digest.update(block)
+                processed += len(block)
+                operation.update('hash', current=processed, total=total, detail=f'{info.filename} ; {processed:,}/{total:,} octet(s) contrôlé(s)')
         result[info.filename] = {"sha256": digest.hexdigest(), "size": info.file_size}
+    operation.finish('hash', detail=f'{len(result)} fichier(s) vérifié(s)')
     return result
 
 
 def _verify_backup_file_inventory(archive, inventory):
     if inventory is None:
         return  # Existing v1-v4 backups remain readable.
+    from sme_gend.services.operation_progress import operation_progress
+    with operation_progress((('hash', 'Lecture des fichiers et calcul des empreintes'),
+                             ('check', 'Comparaison des empreintes de sécurité'))) as operation:
+        return _verify_backup_file_inventory_with_progress(archive, inventory, operation)
+
+
+def _verify_backup_file_inventory_with_progress(archive, inventory, operation):
     names = {info.filename for info in archive.infolist() if info.filename != MANIFEST_NAME}
     if not isinstance(inventory, dict) or set(inventory) != names:
         raise ValueError("Inventaire des fichiers de sauvegarde incomplet ou ambigu.")
+    total = sum(info.file_size for info in archive.infolist() if info.filename != MANIFEST_NAME)
+    operation.start('hash', total=total)
+    processed = 0
+    digests = {}
     for info in archive.infolist():
         if info.filename == MANIFEST_NAME:
             continue
@@ -613,8 +636,16 @@ def _verify_backup_file_inventory(archive, inventory):
         with archive.open(info) as stream:
             for block in iter(lambda: stream.read(1024 * 1024), b""):
                 digest.update(block)
-        if digest.hexdigest() != item["sha256"]:
-            raise ValueError("Sauvegarde altérée : " + info.filename)
+                processed += len(block)
+                operation.update('hash', current=processed, total=total, detail=f'{info.filename} ; {processed:,}/{total:,} octet(s) contrôlé(s)')
+        digests[info.filename] = digest.hexdigest()
+    operation.finish('hash', detail=f'{len(names)} empreinte(s) calculée(s)')
+    operation.start('check', total=len(digests))
+    for index, (name, digest) in enumerate(digests.items(), 1):
+        if digest != inventory[name]['sha256']:
+            raise ValueError("Sauvegarde altérée : " + name)
+        operation.update('check', current=index, total=len(digests), detail=f'{index}/{len(digests)} empreinte(s) vérifiée(s) ; {name}')
+    operation.finish('check', detail=f'{len(names)} fichier(s) intègre(s)')
 
 
 def _split_sql_statements(sql: str) -> list[str]:
@@ -717,6 +748,18 @@ def create_backup(
     scope: BackupScope | None = None,
 ) -> BackupManifest:
     """Crée une archive .zip (complète ou partielle selon ``scope``)."""
+    from sme_gend.services.operation_progress import operation_progress
+    with operation_progress((('prepare', 'Préparation de la sauvegarde'),
+                             ('sql', 'Export cohérent de la base MySQL'),
+                             ('files', 'Copie des paramètres et des médias'),
+                             ('publications', 'Sauvegarde des documents publiés'),
+                             ('verify', 'Vérification de l’intégrité des fichiers'),
+                             ('publish', 'Enregistrement de la sauvegarde'))) as operation:
+        return _create_backup_with_progress(settings, dest_zip, scope=scope, operation=operation)
+
+
+def _create_backup_with_progress(settings, dest_zip, *, scope, operation):
+    operation.start('prepare')
     sc = scope or BackupScope.full()
     dest_zip = Path(dest_zip).expanduser().resolve()
     dest_zip.parent.mkdir(parents=True, exist_ok=True)
@@ -726,11 +769,14 @@ def create_backup(
     counts: dict[str, int] = {}
     sql_text = ""
     snapshot_data = {"include_app_config": sc.include_app_config}
+    operation.finish('prepare')
+    operation.start('sql')
     if sc.include_mysql:
         tbl_list = list(sc.mysql_tables) if sc.mysql_tables else None
         sql_text, counts = _export_mysql_sql(settings, tables=tbl_list, snapshot_data=snapshot_data)
         if not snapshot_data.get("captured"):
             raise RuntimeError("L'instantané SQL et ses configurations n'ont pas été confirmés ensemble.")
+    operation.finish('sql', detail=f'{len(counts)} table(s), {sum(counts.values()):,} ligne(s)' if sc.include_mysql else 'Base MySQL non sélectionnée')
     audit_by_module = snapshot_data.get("audit_by_module", {})
     config_paths = _collect_config_paths() if sc.include_user_config else []
     media_files = (
@@ -758,10 +804,21 @@ def create_backup(
 
     config_arcs: list[str] = []
     app_data_arcs: list[str] = []
+    data_root = project_root() / "data"
+    data_files = [fp for fp in data_root.iterdir() if fp.is_file() and fp.suffix.lower() in (".json", ".jsonl")
+                  and fp.name != "paths.json"] if sc.include_app_data and data_root.is_dir() else []
+    total_files = len(config_paths) + len(media_files) + len(data_files) + int(bool(sc.include_mysql and sql_text)) + int(bool(sc.include_app_config and app_config_rows))
+    operation.start('files', total=total_files)
+    copied_files = 0
+    def copied(name):
+        nonlocal copied_files
+        copied_files += 1
+        operation.update('files', current=copied_files, total=total_files, detail=f'{copied_files}/{total_files} fichier(s) ; {name}')
     with atomic_destination(dest_zip, temporary_suffix=".zip") as tmp:
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
             if sc.include_mysql and sql_text:
                 zf.writestr(SQL_DUMP_NAME, sql_text.encode("utf-8"))
+                copied(SQL_DUMP_NAME)
             if sc.include_app_config and app_config_rows:
                 zf.writestr(
                     APP_CONFIG_DUMP_NAME,
@@ -769,6 +826,7 @@ def create_backup(
                         "utf-8"
                     ),
                 )
+                copied(APP_CONFIG_DUMP_NAME)
             for cfg in config_paths:
                 arc = f"{CONFIG_DIR}/{cfg.name}"
                 if cfg.name == "paths.json":
@@ -780,20 +838,21 @@ def create_backup(
                 else:
                     zf.write(cfg, arcname=arc)
                 config_arcs.append(arc)
+                copied(arc)
             for fp, rel in media_files:
                 zf.write(fp, arcname=f"{PERSONNEL_MEDIA_DIR}/{rel}")
-            if sc.include_app_data:
-                data_root = project_root() / "data"
-                if data_root.is_dir():
-                    for fp in data_root.iterdir():
-                        if fp.is_file() and fp.suffix.lower() in (".json", ".jsonl"):
-                            if fp.name == "paths.json":
-                                continue  # La version utilisateur expurgée est sauvegardée ci-dessus.
-                            arc = f"{DATA_DIR}/{fp.name}"
-                            zf.write(fp, arcname=arc)
-                            app_data_arcs.append(fp.name)
+                copied(f"{PERSONNEL_MEDIA_DIR}/{rel}")
+            for fp in data_files:
+                arc = f"{DATA_DIR}/{fp.name}"
+                zf.write(fp, arcname=arc)
+                app_data_arcs.append(fp.name)
+                copied(arc)
+            operation.finish('files')
+            operation.start('publications')
             from sme_gend.services.sme_publication_backup import add_to_backup
             publication_files = add_to_backup(settings, zf) if sc.include_publications else []
+            operation.finish('publications', detail=f'{len(publication_files)} fichier(s) de publication')
+            operation.start('verify')
             kind = "full" if sc.is_full() else "partial"
             manifest = BackupManifest(
                 format_version=BACKUP_FORMAT_VERSION,
@@ -815,8 +874,11 @@ def create_backup(
                 file_inventory=_backup_file_inventory(zf),
             )
             zf.writestr(MANIFEST_NAME, json.dumps(manifest.to_dict(), indent=2).encode("utf-8"))
+            operation.finish('verify')
+            operation.start('publish', detail='Fermeture et enregistrement atomique de l’archive')
         if not sc.include_mysql and not config_arcs and not media_files and not app_data_arcs and not app_config_rows and not publication_files:
             raise ValueError("Sauvegarde vide : sélectionnez au moins un composant.")
+    operation.finish('publish', detail=f'Archive enregistrée : {dest_zip.name}')
     _log.info(
         "Sauvegarde %s créée : %s (%s tables, %s médias)",
         kind,
@@ -875,11 +937,23 @@ def _validate_backup_zip(zip_path: Path) -> BackupManifest:
 
 def _execute_restore_sql(settings: Settings, statements: list[str]) -> None:
     """Connexion dédiée : aucun état de session de restauration ne rejoint le pool."""
+    from sme_gend.services.operation_progress import operation_progress
+    with operation_progress((('safety', 'Sauvegarde de sécurité'),
+                             ('restore', 'Exécution de la restauration SQL'),
+                             ('verify', 'Contrôle de la restauration'),
+                             ('commit', 'Validation et publication'))) as operation:
+        return _execute_restore_sql_with_progress(settings, statements, operation)
+
+
+def _execute_restore_sql_with_progress(settings, statements, operation):
     import pymysql
 
+    operation.start('safety')
     safety_backup = ensure_recent_backup(settings, max_age_days=0.0)
     if safety_backup is None:
         raise RuntimeError("Restauration annulée : sauvegarde préalable impossible.")
+    operation.finish('safety')
+    operation.start('restore', total=len(statements))
     if any(statement.lstrip().upper().startswith(("DROP", "CREATE")) for statement in statements):
         from sme_gend.services.mysql_restore_staging import prepared_restore
         from sme_gend.services.mysql_private_options import _restrict_folder
@@ -889,7 +963,11 @@ def _execute_restore_sql(settings: Settings, statements: list[str]) -> None:
         _restrict_folder(workspace)
         try:
             with prepared_restore(settings, statements, workspace) as prepared:
+                operation.finish('restore')
+                operation.start('verify')
                 prepared.validate()
+                operation.finish('verify')
+                operation.start('commit', detail='Bascule atomique des tables ; attente du serveur')
                 try:
                     prepared.publish()
                 except Exception:
@@ -900,6 +978,7 @@ def _execute_restore_sql(settings: Settings, statements: list[str]) -> None:
                 "Restauration interrompue avant finalisation. Vérifiez les copies conservées. "
                 f"Journal de récupération : {workspace}"
             ) from exc
+        operation.finish('commit', detail='Tables publiées et contrôlées')
         return
     conn = pymysql.connect(**MySQLConnection(settings).connect_params())
     original_fk = None
@@ -916,6 +995,13 @@ def _execute_restore_sql(settings: Settings, statements: list[str]) -> None:
             try:
                 for number, statement in enumerate(statements, 1):
                     cur.execute(statement)
+                    if number % 250 == 0 or number == len(statements):
+                        operation.update('restore', current=number, total=len(statements),
+                            detail=f'{number:,}/{len(statements):,} instruction(s) exécutée(s)')
+                operation.finish('restore')
+                operation.start('verify')
+                operation.finish('verify', detail='Toutes les instructions ont été acceptées par MySQL')
+                operation.start('commit', detail='Validation de la transaction ; attente du serveur')
                 conn.commit()
             except Exception as exc:
                 try:
@@ -944,6 +1030,7 @@ def _execute_restore_sql(settings: Settings, statements: list[str]) -> None:
                 conn.close()
         except Exception:
             _log.warning("Connexion de restauration déjà interrompue.", exc_info=True)
+    operation.finish('commit', detail='Transaction validée')
 
 
 def inspect_backup(zip_path: Path) -> BackupManifest:
@@ -959,6 +1046,18 @@ def restore_backup(
     """
     Restaure les composants sélectionnés depuis une archive (complète ou partielle).
     """
+    from sme_gend.services.operation_progress import operation_progress
+    with operation_progress((('read', 'Vérification de la sauvegarde'),
+                             ('files', 'Préparation des fichiers à restaurer'),
+                             ('safety', 'Sauvegarde de sécurité'),
+                             ('restore', 'Restauration des données'),
+                             ('verify', 'Contrôles de cohérence'),
+                             ('publish', 'Application et finalisation'))) as operation:
+        return _restore_backup_with_progress(settings, zip_path, scope=scope, operation=operation)
+
+
+def _restore_backup_with_progress(settings, zip_path, *, scope, operation):
+    operation.start('read')
     from sme_gend.services.auth_guard import session_has_permission
     if not session_has_permission("system.restore"):
         raise PermissionError("Permission de restauration refusée.")
@@ -1044,11 +1143,15 @@ def restore_backup(
                 json.loads(structured_source.read(name).decode("utf-8"))
     if not statements:
         from sme_gend.services.configuration_restore import restore_configuration_components
-        return restore_configuration_components(settings, stable_archive, manifest, rs, config_rows, plan, files)
+        operation.finish('read')
+        return restore_configuration_components(settings, stable_archive, manifest, rs, config_rows, plan, files,
+                                                operation=operation)
+    operation.finish('read', detail=f'{len(statements):,} instruction(s) SQL à restaurer')
+    operation.start('files', total=len(plan))
     plan = [(name, contained_path(resolved_personnel_media_root(), "/".join(relative_parts(name)[1:])) if kind == "media" else target, kind)
             for name, target, kind in plan]
     with zipfile.ZipFile(stable_archive, "r") as source:
-        for name, target, kind in plan:
+        for index, (name, target, kind) in enumerate(plan, 1):
             if kind == "config" and target.name == "paths.json" and (rs.preserve_mysql_connection or (rs.restore_publications and manifest.publication_files)):
                 from sme_gend.services.restore_files import digest
                 expected_paths = digest(target)
@@ -1065,20 +1168,29 @@ def restore_backup(
                         files.add(target, payload, expected_before=None)
                     else:
                         files.add(target, payload)
+            operation.update('files', current=index, total=len(plan), detail=f'{index}/{len(plan)} fichier(s) préparé(s) ; {name}')
+    operation.finish('files')
 
     if statements:
         from sme_gend.services.mysql_restore_staging import prepared_restore
-        safety = ensure_recent_backup(settings, max_age_days=0.0)
+        operation.start('safety')
+        with operation.subtask('safety', current=0, total=2, detail='Création de la sauvegarde préalable'):
+            safety = ensure_recent_backup(settings, max_age_days=0.0)
         if safety is None or not safety.is_file() or not safety.stat().st_size:
             raise RuntimeError("Restauration annulée : sauvegarde préalable absente ou vide.")
         retained_safety = workspace / "safety.zip"
-        shutil.copyfile(safety, retained_safety)
-        atomic_write(workspace / "safety_backup.txt", str(retained_safety).encode("utf-8"))
+        with operation.subtask('safety', current=1, total=2, detail='Conservation de la copie de récupération'):
+            shutil.copyfile(safety, retained_safety)
+            atomic_write(workspace / "safety_backup.txt", str(retained_safety).encode("utf-8"))
+        operation.finish('safety', detail=f'Sauvegarde de sécurité conservée : {retained_safety.name}')
+        operation.start('restore')
         try:
             with prepared_restore(settings, statements, workspace, manifest.table_counts) as prepared:
                 from sme_gend.services.configuration_restore import apply_prepared_configuration
                 apply_prepared_configuration(prepared, config_rows, local_auth, created_tables=created_tables,
                     preserve_audit=rs.preserve_audit_journal, full_requested=not partial_requested)
+                operation.finish('restore')
+                operation.start('verify')
                 prepared.validate()
                 from dataclasses import replace
                 from sme_gend.services.sme_publication_registry import validate_registry_snapshot
@@ -1089,6 +1201,8 @@ def restore_backup(
                         raise ValueError("Registre des publications incomplet dans la restauration préparée.")
                     validate_registry_snapshot(replace(settings,mysql_database=prepared.new))
                 prepared.record_restore_audit(archive_name=zip_path.name, preserve_audit=rs.preserve_audit_journal)
+                operation.finish('verify')
+                operation.start('publish', detail='Bascule atomique de la base et publication des fichiers')
                 try:
                     prepared.publish()
                     files.publish()
@@ -1118,6 +1232,7 @@ def restore_backup(
         invalidate_mysql_pool(settings)
         invalidate_mysql_schema_cache()
         invalidate_liste_cache(settings)
+        operation.finish('publish', detail='Base, fichiers et caches actualisés')
         _log.info("Restauration préparée terminée ; récupération conservée dans %s", workspace)
         return manifest
 

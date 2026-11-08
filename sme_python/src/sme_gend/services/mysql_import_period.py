@@ -565,6 +565,17 @@ def purge_sme_periode_for_reimport(settings: Settings, mois: str, *, imported_on
     Les événements durables attestés par d'autres situations sont conservés.
     Le vidage complet utilise explicitement imported_only=False.
     """
+    from sme_gend.services.operation_progress import operation_progress
+    with operation_progress((('periods', 'Identification des périodes du mois'),
+                             ('tables', 'Suppression des données par table'),
+                             ('cache', 'Actualisation du cache mensuel'))) as progress:
+        return _purge_sme_periode_for_reimport(settings, mois, imported_only=imported_only,
+            preserve_manual_passations=preserve_manual_passations,
+            _replace_position_links=_replace_position_links, progress=progress)
+
+
+def _purge_sme_periode_for_reimport(settings: Settings, mois: str, *, imported_only,
+                                   preserve_manual_passations, _replace_position_links, progress):
     from sme_gend.services.liste_generale_cache import invalidate_liste_cache
     from sme_gend.services.month_purge_plan import month_purge_plan, preserve_supported_events
     if _replace_position_links:
@@ -574,35 +585,61 @@ def purge_sme_periode_for_reimport(settings: Settings, mois: str, *, imported_on
     ym = normalize_import_mois(mois)
     from sme_gend.services.month_period_scope import month_period_ids
     counts = {"sme_mois": ym, "agent_orphans_removed": 0}
+    progress.start('periods', detail=f'Identification et verrouillage du mois {ym}…')
     with MySQLConnection(settings).connect() as conn:
         with conn.cursor() as cur:
             ids = month_period_ids(cur, ym, lock=True)
             if not ids:
+                progress.finish('periods', detail=f'Aucune période rattachée au mois {ym}.')
+                progress.finish('tables', detail='Aucune donnée mensuelle à supprimer.')
+                progress.finish('cache', detail='Aucune modification du cache nécessaire.')
                 return dict(counts, skipped=1)
             counts["sme_periode_id"] = ids[0]
             counts["sme_periode_ids"] = list(ids)
+            plans = []
             for pid in ids:
+                plan = month_purge_plan(pid, ym, imported_only=imported_only, target_period_ids=ids)
+                if preserve_manual_passations:
+                    from dataclasses import replace
+                    plan = [replace(item, predicate=item.predicate + " AND COALESCE(d.obs,'') LIKE 'Import archive %%'")
+                            if item.table == 'agent_passation_grade' else item for item in plan]
+                plans.append((pid, plan))
+            progress.finish('periods', detail=f'{len(ids)} période(s) rattachée(s) au mois {ym}.')
+            total = sum(len(plan) + 2 for _, plan in plans)
+            completed = 0
+            progress.start('tables', total=total, detail='Contrôle des dépendances et suppression des tables mensuelles…')
+            for period_number, (pid, plan) in enumerate(plans, 1):
                 # This cache belongs to the selected snapshot; actual dated
                 # movements remain durable global facts across imports/purges.
                 cur.execute("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() "
                             "AND TABLE_NAME='sme_month_membership'")
                 if cur.fetchone():
                     cur.execute('DELETE FROM sme_month_membership WHERE sme_periode_id=%s',(pid,))
-                plan = month_purge_plan(pid, ym, imported_only=imported_only, target_period_ids=ids)
-                if preserve_manual_passations:
-                    from dataclasses import replace
-                    plan = [replace(item, predicate=item.predicate + " AND COALESCE(d.obs,'') LIKE 'Import archive %%'")
-                            if item.table == 'agent_passation_grade' else item for item in plan]
+                completed += 1
+                progress.update('tables', current=completed, total=total,
+                                detail=f'Période {period_number}/{len(ids)} : projection mensuelle traitée.')
                 if not _replace_position_links:
                     from sme_gend.services.automatic_position_links import external_position_links
                     if external_position_links(cur, plan, ym):
                         raise ValueError('Un autre mois dépend d’une activité de ce mois. '
                                          'Le vidage / réimport est refusé pour préserver ses positions et retours validés.')
                 preserve_supported_events(cur, plan, pid, ym)
+                completed += 1
+                progress.update('tables', current=completed, total=total,
+                                detail=f'Période {period_number}/{len(ids)} : événements partagés et dépendances contrôlés.')
                 for item in plan:
+                    progress.update('tables', current=completed, total=total,
+                        detail=f'Période {period_number}/{len(ids)} — {item.table} : suppression en cours…')
                     cur.execute(f"DELETE d FROM {item.table} d WHERE {item.predicate}", item.params)
-                    counts[item.table] = counts.get(item.table, 0) + int(cur.rowcount or 0)
+                    removed = int(cur.rowcount or 0)
+                    counts[item.table] = counts.get(item.table, 0) + removed
+                    completed += 1
+                    progress.update('tables', current=completed, total=total,
+                        detail=f'Période {period_number}/{len(ids)} — {item.table} : {removed} ligne(s) supprimée(s).')
+            progress.finish('tables', detail=f'{sum(counts.get(item.table, 0) for item in plans[0][1])} ligne(s) mensuelle(s) supprimée(s).')
+    progress.start('cache', detail='Invalidation du cache mensuel…')
     invalidate_liste_cache(None)
+    progress.finish('cache', detail='Cache mensuel invalidé ; attente de validation par l’opération appelante.')
     return counts
 
 

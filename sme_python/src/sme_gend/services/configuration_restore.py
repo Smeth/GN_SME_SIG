@@ -218,7 +218,9 @@ def _finish_or_rollback(files,state,gate):
     return committed
 
 
-def _apply(settings,files,state,rows,repository,gate):
+def _apply(settings,files,state,rows,repository,gate,operation=None):
+    if operation is not None:
+        operation.start('safety', detail='Conservation des fichiers originaux et des paramètres partagés')
     _record(files,state,'prepared')
     try:
         if gate is not None:
@@ -227,17 +229,34 @@ def _apply(settings,files,state,rows,repository,gate):
                 repository.set_json(state['marker'],{'operation':state['operation'],'state':'committed'})
                 before = _before_rows(settings,rows)
                 write_recovery(files.workspace/'configuration_before.json',json.dumps(before,ensure_ascii=False).encode('utf-8'))
+                if operation is not None:
+                    operation.finish('safety', detail=f'{len(before)} paramètre(s) et copies des fichiers conservés')
+                    operation.start('restore', total=len(rows), detail='Restauration des paramètres partagés')
                 restored = repository.import_config_rows(rows)
+                if operation is not None:
+                    operation.update('restore', current=restored, total=len(rows))
+                    operation.finish('restore')
+                    operation.start('verify', detail='Contrôle du nombre de paramètres et du verrou de maintenance')
                 if restored != len(rows):raise RuntimeError('Restauration de configuration incomplète.')
                 publish_data_change(settings,reason='configuration_restore')
                 from sme_gend.services.auth_context import resolve_audit_actor
                 repository.append_audit(action='configuration_restored', module='configuration',
                     actor=resolve_audit_actor(), payload={'detail':'Configuration partagée restaurée', 'recovery_session':state['operation'], 'config_count':len(rows)})
                 gate.check();_record(files,state,'publishing')
+                if operation is not None:
+                    operation.finish('verify')
+                    operation.start('publish', detail='Publication des fichiers et validation de la transaction')
                 files.publish()
                 _record(files,state,'committing');gate.check()
             _record(files,state,'committed')
         else:
+            if operation is not None:
+                operation.finish('safety', detail='Copies de récupération des fichiers conservées')
+                operation.start('restore')
+                operation.finish('restore', detail='Aucun paramètre SQL sélectionné')
+                operation.start('verify')
+                operation.finish('verify', detail='Fichiers préparés et empreintes de récupération vérifiés')
+                operation.start('publish', detail='Publication des fichiers')
             _record(files,state,'publishing');files.publish()
         files.complete();_record(files,state,'completed')
     except BaseException as exc:
@@ -346,7 +365,19 @@ def _recover_pending(backup,settings,base):
             ) from exc
 
 
-def restore_configuration_components(settings,archive,manifest,scope,rows,plan,files):
+def restore_configuration_components(settings,archive,manifest,scope,rows,plan,files,*,operation=None):
+    if operation is None:
+        from sme_gend.services.operation_progress import operation_progress
+        with operation_progress((('files', 'Préparation des fichiers'),
+                                 ('safety', 'Conservation des copies de sécurité'),
+                                 ('restore', 'Restauration des paramètres'),
+                                 ('verify', 'Contrôle de la configuration'),
+                                 ('publish', 'Publication et validation'))) as progress:
+            return _restore_configuration_with_progress(settings,archive,manifest,scope,rows,plan,files,progress)
+    return _restore_configuration_with_progress(settings,archive,manifest,scope,rows,plan,files,operation)
+
+
+def _restore_configuration_with_progress(settings,archive,manifest,scope,rows,plan,files,operation):
     from sme_gend.services import backup_restore_service as backup
     from sme_gend.services.local_audit_mirror import locked_mirror_stream
     from sme_gend.services.shared_media import shared_media_write_target,invalidate_shared_media_cache
@@ -357,6 +388,7 @@ def restore_configuration_components(settings,archive,manifest,scope,rows,plan,f
     plan=[item for item in plan if not (item[2]=='config' and Path(item[1]).name=='client_instance.json')]
     base=backup.default_backup_directory()
     completed=False
+    operation.start('files', total=len(plan), detail='Vérification des restaurations antérieures et des destinations')
     with locked_mirror_stream(base/'.configuration-restore.lock',thread_lock=_profile_lock):
         _recover_pending(backup,settings,base)
         try:
@@ -370,7 +402,7 @@ def restore_configuration_components(settings,archive,manifest,scope,rows,plan,f
                 if gate is not None:rows=_filter_database_keys(gate,rows,preserve_accounts=scope.preserve_local_accounts)
                 root=stack.enter_context(shared_media_write_target(requested,settings=settings,gate=gate)).root if media else None
                 with zipfile.ZipFile(archive,'r') as source:
-                    for name,_,kind in plan:
+                    for index, (name,_,kind) in enumerate(plan, 1):
                         target=_target(backup,name,kind,root)
                         if kind=='config' and target.name=='paths.json':
                             expected_before=digest(target)
@@ -383,13 +415,15 @@ def restore_configuration_components(settings,archive,manifest,scope,rows,plan,f
                                     files.add(target,content,expected_before=None)
                                 else:
                                     files.add(target,content)
+                        operation.update('files', current=index, total=len(plan), detail=f'{index}/{len(plan)} fichier(s) préparé(s) ; {name}')
+                operation.finish('files')
                 state=dict(version=1,operation=files.workspace.name,sql=gate is not None,
                     marker='configuration_restore:'+files.workspace.name,database=list(mysql_database_key(settings)),
                     plan=[dict(name=name,kind=kind) for name,_,kind in plan])
                 if maintenance is not None:
                     state['maintenance_token'] = maintenance.token
                 try:
-                    _apply(settings,files,state,rows,backup.AppConfigRepository(settings) if gate else None,gate)
+                    _apply(settings,files,state,rows,backup.AppConfigRepository(settings) if gate else None,gate,operation)
                 except ConfigurationRestoreRecoveryRequired:
                     if maintenance is not None:
                         maintenance.keep_blocked()
@@ -400,4 +434,5 @@ def restore_configuration_components(settings,archive,manifest,scope,rows,plan,f
             if completed:
                 raise ConfigurationRestoreCommittedError('Restauration terminée ; erreur de fin de coordination. Ne la recommencez pas.') from exc
             raise
+    operation.finish('publish', detail='Fichiers, paramètres et caches actualisés')
     return manifest

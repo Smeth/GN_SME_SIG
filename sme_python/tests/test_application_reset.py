@@ -12,7 +12,10 @@ def test_large_table_is_deleted_in_bounded_batches_without_committing():
     amounts=iter((1000,1000,17))
     def execute(*args):cursor.rowcount=next(amounts)
     cursor.execute.side_effect=execute
-    assert _delete_reset_table(cursor,'carriere_situation',keep_document_history=True)==2017
+    completed=[]
+    assert _delete_reset_table(cursor,'carriere_situation',keep_document_history=True,
+                               on_batch=completed.append)==2017
+    assert completed==[1000,2000,2017]
     assert cursor.execute.call_count==3
     assert all('LIMIT 1000' in call.args[0] for call in cursor.execute.call_args_list)
     assert all('TRUNCATE' not in call.args[0] for call in cursor.execute.call_args_list)
@@ -172,6 +175,75 @@ def test_file_cleanup_refuses_changed_file(tmp_path):
     with pytest.raises(RuntimeError,match='change'):
         files.remove()
     assert original.read_bytes()==b'CHANGED'
+
+
+def test_reset_progress_finishes_only_after_schema_lock_cleanup(monkeypatch):
+    from contextlib import contextmanager
+    from sme_gend.services import application_reset as module
+    from sme_gend.services.operation_progress import progress_reporting
+    monkeypatch.setattr('sme_gend.services.auth_guard.session_has_admin_role',lambda:True)
+    monkeypatch.setattr('sme_gend.services.auth_guard.session_has_permission',lambda key:True)
+    events=[]
+    @contextmanager
+    def locked(settings):
+        yield
+        assert events[-1].active_key=='finalize'
+        assert events[-1].percent<100
+        events.append('schema_released')
+    monkeypatch.setattr('sme_gend.repositories.mysql_connection.schema_metadata_lock',locked)
+    def execute(settings,options,*,auth,progress):
+        for key,_ in module._RESET_PROGRESS_STEPS[:-1]:
+            progress.finish(key)
+        progress.start('finalize',detail='Libération des verrous…')
+        return {'warnings':[],'backup':'synthetic.zip'}
+    monkeypatch.setattr(module,'_reset_application_locked',execute)
+    settings=SimpleNamespace(mysql_host='test.invalid',mysql_port=33329,mysql_database='synthetic')
+    with progress_reporting(events.append):
+        reset_application(settings,ResetOptions(),confirmation=reset_target(settings))
+    assert [step.key for step in events[0].steps]==[key for key,_ in module._RESET_PROGRESS_STEPS]
+    assert events[-2]=='schema_released'
+    assert events[-1].percent==100
+    assert all(step.state=='done' for step in events[-1].steps)
+
+
+def test_failed_reset_never_reports_success(monkeypatch):
+    from contextlib import nullcontext
+    from sme_gend.services import application_reset as module
+    from sme_gend.services.operation_progress import progress_reporting
+    monkeypatch.setattr('sme_gend.services.auth_guard.session_has_admin_role',lambda:True)
+    monkeypatch.setattr('sme_gend.services.auth_guard.session_has_permission',lambda key:True)
+    monkeypatch.setattr('sme_gend.repositories.mysql_connection.schema_metadata_lock',lambda settings:nullcontext())
+    def execute(settings,options,*,auth,progress):
+        progress.finish('prepare')
+        progress.start('backup',detail='Sauvegarde interrompue')
+        raise RuntimeError('synthetic backup failure')
+    monkeypatch.setattr(module,'_reset_application_locked',execute)
+    settings=SimpleNamespace(mysql_host='test.invalid',mysql_port=33329,mysql_database='synthetic')
+    events=[]
+    with progress_reporting(events.append),pytest.raises(RuntimeError,match='synthetic backup failure'):
+        reset_application(settings,ResetOptions(),confirmation=reset_target(settings))
+    assert events[-1].active_key=='backup'
+    assert all(event.percent<100 for event in events)
+    assert next(step for step in events[-1].steps if step.key=='finalize').state=='pending'
+
+
+def test_local_file_progress_counts_only_verified_and_removed_files(tmp_path):
+    from sme_gend.services.application_reset_files import ResetLocalFiles
+    from sme_gend.services.operation_progress import progress_reporting
+    originals=[tmp_path/'first.mdb',tmp_path/'second.mdb']
+    for number,path in enumerate(originals):path.write_bytes(bytes([number])*30)
+    events=[]
+    with progress_reporting(events.append):
+        files=ResetLocalFiles(tmp_path/'recovery',originals)
+    assert {(e.current,e.total) for e in events}>={(1,2),(2,2)}
+    assert events[-1].percent==100
+    assert originals[0].exists() and originals[1].exists()
+    events=[]
+    with progress_reporting(events.append):files.remove()
+    assert {(e.current,e.total) for e in events}>={(1,2),(2,2)}
+    assert not any(path.exists() for path in originals)
+    files.rollback()
+    assert all(path.exists() for path in originals)
 
 
 def test_reset_entry_point_obeys_restore_permissions(monkeypatch,tmp_path):

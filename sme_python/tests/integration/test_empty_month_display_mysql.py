@@ -35,8 +35,15 @@ def month_service(isolated_mysql,monkeypatch,tmp_path,*,archive=False,legacy=Fal
 @pytest.mark.parametrize('archive',[False,True])
 def test_full_empty_does_not_display_another_month(isolated_mysql,monkeypatch,tmp_path,archive):
     from sme_gend.repositories.mysql_agent_repository import MySQLAgentRepository
+    from sme_gend.services.operation_progress import progress_reporting
     module,settings,connect,params=month_service(isolated_mysql,monkeypatch,tmp_path,archive=archive)
-    result=module.empty_sme_month(settings,'2026-09',imported_only=False)
+    events=[]
+    with progress_reporting(events.append):
+        result=module.empty_sme_month(settings,'2026-09',imported_only=False)
+    assert events[-1].percent==100
+    assert all(step.state=='done' for step in events[-1].steps)
+    assert any(event.active_key=='purge' and 'carriere_situation' in event.detail and
+               '1 ligne(s) supprimée(s)' in event.detail for event in events)
     with connect(**params) as conn:
         with conn.cursor() as cur:
             cur.execute('SELECT COUNT(*) FROM carriere_situation WHERE sme_periode_id=1')

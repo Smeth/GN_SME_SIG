@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import zipfile
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -46,8 +48,14 @@ from sme_gend.services.backup_restore_service import (
 )
 from sme_gend.services.workflow_permissions import session_can_perform_action
 from sme_gend.ui.backup_scope_widgets import scope_group_box
-from sme_gend.ui.bg_task import run_in_background, run_with_progress
+from sme_gend.ui.bg_task import run_in_background, run_with_operation_progress as run_with_progress
 from sme_gend.ui.page_header import PageHeader
+
+
+def _session_operation_context(owner):
+    window = owner.window()
+    defer = getattr(window, 'defer_session_lock_for_operation', None)
+    return defer() if callable(defer) else nullcontext(SimpleNamespace(exit_after_operation=False))
 
 
 class _BackupColumns(QWidget):
@@ -430,10 +438,11 @@ class BackupRestoreView(QWidget):
             QMessageBox.warning(self, "Droits", "Suppression réservée aux administrateurs autorisés à restaurer.")
             return
         from sme_gend.ui.empty_month_dialog import run_empty_month_dialog
-        if run_empty_month_dialog(self, self._settings):
-            self._append_log("Données du mois supprimées ; sauvegarde et confirmation effectuées.")
-            self._health_cache = None
-            self._refresh_health_async(force=True)
+        with _session_operation_context(self):
+            if run_empty_month_dialog(self, self._settings):
+                self._append_log("Données du mois supprimées ; sauvegarde et confirmation effectuées.")
+                self._health_cache = None
+                self._refresh_health_async(force=True)
 
     def _load_mysql_tables_async(self) -> None:
         st = self._settings
@@ -818,19 +827,20 @@ class BackupRestoreView(QWidget):
             ack_label='Je confirme les mois sélectionnés et la fermeture des autres postes',
             confirm_label='Restaurer ces mois'):
             return
-        result = run_with_progress(self, 'Restauration des mois sélectionnés',
-            'Sauvegarde de sécurité puis restauration…',
-            lambda: restore_selected_backup_months(self._settings, prepared, selected))
-        if result is None:
-            return
-        self._append_log('Mois restaurés : ' + ', '.join(result['months']))
-        QMessageBox.information(self, 'Restauration terminée',
-            'Mois restaurés : ' + ', '.join(result['months']) +
-            f'\nGrades recalculés depuis le dossier : {result.get("grade_history_reapplied", 0)}' +
-            '\nSauvegarde préalable : ' + result['backup'])
-        window = self.window()
-        if hasattr(window, 'refresh_for_month_change'):
-            window.refresh_for_month_change()
+        with _session_operation_context(self):
+            result = run_with_progress(self, 'Restauration des mois sélectionnés',
+                'Sauvegarde de sécurité puis restauration…',
+                lambda: restore_selected_backup_months(self._settings, prepared, selected))
+            if result is None:
+                return
+            self._append_log('Mois restaurés : ' + ', '.join(result['months']))
+            QMessageBox.information(self, 'Restauration terminée',
+                'Mois restaurés : ' + ', '.join(result['months']) +
+                f'\nGrades recalculés depuis le dossier : {result.get("grade_history_reapplied", 0)}' +
+                '\nSauvegarde préalable : ' + result['backup'])
+            window = self.window()
+            if hasattr(window, 'refresh_for_month_change'):
+                window.refresh_for_month_change()
 
     def _on_restore_partial(self) -> None:
         if not session_can_perform_action("system.restore"):
@@ -912,6 +922,10 @@ class BackupRestoreView(QWidget):
         preserve_audit: bool,
         keep_accounts: bool = False,
     ) -> None:
+        with _session_operation_context(self):
+            BackupRestoreView._finish_restore_and_show_result(self, work, zip_name, preserve_audit, keep_accounts)
+
+    def _finish_restore_and_show_result(self, work, zip_name, preserve_audit, keep_accounts=False):
         try:
             result = run_with_progress(self, "Restauration", "Restauration en cours…", work)
             if result is None:
@@ -959,21 +973,24 @@ class BackupRestoreView(QWidget):
             return
         options = dialog.options()
         username, password = dialog.username.text(), dialog.password.text()
-        try:
-            result = run_with_progress(self, "Réinitialisation complète",
-                "Sauvegarde puis réinitialisation de la base...",
-                lambda: reset_application(self._settings, options, confirmation=typed,
-                    new_username=username, new_password=password))
-            if result is None:
+        with _session_operation_context(self) as session_guard:
+            try:
+                result = run_with_progress(self, "Réinitialisation complète",
+                    "Sauvegarde puis réinitialisation de la base...",
+                    lambda: reset_application(self._settings, options, confirmation=typed,
+                        new_username=username, new_password=password))
+                if result is None:
+                    return
+            except Exception as exc:
+                QMessageBox.critical(self, "Réinitialisation interrompue", str(exc))
                 return
-        except Exception as exc:
-            QMessageBox.critical(self, "Réinitialisation interrompue", str(exc))
-            return
-        QMessageBox.information(self, "Réinitialisation terminée",
-            "La base a été réinitialisée. Les sessions doivent se reconnecter.\n"
-            "Sauvegarde : " + result['backup'] + "\nRecuperation des fichiers : " + result['recovery'] +
-            "\n" + "\n".join(result['warnings']) + "\nRelancez l'application pour continuer.")
-        QApplication.quit()
+            QMessageBox.information(self, "Réinitialisation terminée",
+                "La base a été réinitialisée.\n"
+                "Sauvegarde : " + result['backup'] + "\nRécupération des fichiers : " + result['recovery'] +
+                "\n" + "\n".join(result['warnings']) +
+                "\n\nL’application va se fermer après ce bilan. Relancez-la pour vous reconnecter.")
+            session_guard.exit_after_operation = True
+            QApplication.quit()
 
     def _on_backup_month(self):
         if not session_can_perform_action("system.backup"):
@@ -1021,13 +1038,14 @@ class BackupRestoreView(QWidget):
                 "Les passations du dossier seront conservées et réappliquées selon leurs dates.\n"
                 "Une sauvegarde complete sera créée avant toute suppression.\nPour confirmer, saisissez : "+month)
             if not ok or typed!=month:return
-            result=run_with_progress(self,"Restauration mensuelle","Sauvegarde de sécurité puis restauration du mois...",
-                lambda:restore_month_backup(self._settings,archive,confirmed_month=typed))
-            if result is None:return
-            QMessageBox.information(self,"Restauration mensuelle","Mois restauré : "+month+"\nSauvegarde préalable : "+result['backup'])
-            self._append_log("Restauration du mois "+month)
-            win=self.window()
-            if hasattr(win,"refresh_for_month_change"):win.refresh_for_month_change()
-            self._health_cache=None
+            with _session_operation_context(self):
+                result=run_with_progress(self,"Restauration mensuelle","Sauvegarde de sécurité puis restauration du mois...",
+                    lambda:restore_month_backup(self._settings,archive,confirmed_month=typed))
+                if result is None:return
+                QMessageBox.information(self,"Restauration mensuelle","Mois restauré : "+month+"\nSauvegarde préalable : "+result['backup'])
+                self._append_log("Restauration du mois "+month)
+                win=self.window()
+                if hasattr(win,"refresh_for_month_change"):win.refresh_for_month_change()
+                self._health_cache=None
         except Exception as exc:
             QMessageBox.critical(self,"Restauration mensuelle",str(exc))

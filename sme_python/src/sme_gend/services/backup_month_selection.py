@@ -6,6 +6,7 @@ from uuid import uuid4
 from zipfile import ZipFile
 
 from sme_gend.repositories.mysql_connection import MySQLConnection, mysql_database_key, mysql_import_transaction
+from sme_gend.services.operation_progress import operation_progress
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,15 @@ def _authorize():
 
 
 def prepare_backup_months(settings, archive):
+    with operation_progress((('read', 'Vérification de la sauvegarde'),
+                             ('stage', 'Préparation des données de la sauvegarde'),
+                             ('verify', 'Contrôle des données préparées'),
+                             ('months', 'Lecture des mois disponibles'))) as operation:
+        return _prepare_backup_months_with_progress(settings, archive, operation)
+
+
+def _prepare_backup_months_with_progress(settings, archive, operation):
+    operation.start('read')
     _authorize()
     from sme_gend.services.backup_restore_service import (
         default_backup_directory, inspect_backup, SQL_DUMP_NAME, _split_sql_statements,
@@ -54,9 +64,15 @@ def prepare_backup_months(settings, archive):
                if statement.lstrip().upper().startswith('CREATE')}
     if created != set(manifest.table_counts).difference(INTERNAL_TABLES):
         raise ValueError('Archive SQL incomplète : les tables ne correspondent pas au manifeste.')
+    operation.finish('read', detail=f'{len(statements):,} instruction(s) vérifiée(s)')
+    operation.start('stage')
     # No publish: the live tables, accounts and files are never replaced here.
     with prepared_restore(settings, statements, workspace, counts=manifest.table_counts) as staged:
+        operation.finish('stage')
+        operation.start('verify')
         staged.validate()
+        operation.finish('verify')
+        operation.start('months')
         source_settings = replace(settings, mysql_database=staged.new)
         with MySQLConnection(source_settings).connect(read_only=True) as conn:
             with conn.cursor() as cur:
@@ -66,10 +82,19 @@ def prepare_backup_months(settings, archive):
         invalidate_mysql_pool(source_settings)
     if not months:
         raise ValueError('Aucun mois présent dans cette sauvegarde.')
+    operation.finish('months', detail=f'{len(months)} mois disponible(s) : ' + ', '.join(months))
     return BackupMonths(mysql_database_key(settings), source_settings, months, workspace)
 
 
 def restore_selected_backup_months(settings, prepared, selected):
+    with operation_progress((('bundles', 'Préparation des mois sélectionnés'),
+                             ('safety', 'Sauvegarde de sécurité de la base cible'),
+                             ('restore', 'Restauration des mois sélectionnés'),
+                             ('commit', 'Validation commune et finalisation'))) as operation:
+        return _restore_selected_backup_months_with_progress(settings, prepared, selected, operation)
+
+
+def _restore_selected_backup_months_with_progress(settings, prepared, selected, operation):
     _authorize()
     if prepared.owner != mysql_database_key(settings):
         raise ValueError('La base cible a changé ; choisissez à nouveau la sauvegarde.')
@@ -80,18 +105,30 @@ def restore_selected_backup_months(settings, prepared, selected):
     from sme_gend.services.database_maintenance import centralized_maintenance
     from sme_gend.services.backup_restore_service import create_backup_to_default_dir, inspect_backup
     bundles = []
-    for month in selected:
+    operation.start('bundles', total=len(selected))
+    for index, month in enumerate(selected):
         destination = prepared.workspace / ('month_' + month + '.zip')
-        _create_month_backup(prepared.source_settings, month, destination)
-        inspect_month_backup(destination)
+        with operation.subtask('bundles', current=index, total=len(selected), detail=f'Mois {month}'):
+            _create_month_backup(prepared.source_settings, month, destination)
+            inspect_month_backup(destination)
         bundles.append((month, destination))
+    operation.finish('bundles')
     with centralized_maintenance(settings, reason='Restauration des mois sélectionnés : ' + ', '.join(selected)):
-        safety = create_backup_to_default_dir(settings)
-        inspect_backup(safety)
+        operation.start('safety')
+        with operation.subtask('safety', current=0, total=2, detail='Création de la sauvegarde de sécurité'):
+            safety = create_backup_to_default_dir(settings)
+        with operation.subtask('safety', current=1, total=2, detail='Vérification de la sauvegarde de sécurité'):
+            inspect_backup(safety)
+        operation.finish('safety', detail=f'Sauvegarde vérifiée : {Path(safety).name}')
+        operation.start('restore', total=len(bundles))
         # One shared transaction: failure of any selected month rolls back all.
         with mysql_import_transaction(settings):
             grade_corrections = 0
-            for month, archive in bundles:
-                result = restore_month_backup(settings, archive, confirmed_month=month, _safety_backup=safety)
+            for index, (month, archive) in enumerate(bundles):
+                with operation.subtask('restore', current=index, total=len(bundles), detail=f'Mois {month}'):
+                    result = restore_month_backup(settings, archive, confirmed_month=month, _safety_backup=safety)
                 grade_corrections += result.get('grade_history_reapplied', 0)
+            operation.finish('restore')
+            operation.start('commit', detail='Validation unique de tous les mois ; attente de la confirmation MySQL')
+    operation.finish('commit', detail=f'{len(selected)} mois restauré(s) dans une seule transaction')
     return {'months': selected, 'backup': str(safety), 'grade_history_reapplied': grade_corrections}

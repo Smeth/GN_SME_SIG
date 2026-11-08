@@ -47,7 +47,8 @@ def test_restore_ui_does_not_report_success_when_worker_returns_no_result(monkey
     info=MagicMock();monkeypatch.setattr(ui.QMessageBox,'information',info)
     ui.BackupRestoreView._finish_restore(fake,lambda:None,'synthetic.zip',False)
     info.assert_not_called()
-    fake.window.assert_not_called()
+    fake.window().reload_runtime_configuration.assert_not_called()
+    fake.window().refresh_for_month_change.assert_not_called()
     assert not any('✓' in str(call) for call in fake._append_log.call_args_list)
 
 

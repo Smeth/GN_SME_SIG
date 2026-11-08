@@ -6,7 +6,7 @@ from PySide6.QtWidgets import QInputDialog, QMessageBox
 
 def run_empty_month_dialog(parent, settings) -> bool:
     from sme_gend.ui.import_mois_dialog import pick_import_mois
-    from sme_gend.ui.bg_task import run_with_progress
+    from sme_gend.ui.bg_task import run_with_operation_progress as run_with_progress
     from sme_gend.services.empty_sme_month import empty_sme_month, preview_empty_sme_month, can_empty_month
 
     if not can_empty_month():

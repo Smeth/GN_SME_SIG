@@ -6,6 +6,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication,QEvent,QThread,QTimer
 from PySide6.QtWidgets import QApplication,QProgressDialog,QWidget
 from sme_gend.ui import bg_task
+from sme_gend.ui.operation_progress_dialog import OperationProgressDialog
 
 
 @pytest.fixture
@@ -28,7 +29,7 @@ def test_premature_progress_close_cannot_report_success_before_the_worker_finish
         time.sleep(.08);finished.set();return 42
     def close_progress():
         for widget in QApplication.topLevelWidgets():
-            if isinstance(widget,QProgressDialog):widget.close()
+            if isinstance(widget,(QProgressDialog,OperationProgressDialog)):widget.close()
     QTimer.singleShot(10,close_progress)
     result=bg_task.run_with_determinate_progress(parent,'test',1,work) if determinate else bg_task.run_with_progress(parent,'test','test',work)
     completed_at_return=finished.is_set()

@@ -13,6 +13,7 @@ import pymysql
 from sme_gend.repositories.mysql_connection import MySQLConnection, has_import_transaction
 from sme_gend.services.backup_sql import target_table, validate_restore_statement, is_safe_setting
 from sme_gend.services.restore_files import write_recovery
+from sme_gend.services.operation_progress import operation_progress
 
 
 def identifier(value):
@@ -97,18 +98,32 @@ class PreparedRestore:
         return [str(row[0]) for row in rows if str(row[0]) not in INTERNAL_TABLES]
 
     def prepare(self,statements,counts=None):
+        with operation_progress((('validate', 'Vérification des instructions SQL'),
+                                 ('clone', 'Préparation des tables conservées'),
+                                 ('import', 'Restauration des instructions SQL'),
+                                 ('verify', 'Contrôle des tables restaurées'))) as operation:
+            return self._prepare_with_progress(statements, counts, operation)
+
+    def _prepare_with_progress(self,statements,counts,operation):
+        operation.start('validate', total=len(statements))
         from sme_gend.services.database_maintenance import _owner, INTERNAL_TABLES
         if _owner.get() is None:
             raise RuntimeError('La préparation exige une maintenance centralisée active.')
         if any(target_table(statement) in INTERNAL_TABLES for statement in statements):
             raise ValueError('L’état de maintenance ne peut pas être restauré depuis une archive.')
-        for statement in statements:validate_staged_statement(statement)
+        for index, statement in enumerate(statements, 1):
+            validate_staged_statement(statement)
+            if index % 1000 == 0 or index == len(statements):
+                operation.update('validate', current=index, total=len(statements),
+                    detail=f'{index:,}/{len(statements):,} instruction(s) vérifiée(s)')
         creates=[target_table(s) for s in statements if s.lstrip().upper().startswith('CREATE')]
         drops=[target_table(s) for s in statements if s.lstrip().upper().startswith('DROP')]
         affected={target_table(s) for s in statements if not is_safe_setting(s)}
         if len(set(creates))!=len(creates) or set(drops)-set(creates) or affected-set(creates):
             raise ValueError('Le dump doit recréer chaque table remplacée, une seule fois.')
         if has_import_transaction(self.settings):raise RuntimeError('Restauration interdite dans une transaction métier.')
+        operation.finish('validate')
+        operation.start('clone', detail='Connexion à la base de préparation')
         params=MySQLConnection(self.settings).connect_params()
         params.update(autocommit=True,read_timeout=300,write_timeout=300)
         self.conn=pymysql.connect(**params)
@@ -134,34 +149,50 @@ class PreparedRestore:
                 (self.live,self.live,self.live,self.live))
             if cur.fetchone()[0]:raise RuntimeError('Clés étrangères entre bases détectées : bascule refusée.')
             self.original=self.table_names(self.live)
+            operation.update('clone', current=0, total=2 * len(self.original),
+                detail=f'{len(self.original)} table(s) à préparer')
             for schema in (self.new,self.old):
                 cur.execute(f'CREATE DATABASE {identifier(schema)} CHARACTER SET utf8mb4')
                 self.created.append(schema)
             self.record('preparing')
             cur.execute(f'USE {identifier(self.new)}');cur.execute('SET FOREIGN_KEY_CHECKS=0')
-            for table in self.original:
+            for index, table in enumerate(self.original, 1):
                 cur.execute(f'SHOW CREATE TABLE {identifier(self.live)}.{identifier(table)}')
                 ddl=cur.fetchone()[1];validate_staged_statement(ddl)
                 cur.execute(ddl)
+                operation.update('clone', current=index, total=2 * len(self.original), detail=f'Schéma : {table}')
             # Preserve every table not selected, including current-version tables
             # absent in an older archive. No selected live table is dropped.
-            for table in self.original:
+            for index, table in enumerate(self.original, 1):
+                operation.update('clone', current=len(self.original) + index - 1, total=2 * len(self.original),
+                    detail=f'Copie des données : {table} ; attente du serveur')
                 cur.execute('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s '
                     "AND EXTRA NOT LIKE '%%VIRTUAL GENERATED%%' AND EXTRA NOT LIKE '%%STORED GENERATED%%' ORDER BY ORDINAL_POSITION",(self.live,table))
                 cols=','.join(identifier(row[0]) for row in cur.fetchall())
                 cur.execute(f'INSERT INTO {identifier(table)} ({cols}) SELECT {cols} FROM {identifier(self.live)}.{identifier(table)}')
-            for statement in statements:
-                if is_safe_setting(statement):continue  # The owner controls FK and sql_mode.
+                operation.update('clone', current=len(self.original) + index, total=2 * len(self.original),
+                    detail=f'Données copiées : {table}')
+            operation.finish('clone')
+            executable = [statement for statement in statements if not is_safe_setting(statement)]
+            operation.start('import', total=len(executable))
+            for index, statement in enumerate(executable, 1):
                 cur.execute(statement)
+                if index % 250 == 0 or index == len(executable):
+                    operation.update('import', current=index, total=len(executable),
+                        detail=f'{index:,}/{len(executable):,} instruction(s) appliquée(s) ; table {target_table(statement)}')
+            operation.finish('import')
+            operation.start('verify', total=len(set(creates)))
             self.prepared=self.table_names(self.new)
             if counts is not None:
-                for table in set(creates):
+                for index, table in enumerate(sorted(set(creates)), 1):
                     if table not in counts:raise ValueError('Table du dump absente du manifeste.')
                     expected=counts[table]
                     if isinstance(expected,bool) or not isinstance(expected,int) or expected<0:raise ValueError('Décompte de table invalide.')
                     cur.execute(f'SELECT COUNT(*) FROM {identifier(table)}')
                     if cur.fetchone()[0]!=expected:raise ValueError('Décompte de table différent du manifeste : archive refusée.')
+                    operation.update('verify', current=index, total=len(set(creates)), detail=f'{table} : {expected:,} ligne(s) contrôlée(s)')
         self.record('prepared')
+        operation.finish('verify', detail='Base de préparation prête ; base active inchangée')
 
     def apply_config(self,rows,local_auth):
         from sme_gend.services.database_maintenance import check_owned_barrier
@@ -205,6 +236,12 @@ class PreparedRestore:
         self.prepared=self.table_names(self.new)
 
     def validate(self):
+        with operation_progress((('references', 'Contrôle des clés étrangères'),
+                                 ('revision', 'Préparation de la révision partagée'))) as operation:
+            return self._validate_with_progress(operation)
+
+    def _validate_with_progress(self,operation):
+        operation.start('references')
         from sme_gend.services.database_maintenance import check_owned_barrier
         check_owned_barrier(self.settings, self.conn)
         with self.conn.cursor() as cur:
@@ -215,18 +252,23 @@ class PreparedRestore:
             for table,constraint,column,schema,parent,parent_column in cur.fetchall():
                 if schema!=self.new:raise RuntimeError('Référence externe détectée dans les tables préparées.')
                 groups.setdefault((table,constraint,parent),[]).append((column,parent_column))
-            for (table,constraint,parent),columns in groups.items():
+            operation.update('references', current=0, total=len(groups))
+            for index, ((table,constraint,parent),columns) in enumerate(groups.items(), 1):
                 join=' AND '.join(f'c.{identifier(c)}=p.{identifier(p)}' for c,p in columns)
                 filled=' AND '.join(f'c.{identifier(c)} IS NOT NULL' for c,p in columns)
                 cur.execute(f'SELECT 1 FROM {identifier(table)} c WHERE {filled} AND NOT EXISTS '
                     f'(SELECT 1 FROM {identifier(parent)} p WHERE {join}) LIMIT 1')
                 if cur.fetchone():raise RuntimeError('Archive incohérente : une clé étrangère ne retrouve pas son parent.')
+                operation.update('references', current=index, total=len(groups), detail=f'{table} → {parent}')
+            operation.finish('references')
+            operation.start('revision')
             if 'app_config' in self.prepared:
                 token=uuid4().hex
                 cur.execute('INSERT INTO app_config (config_key,payload,updated_by) VALUES (%s,%s,%s) '
                     'ON DUPLICATE KEY UPDATE payload=VALUES(payload),updated_by=VALUES(updated_by),updated_at=CURRENT_TIMESTAMP(3)',
                     ('shared_data_revision',json.dumps(dict(token=token,reason='full_restore')),'restore'))
         self.record('validated')
+        operation.finish('revision')
 
     def rename_sql(self,reverse=False):
         moves=[]

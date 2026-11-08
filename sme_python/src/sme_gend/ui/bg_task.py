@@ -165,6 +165,9 @@ class _ProgressDelivery(_WorkerDelivery):
     @Slot(int, int, str)
     def step(self, current, total, message):
         if self.alive and not _quitting:
+            if hasattr(self.dialog, 'legacy_step'):
+                self.dialog.legacy_step(current, total, message)
+                return
             self.dialog.setMaximum(total)
             self.dialog.setValue(current)
             self.dialog.setLabelText(f"({current}/{total}) {message}")
@@ -172,6 +175,9 @@ class _ProgressDelivery(_WorkerDelivery):
     @Slot(str)
     def detail(self, message):
         if self.alive and not _quitting:
+            if hasattr(self.dialog, 'legacy_detail'):
+                self.dialog.legacy_detail(message)
+                return
             self.dialog.setLabelText(f"({self.dialog.value()}/{self.dialog.maximum()}) {message}")
 
 
@@ -321,37 +327,32 @@ def run_with_determinate_progress(
     à chaque étape franchie (jusqu'à ``total_steps`` fois). La barre et le
     libellé se mettent à jour à chaque appel.
     """
+    total_steps = max(1, total_steps)
     # The owner can be destroyed during application shutdown. Keep the modal
     # alive until its detached worker really finishes.
-    dlg = _TaskProgressDialog()
-    dlg.setAutoClose(False)
-    dlg.setAutoReset(False)
-    dlg.setWindowTitle(title)
-    dlg.setRange(0, max(1, total_steps))
-    dlg.setValue(0)
-    dlg.setLabelText("Préparation…")
-    dlg.setCancelButton(None)
-    dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
-    dlg.setMinimumWidth(420)
+    from sme_gend.ui.operation_progress_dialog import OperationProgressDialog
+    dlg = OperationProgressDialog(title, 'Préparation…')
+    dlg.legacy_step(1,max(1,total_steps),'Préparation…')
     # QProgressDialog ferme automatiquement dès que setValue() atteint le maximum
     # (comportement Qt par défaut) — désactivé : la dernière étape signalée ne
     # correspond pas forcément à la fin réelle de fn (code encore à exécuter après),
     # et fermer prématurément faisait revenir un résultat vide même en cas de succès.
-    dlg.setAutoClose(False)
-    dlg.setAutoReset(False)
 
     result: list[T] = []
     err: list[BaseException] = []
 
     def on_ok(value: object) -> None:
         result.append(value)  # type: ignore[arg-type]
-        dlg.setValue(dlg.maximum())
+        dlg.success()
 
     def on_fail(exc: object) -> None:
         err.append(exc)  # type: ignore[arg-type]
+        from sme_gend.services.mysql_health import format_mysql_error_for_user
+        dlg.failure(format_mysql_error_for_user(exc))
 
     worker = _ProgressWorker(fn, total_steps, parent)
     delivery = _ProgressDelivery(worker, dlg, on_ok, on_fail)
+    delivery.finished_callback = dlg.after_worker_finished
     worker.step.connect(delivery.step, Qt.ConnectionType.QueuedConnection)
     worker.detail.connect(delivery.detail, Qt.ConnectionType.QueuedConnection)
     _start_worker(worker, delivery)
@@ -360,15 +361,48 @@ def run_with_determinate_progress(
     dlg.deleteLater()
 
     if err:
-        e = err[0]
-        from sme_gend.services.mysql_health import format_mysql_error_for_user
-
-        detail = format_mysql_error_for_user(e)
-        extra = (
-            "\n\nMenu Fichier → Configuration MySQL et chemins… pour corriger la connexion."
-        )
-        QMessageBox.critical(parent if parent is None or isValid(parent) else None, title, f"{detail}{extra}")
         return None
+    return result[0] if result else None
+
+
+class _OperationWorker(FunctionWorker):
+    progress = Signal(object)
+
+    def run(self):
+        from sme_gend.services.operation_progress import progress_reporting
+        with progress_reporting(self.progress.emit):
+            super().run()
+
+
+class _OperationDelivery(_WorkerDelivery):
+    def __init__(self, worker, dialog, success, error):
+        super().__init__(worker, dialog, success, error, dialog.after_worker_finished)
+        self.dialog = dialog
+
+    @Slot(object)
+    def progress(self, snapshot):
+        if self.alive and not _quitting:
+            self.dialog.apply_snapshot(snapshot)
+
+
+def run_with_operation_progress(parent, title, text, fn):
+    """Run an instrumented service with real percentages and the complete phase list."""
+    from sme_gend.ui.operation_progress_dialog import OperationProgressDialog
+    from sme_gend.services.mysql_health import format_mysql_error_for_user
+    dlg = OperationProgressDialog(title, text)
+    result=[]
+    def success(value):
+        result.append(value)
+        dlg.success()
+    def failure(exc):
+        dlg.failure(format_mysql_error_for_user(exc))
+    worker = _OperationWorker(fn, parent)
+    delivery = _OperationDelivery(worker, dlg, success, failure)
+    worker.progress.connect(delivery.progress, Qt.ConnectionType.QueuedConnection)
+    _start_worker(worker, delivery)
+    dlg.exec()
+    worker.wait() if isValid(worker) else None
+    dlg.deleteLater()
     return result[0] if result else None
 
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from sme_gend.config.ui_labels import IMPORT_MONTH_ACCESS_ACTION
 
+from contextlib import contextmanager
+from dataclasses import dataclass
 import logging
 
 from PySide6.QtCore import QTimer, QSize, Qt, QEvent
@@ -123,6 +125,14 @@ from sme_gend.ui.sidebar_navigation import (
     default_nav_groups,
     page_nav_icons,
 )
+
+
+@dataclass
+class _OperationSessionGuard:
+    """The caller sets this only once a successful operation will quit the app."""
+
+    exit_after_operation: bool = False
+
 
 _MOIS_FR = (
     "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
@@ -736,6 +746,10 @@ class ShellWindow(QMainWindow):
 
         self._session_lock_active = False
         self._session_verification_pending = False
+        self._session_operation_depth = 0
+        self._session_operation_exit_pending = False
+        self._session_operation_exiting = False
+        self._session_lock_presentation_pending = False
         self._locked_username = ""
         self._session_lock_overlay = SessionLockOverlay(self)
         self._session_lock_overlay.sync_geometry()
@@ -765,6 +779,22 @@ class ShellWindow(QMainWindow):
             app.installEventFilter(self)
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if getattr(self, "_session_operation_depth", 0) or getattr(self, "_session_operation_exiting", False):
+            # Progress and result dialogs remain usable even if reset revoked
+            # the session. The underlying shell must never become interactive.
+            if event.type() in (
+                self._SESSION_ACTIVITY | {QEvent.Type.KeyRelease, QEvent.Type.MouseButtonDblClick,
+                                          QEvent.Type.Shortcut, QEvent.Type.ShortcutOverride,
+                                          QEvent.Type.TouchUpdate, QEvent.Type.TouchEnd}
+            ):
+                modal = QApplication.activeModalWidget()
+                allowed_modal_input = modal is not None and (
+                    (isinstance(obj, QWidget) and (obj is modal or modal.isAncestorOf(obj)))
+                    or obj is modal.windowHandle()
+                )
+                if not allowed_modal_input:
+                    return True
+            return super().eventFilter(obj, event)
         if getattr(self, '_session_verification_pending', False) and event.type() in (
             self._SESSION_ACTIVITY | {QEvent.Type.KeyRelease, QEvent.Type.MouseButtonDblClick,
                                       QEvent.Type.Shortcut, QEvent.Type.ShortcutOverride,
@@ -789,6 +819,36 @@ class ShellWindow(QMainWindow):
         super().resizeEvent(event)
         if hasattr(self, "_session_lock_overlay"):
             self._session_lock_overlay.sync_geometry()
+
+    @contextmanager
+    def defer_session_lock_for_operation(self):
+        """Keep the operation's progress and result ahead of a pending login.
+
+        Wrap both the worker dialog and its final result. Authentication checks
+        and revocation keep running; only the lock screen's presentation waits.
+        The caller can set the yielded guard's ``exit_after_operation`` to True
+        immediately before quitting after a successful reset. Leave it False on
+        cancellation/failure or after restoring so session access is rechecked.
+        """
+        guard = _OperationSessionGuard()
+        if not getattr(self, "_session_operation_depth", 0):
+            self._session_operation_exit_pending = False
+        self._session_operation_depth = getattr(self, "_session_operation_depth", 0) + 1
+        try:
+            yield guard
+        finally:
+            self._session_operation_exit_pending = (
+                self._session_operation_exit_pending or guard.exit_after_operation
+            )
+            self._session_operation_depth -= 1
+            if self._session_operation_depth == 0 and self._session_operation_exit_pending:
+                self._session_operation_exiting = True
+            if self._session_operation_depth == 0 and not self._session_operation_exit_pending:
+                # Short operations may have finished before the heartbeat timer
+                # fired. Verify restored/replaced accounts before allowing work.
+                ShellWindow._check_session_expiry(self)
+                if getattr(self, "_session_lock_presentation_pending", False):
+                    ShellWindow._present_session_lock(self)
 
     def _check_session_expiry(self) -> None:
         from sme_gend.services.auth_context import get_app_auth
@@ -839,6 +899,8 @@ class ShellWindow(QMainWindow):
                    "Vos saisies restent dans la fenêtre. Si la session est toujours valide, "
                    "le travail reprendra sans nouvelle connexion.",
         )
+        if getattr(self, "_session_operation_depth", 0) or getattr(self, "_session_operation_exiting", False):
+            return
         self._session_lock_overlay.sync_geometry()
         self._session_lock_overlay.show()
         self._session_lock_overlay.raise_()
@@ -928,6 +990,13 @@ class ShellWindow(QMainWindow):
         if timer is not None:
             timer.stop()
         self._session_lock_overlay.set_context(title=title, detail=detail)
+        self._session_lock_presentation_pending = True
+        if getattr(self, "_session_operation_depth", 0) or getattr(self, "_session_operation_exiting", False):
+            return
+        ShellWindow._present_session_lock(self)
+
+    def _present_session_lock(self) -> None:
+        self._session_lock_presentation_pending = False
         self._session_lock_overlay.refresh_theme()
         self._session_lock_overlay.sync_geometry()
         self._session_lock_overlay.show()
@@ -935,6 +1004,9 @@ class ShellWindow(QMainWindow):
         QTimer.singleShot(0, self._prompt_relogin)
 
     def _prompt_relogin(self) -> None:
+        if getattr(self, "_session_operation_depth", 0) or getattr(self, "_session_operation_exiting", False):
+            self._session_lock_presentation_pending = True
+            return
         from sme_gend.services.auth_context import get_app_auth
         from sme_gend.ui.login_dialog import LoginDialog
 
@@ -1304,6 +1376,8 @@ class ShellWindow(QMainWindow):
         )
 
     def _shared_refresh_blocked(self) -> bool:
+        if getattr(self, "_session_operation_depth", 0) or getattr(self, "_session_operation_exiting", False):
+            return True
         if QApplication.activeModalWidget() is not None:
             return True
         dirty = getattr(self, "_has_unsaved_changes", None)

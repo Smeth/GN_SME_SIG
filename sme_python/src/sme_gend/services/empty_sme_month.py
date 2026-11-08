@@ -4,6 +4,19 @@ from zipfile import ZipFile, ZIP_DEFLATED
 
 from sme_gend.config.settings import Settings
 from sme_gend.services.mysql_import_period import normalize_import_mois, purge_sme_periode_for_reimport
+from sme_gend.services.operation_progress import operation_progress
+
+
+_EMPTY_MONTH_PROGRESS_STEPS = (
+    ('prepare', 'Préparation et verrouillage du mois'),
+    ('backup', 'Sauvegarde de sécurité MySQL'),
+    ('archives_backup', 'Sauvegarde des archives du mois'),
+    ('purge', 'Suppression des données du mois'),
+    ('unlink', 'Nettoyage des imports et du suivi'),
+    ('validate', 'Contrôles et validation MySQL'),
+    ('archives_remove', 'Retrait des copies locales du mois'),
+    ('finalize', 'Finalisation et libération des verrous'),
+)
 
 
 def can_empty_month():
@@ -59,18 +72,27 @@ def empty_sme_month(settings: Settings, mois: str, *, imported_only: bool = Fals
     from sme_gend.services.database_maintenance import centralized_maintenance
     _authorize()
     ym = normalize_import_mois(mois)
-    _assert_no_dated_movements(settings, ym)
-    # Follow the same global lock order as dumps, migrations and restores.
-    with schema_metadata_lock(settings):
-        ensure_mysql_schema(settings)
-        ensure_central_config_ready(settings)
-        with centralized_maintenance(settings, reason='Vidage des données du mois '+ym):
-            # A first real movement may have committed after the preview.
-            _assert_no_dated_movements(settings, ym)
-            return _empty_sme_month_locked(settings, ym, imported_only=imported_only)
+    with operation_progress(_EMPTY_MONTH_PROGRESS_STEPS) as progress:
+        progress.start('prepare', detail=f'Contrôle du mois {ym} et acquisition des verrous…')
+        _assert_no_dated_movements(settings, ym)
+        # Follow the same global lock order as dumps, migrations and restores.
+        with schema_metadata_lock(settings):
+            ensure_mysql_schema(settings)
+            ensure_central_config_ready(settings)
+            with centralized_maintenance(settings, reason='Vidage des données du mois '+ym):
+                # A first real movement may have committed after the preview.
+                _assert_no_dated_movements(settings, ym)
+                progress.finish('prepare', detail=f'Mois {ym} contrôlé ; maintenance acquise.')
+                result = _empty_sme_month_locked(settings, ym, imported_only=imported_only, progress=progress)
+                progress.start('finalize', detail='Fermeture de la maintenance et libération des verrous…')
+        progress.finish('finalize', detail=f'Vidage du mois {ym} terminé ; bilan prêt à consulter.')
+        return result
 
 
-def _empty_sme_month_locked(settings: Settings, ym: str, *, imported_only: bool) -> dict:
+def _empty_sme_month_locked(settings: Settings, ym: str, *, imported_only: bool, progress=None) -> dict:
+    if progress is None:
+        with operation_progress(_EMPTY_MONTH_PROGRESS_STEPS) as tracker:
+            return _empty_sme_month_locked(settings, ym, imported_only=imported_only, progress=tracker)
     from sme_gend.repositories.mysql_connection import MySQLConnection, mysql_import_transaction, CommittedMirrorError
     from sme_gend.services.backup_restore_service import create_backup_to_default_dir, inspect_backup
     from sme_gend.services.mysql_import_period import ensure_sme_periode
@@ -78,11 +100,16 @@ def _empty_sme_month_locked(settings: Settings, ym: str, *, imported_only: bool)
     from sme_gend.services.audit_log import append_audit_event
     from sme_gend.services.liste_generale_cache import invalidate_liste_cache
 
-    backup = create_backup_to_default_dir(settings)
-    if backup is None:
-        raise RuntimeError("Vidage annulé : la sauvegarde préalable a échoué.")
-    backup = Path(backup)
-    inspect_backup(backup)
+    progress.start('backup', detail='Création et vérification de la sauvegarde préalable…')
+    with progress.subtask('backup', current=0, total=2, detail='Création de la sauvegarde préalable…'):
+        backup = create_backup_to_default_dir(settings)
+        if backup is None:
+            raise RuntimeError("Vidage annulé : la sauvegarde préalable a échoué.")
+        backup = Path(backup)
+    with progress.subtask('backup', current=1, total=2, detail='Vérification de la sauvegarde préalable…'):
+        inspect_backup(backup)
+    progress.finish('backup', detail='Sauvegarde MySQL vérifiée.')
+    progress.start('archives_backup', detail=f'Inventaire des copies d’archives du mois {ym}…')
     root = sme_archives_dir().resolve()
     files = month_archive_files(root, ym)
     archive_backup = None
@@ -90,10 +117,16 @@ def _empty_sme_month_locked(settings: Settings, ym: str, *, imported_only: bool)
         archive_backup = backup.with_name(f"{backup.stem}_archives_{ym}.zip")
         # Les copies Access ne sont pas incluses dans la sauvegarde MySQL standard.
         with ZipFile(archive_backup, "w", ZIP_DEFLATED) as zf:
-            for path in files:
+            for number, path in enumerate(files, 1):
+                progress.update('archives_backup', current=number - 1, total=len(files),
+                                detail=f'Sauvegarde de l’archive {number}/{len(files)} : {path.name}…')
                 zf.write(path, arcname=path.name)
+                progress.update('archives_backup', current=number, total=len(files),
+                                detail=f'Archive {number}/{len(files)} sauvegardée : {path.name}.')
+    progress.finish('archives_backup', detail=f'{len(files)} copie(s) d’archives sauvegardée(s).')
 
     warnings = []
+    progress.start('purge', detail=f'Suppression des données rattachées au mois {ym}…')
     try:
         with mysql_import_transaction(settings):
             from sme_gend.services.month_period_scope import month_period_ids
@@ -103,27 +136,49 @@ def _empty_sme_month_locked(settings: Settings, ym: str, *, imported_only: bool)
                 if not ids:
                     ids = (ensure_sme_periode(conn, ym),)
             counts = purge_sme_periode_for_reimport(settings, ym, imported_only=imported_only)
+            progress.finish('purge', detail='Suppression mensuelle effectuée ; transaction non encore validée.')
+            links = ("agent_diplome", "agent_distinction", "agent_affectation", "agent_mission", "agent_malade",
+                     "agent_desertion", "parcours_stage", "mouvement_effectif", "agent_conge", "carriere_situation")
+            follow_up = () if imported_only else ("workflow_task", "career_alert_ack", "career_alert_ack_occurrence")
+            cleanup_total = len(ids) * (len(links) + 2) + len(follow_up)
+            cleanup_done = 0
+            progress.start('unlink', total=cleanup_total, detail='Nettoyage des références d’import…')
             with MySQLConnection(settings).connect() as conn:
                 with conn.cursor() as cur:
                     for pid in ids:
-                        for table in ("agent_diplome", "agent_distinction", "agent_affectation",
-                                      "agent_mission", "agent_malade", "agent_desertion",
-                                      "parcours_stage", "mouvement_effectif", "agent_conge",
-                                      "carriere_situation"):
+                        for table in links:
                             cur.execute(f"UPDATE {table} SET import_lot_id=NULL WHERE import_lot_id IN "
                                         "(SELECT id FROM import_lot WHERE sme_periode_id=%s)", (pid,))
+                            cleanup_done += 1
+                            progress.update('unlink', current=cleanup_done, total=cleanup_total,
+                                            detail=f'{table} : {int(cur.rowcount or 0)} référence(s) d’import détachée(s).')
                         cur.execute("DELETE e FROM etl_erreur e JOIN import_lot l ON l.id=e.import_lot_id WHERE l.sme_periode_id=%s", (pid,))
                         counts["etl_erreur"] = counts.get("etl_erreur", 0) + int(cur.rowcount or 0)
+                        cleanup_done += 1
+                        progress.update('unlink', current=cleanup_done, total=cleanup_total,
+                                        detail=f'etl_erreur : {int(cur.rowcount or 0)} ligne(s) supprimée(s).')
                         cur.execute("DELETE FROM import_lot WHERE sme_periode_id=%s", (pid,))
                         counts["import_lot"] = counts.get("import_lot", 0) + int(cur.rowcount or 0)
-                    for table in (() if imported_only else ("workflow_task", "career_alert_ack", "career_alert_ack_occurrence")):
+                        cleanup_done += 1
+                        progress.update('unlink', current=cleanup_done, total=cleanup_total,
+                                        detail=f'import_lot : {int(cur.rowcount or 0)} lot(s) supprimé(s).')
+                    for table in follow_up:
                         cur.execute(f"DELETE FROM {table} WHERE TRIM(REPLACE(mois, '-', ''))=%s", (ym.replace('-', ''),))
                         counts[table] = int(cur.rowcount or 0)
+                        cleanup_done += 1
+                        progress.update('unlink', current=cleanup_done, total=cleanup_total,
+                                        detail=f'{table} : {int(cur.rowcount or 0)} ligne(s) supprimée(s).')
+                    progress.finish('unlink', detail='Références d’import et suivi mensuel nettoyés.')
                     remaining = {}
                     placeholders = ','.join(['%s'] * len(ids))
-                    for table in ("carriere_situation", "agent_mission", "agent_malade", "agent_desertion", "parcours_stage", "mouvement_effectif", "agent_conge"):
+                    check_tables = ("carriere_situation", "agent_mission", "agent_malade", "agent_desertion", "parcours_stage", "mouvement_effectif", "agent_conge")
+                    validation_total = len(check_tables) + 2  # central audit, then acknowledged COMMIT
+                    progress.start('validate', total=validation_total, detail='Contrôle des données restantes…')
+                    for number, table in enumerate(check_tables, 1):
                         cur.execute(f"SELECT COUNT(*) FROM {table} WHERE sme_periode_id IN ({placeholders})", ids)
                         remaining[table] = int(cur.fetchone()[0])
+                        progress.update('validate', current=number, total=validation_total,
+                                        detail=f'{table} : {remaining[table]} ligne(s) restante(s) dans le mois.')
                     counts['remaining_month_rows'] = remaining
                     if not imported_only and any(remaining.values()):
                         raise RuntimeError("Vidage annulé : des données restent rattachées au mois. Aucune suppression validée.")
@@ -135,13 +190,17 @@ def _empty_sme_month_locked(settings: Settings, ym: str, *, imported_only: bool)
                         "archive_backup": str(archive_backup) if archive_backup else None,
                         "archives_pending": [p.name for p in files]},
             )
+            progress.update('validate', current=validation_total - 1, total=validation_total,
+                            detail='Contrôles terminés ; validation de la transaction MySQL en cours…')
     except CommittedMirrorError:
         warnings.append("Mois vidé et trace centrale enregistrée ; la copie locale du journal n’a pas pu être écrite.")
     finally:
         invalidate_liste_cache(None)
+    progress.finish('validate', detail='Vidage du mois confirmé dans MySQL.')
 
     removed_files = 0
-    for path in files:
+    progress.start('archives_remove', total=len(files), detail='Retrait des copies locales sauvegardées…')
+    for number, path in enumerate(files, 1):
         try:
             if path.resolve().parent != root or path.is_symlink():
                 raise ValueError("Chemin d'archive modifié ; suppression refusée.")
@@ -149,6 +208,8 @@ def _empty_sme_month_locked(settings: Settings, ym: str, *, imported_only: bool)
             removed_files += 1
         except (OSError, ValueError) as exc:
             warnings.append(f"Archive conservée : {path.name} ({exc})")
+        progress.update('archives_remove', current=number, total=len(files),
+                        detail=f'Archive {number}/{len(files)} traitée ; {removed_files} supprimée(s).')
     counts.update(imported_only=imported_only, archives_removed=removed_files, backup=str(backup),
                   archive_backup=str(archive_backup) if archive_backup else None,
                   warnings=warnings)
@@ -157,6 +218,7 @@ def _empty_sme_month_locked(settings: Settings, ym: str, *, imported_only: bool)
             append_audit_event(action="sme_month_archives_cleaned", sme_mois_context=ym, result=counts)
         except Exception:
             warnings.append("Mois vidé et sauvegardé ; le résultat du nettoyage des archives n’a pas pu être journalisé. Consultez la sauvegarde des archives avant toute nouvelle intervention.")
+    progress.finish('archives_remove', detail=f'{removed_files}/{len(files)} copie(s) d’archives retirée(s).')
     return counts
 
 

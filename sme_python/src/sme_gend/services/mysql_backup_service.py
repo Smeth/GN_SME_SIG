@@ -13,6 +13,7 @@ from sme_gend.config.settings import Settings
 from sme_gend.repositories.mysql_connection import MySQLConnection, has_import_transaction, schema_metadata_lock
 from sme_gend.services.safe_paths import atomic_destination, file_key
 from sme_gend.services.mysql_private_options import private_mysql_options
+from sme_gend.services.operation_progress import operation_progress
 
 _log = logging.getLogger(__name__)
 
@@ -66,7 +67,17 @@ def _python_sql_dump(settings: Settings, dest: Path, *, selected_tables: list[st
 
 
 def _python_sql_dump_locked(settings: Settings, dest: Path, *, selected_tables=None,snapshot_reader=None):
+    with operation_progress((('schema', 'Vérification des tables'),
+                             ('snapshot', 'Ouverture de l’instantané cohérent'),
+                             ('export', 'Export des tables et des lignes'),
+                             ('close', 'Fermeture de l’instantané'))) as operation:
+        return _python_sql_dump_with_progress(settings, dest, selected_tables=selected_tables,
+                                              snapshot_reader=snapshot_reader, operation=operation)
+
+
+def _python_sql_dump_with_progress(settings, dest, *, selected_tables, snapshot_reader, operation):
     """One InnoDB snapshot; stream rows rather than retaining the whole dump."""
+    operation.start('schema')
     if has_import_transaction(settings):
         raise RuntimeError("La sauvegarde doit précéder la transaction d'écriture.")
     from pymysql.cursors import SSCursor
@@ -93,6 +104,7 @@ def _python_sql_dump_locked(settings: Settings, dest: Path, *, selected_tables=N
                     raise RuntimeError("Le client natif est requis pour conserver routines, déclencheurs ou événements.")
             cur.execute("SELECT @@SESSION.sql_mode")
             original_mode = cur.fetchone()[0]
+        operation.finish('schema', detail=f'{len(tables)} table(s) InnoDB')
         # Metadata reads can open a read transaction. This connection was
         # checked above and belongs exclusively to the dump.
         conn.rollback()
@@ -101,19 +113,27 @@ def _python_sql_dump_locked(settings: Settings, dest: Path, *, selected_tables=N
         counts = {}
         failed = False
         try:
+            operation.start('snapshot')
             with conn.cursor() as cur:
                 cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
                 cur.execute("START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY")
             if snapshot_reader is not None:
                 snapshot_reader(conn, all_tables)
+            operation.finish('snapshot')
+            operation.start('export', total=len(tables))
             with Path(dest).open("w",encoding="utf-8",newline="\n") as file:
                 file.write("-- SME closure backup (consistent InnoDB snapshot)\nSET NAMES utf8mb4;\nSET SESSION SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';\nSET FOREIGN_KEY_CHECKS=0;\n")
-                for table,engine,kind in tables:
+                for table_index, (table,engine,kind) in enumerate(tables):
+                    operation.update('export', current=table_index, total=len(tables), detail=f'Table {table} : lecture en cours')
                     quoted = _identifier(table)
                     counts[table] = 0
                     with conn.cursor() as cur:
                         cur.execute(f"SHOW CREATE TABLE {quoted}")
                         ddl = cur.fetchone()
+                        # The count and the streamed rows see the very same
+                        # InnoDB snapshot, including concurrent external writes.
+                        cur.execute(f"SELECT COUNT(*) FROM {quoted}")
+                        table_total = int(cur.fetchone()[0])
                     if not ddl:
                         raise RuntimeError("Schéma incomplet pendant la sauvegarde.")
                     file.write(f"DROP TABLE IF EXISTS {quoted};\n{ddl[1]};\n")
@@ -123,7 +143,15 @@ def _python_sql_dump_locked(settings: Settings, dest: Path, *, selected_tables=N
                         for row in rows:
                             counts[table] += 1
                             file.write(f"INSERT INTO {quoted} ({columns}) VALUES ("+",".join(_literal(value) for value in row)+");\n")
+                            if counts[table] % 1000 == 0:
+                                fraction = min(1.0, counts[table] / table_total) if table_total else 0.0
+                                operation.update('export', current=table_index + fraction, total=len(tables),
+                                    detail=f'Table {table} : {counts[table]:,}/{table_total:,} ligne(s) exportée(s)')
+                    operation.update('export', current=table_index + 1, total=len(tables),
+                        detail=f'{table_index + 1}/{len(tables)} table(s) ; {sum(counts.values()):,} ligne(s) exportée(s)')
                 file.write("SET FOREIGN_KEY_CHECKS=1;\n-- SME dump complete\n")
+            operation.finish('export', detail=f'{len(tables)} table(s), {sum(counts.values()):,} ligne(s)')
+            operation.start('close')
         except BaseException:
             failed = True
             raise
@@ -138,6 +166,7 @@ def _python_sql_dump_locked(settings: Settings, dest: Path, *, selected_tables=N
                 if not failed:
                     raise
                 _log.warning('Nettoyage de la connexion de sauvegarde impossible ; erreur initiale conservée.')
+    operation.finish('close')
     return counts
 
 
@@ -161,17 +190,27 @@ def backup_mysql_database(settings: Settings, dest_dir: Path, slug: str) -> tupl
 
 
 def _backup_mysql_database_locked(settings: Settings, dest_dir: Path, slug: str):
+    with operation_progress((('prepare', 'Préparation de la sauvegarde SQL'),
+                             ('dump', 'Export de la base MySQL'),
+                             ('publish', 'Vérification et enregistrement du fichier'))) as operation:
+        return _backup_mysql_database_with_progress(settings, dest_dir, slug, operation)
+
+
+def _backup_mysql_database_with_progress(settings, dest_dir, slug, operation):
     warnings = []
     if has_import_transaction(settings):
         return None,["La sauvegarde doit être créée avant toute transaction d'écriture."]
     try:
+        operation.start('prepare')
         slug = file_key(slug)
         dest_dir = Path(dest_dir)
         dest_dir.mkdir(parents=True,exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         dest = dest_dir / f"mysql_smegend_{slug}_{stamp}_{uuid4().hex[:12]}.sql"
         exe = _find_mysqldump()
+        operation.finish('prepare')
         with atomic_destination(dest,replace_existing=False) as temporary:
+            operation.start('dump', detail='Le serveur prépare l’export ; attente de sa réponse.')
             native_ok = False
             if exe:
                 try:
@@ -202,6 +241,9 @@ def _backup_mysql_database_locked(settings: Settings, dest_dir: Path, slug: str)
                     raise
             if not temporary.is_file() or temporary.stat().st_size == 0:
                 raise RuntimeError("La sauvegarde produite est vide.")
+            operation.finish('dump', detail=f'{temporary.stat().st_size:,} octet(s) écrits')
+            operation.start('publish')
+        operation.finish('publish', detail='Fichier SQL enregistré')
         return dest,warnings
     except Exception:
         if not warnings:

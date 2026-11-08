@@ -40,12 +40,31 @@ def make_backup(settings, backup, tmp_path):
 @pytest.mark.parametrize('keep_users',[True,False])
 @pytest.mark.parametrize('keep_documents',[True,False])
 def test_reset_choices_are_independent_and_saved(isolated_mysql, monkeypatch, tmp_path, keep_users, keep_documents):
+    from contextlib import contextmanager
+    from sme_gend.services.operation_progress import progress_reporting
+    from sme_gend.repositories.mysql_connection import mysql_import_transaction
     from sme_gend.repositories.app_config_repository import AppConfigRepository
     from sme_gend.services.auth_service import verify_password
     from sme_gend.config.auth_config import AuthUser
     settings, connect, params, old_auth, local = prepare(isolated_mysql, monkeypatch, tmp_path)
-    result = reset_application(settings, ResetOptions(keep_users,keep_documents), confirmation=reset_target(settings),
-                               new_username='new_admin', new_password='Test-Reset-Secret-123')
+    events=[]
+    commits=[]
+    @contextmanager
+    def observed_transaction(settings):
+        with mysql_import_transaction(settings):
+            yield
+            assert events[-1].active_key=='commit'
+            assert all(event.percent<100 for event in events)
+        commits.append(True)
+    monkeypatch.setattr('sme_gend.repositories.mysql_connection.mysql_import_transaction',observed_transaction)
+    with progress_reporting(events.append):
+        result = reset_application(settings, ResetOptions(keep_users,keep_documents), confirmation=reset_target(settings),
+                                   new_username='new_admin', new_password='Test-Reset-Secret-123')
+    assert commits==[True]
+    assert events[-1].percent==100
+    assert all(step.state=='done' for step in events[-1].steps)
+    assert any(event.active_key=='delete' and event.current and event.total for event in events)
+    assert any(event.active_key=='files' and event.current==event.total==1 for event in events)
     assert Path(result['backup']).is_file() and not local.exists()
     assert Path(result['recovery'],'0.original').read_bytes()==b'OLD MONTH'
     repo = AppConfigRepository(settings)
@@ -76,10 +95,13 @@ def test_reset_choices_are_independent_and_saved(isolated_mysql, monkeypatch, tm
 
 def test_reset_failure_rolls_back_database_and_local_files(isolated_mysql, monkeypatch, tmp_path):
     from sme_gend.repositories.app_config_repository import AppConfigRepository
+    from sme_gend.services.operation_progress import progress_reporting
     settings, connect, params, old_auth, local = prepare(isolated_mysql, monkeypatch, tmp_path)
     monkeypatch.setattr(AppConfigRepository,'append_audit',lambda *a,**kw: (_ for _ in ()).throw(RuntimeError('AUDIT FAILURE')))
-    with pytest.raises(RuntimeError,match='AUDIT FAILURE'):
+    events=[]
+    with progress_reporting(events.append),pytest.raises(RuntimeError,match='AUDIT FAILURE'):
         reset_application(settings,ResetOptions(False,False),confirmation=reset_target(settings),new_username='new',new_password='Test-Reset-Secret-123')
+    assert events and all(event.percent<100 for event in events)
     assert local.read_bytes()==b'OLD MONTH'
     assert AppConfigRepository(settings).get_json('auth_config')==old_auth
     with connect(**params) as conn:

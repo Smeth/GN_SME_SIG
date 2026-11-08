@@ -19,7 +19,7 @@ def test_month_confirmation_and_screen_refresh(monkeypatch, text, accepted, shou
     monkeypatch.setattr("sme_gend.services.empty_sme_month.preview_empty_sme_month", lambda *a, **kw: {"carriere_situation": 3})
     service = MagicMock(return_value={"backup": "backup.zip", "warnings": []})
     monkeypatch.setattr("sme_gend.services.empty_sme_month.empty_sme_month", service)
-    monkeypatch.setattr("sme_gend.ui.bg_task.run_with_progress", lambda parent, title, label, fn: fn())
+    monkeypatch.setattr("sme_gend.ui.bg_task.run_with_operation_progress", lambda parent, title, label, fn: fn())
     parent, settings = MagicMock(), object()
     assert run_empty_month_dialog(parent, settings) == should_run
     if should_run:

@@ -111,12 +111,16 @@ def test_periods_cleared_after_rebind_and_failed_reload(app,monkeypatch):
     view.close()
 
 
-def test_empty_month_button_requires_admin(app,monkeypatch):
+@pytest.mark.parametrize('admin,restore',[(False,True),(True,False),(True,True)])
+def test_empty_month_button_requires_admin(app,monkeypatch,admin,restore):
     from sme_gend.ui.views import archives_view as ui
     monkeypatch.setattr(ui,"session_can_perform_action",lambda *a:True)
-    monkeypatch.setattr(ui,"session_has_admin_role",lambda:False)
+    monkeypatch.setattr(ui,"session_has_admin_role",lambda:admin)
+    # The shared service checks the live auth guard for every entry point.
+    monkeypatch.setattr('sme_gend.services.auth_guard.session_has_admin_role',lambda:admin)
+    monkeypatch.setattr('sme_gend.services.auth_guard.session_has_permission',lambda key:restore)
     view = ui.ArchivesView()
-    assert not view._empty.isEnabled()
+    assert view._empty.isEnabled()==(admin and restore)
     view.close()
 
 

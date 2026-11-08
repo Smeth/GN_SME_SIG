@@ -11,6 +11,7 @@ from sme_gend.repositories.mysql_connection import MySQLConnection, mysql_import
 from sme_gend.services.mysql_import_period import normalize_import_mois
 from sme_gend.services.month_period_scope import month_period_ids
 from sme_gend.services.automatic_position_links import automatic_source, source_match_fields
+from sme_gend.services.operation_progress import operation_progress
 
 MEMBER = 'month_backup.json'
 EXTRA = ('workflow_task', 'career_alert_ack', 'career_alert_ack_occurrence')
@@ -99,6 +100,16 @@ def create_month_backup(settings, month, destination):
 
 def _create_month_backup(settings, month, destination):
     """Internal row export; caller must authorize backup or restoration."""
+    with operation_progress((('read', 'Ouverture de l’instantané du mois'),
+                             ('collect', 'Lecture des données mensuelles'),
+                             ('dependencies', 'Collecte des historiques et dépendances'),
+                             ('write', 'Création de la sauvegarde mensuelle'),
+                             ('publish', 'Enregistrement de la sauvegarde'))) as operation:
+        return _create_month_backup_with_progress(settings, month, destination, operation)
+
+
+def _create_month_backup_with_progress(settings, month, destination, operation):
+    operation.start('read')
     month = normalize_import_mois(month)
     with MySQLConnection(settings).connect(read_only=True) as conn:
         conn.rollback()
@@ -108,12 +119,19 @@ def _create_month_backup(settings, month, destination):
             schema = metadata(cur)
             ids = month_period_ids(cur, month)
             if not ids: raise ValueError('Ce mois est absent de la base MySQL.')
+            operation.finish('read', detail=f'Mois {month}')
             tables = {}
-            for table, predicates in ownership(cur, month, ids, schema).items():
+            owned_tables = ownership(cur, month, ids, schema)
+            operation.start('collect', total=len(owned_tables))
+            for index, (table, predicates) in enumerate(owned_tables.items(), 1):
                 where = ' OR '.join('('+p+')' for p, _ in predicates)
                 args = tuple(v for _, values in predicates for v in values)
                 tables[table] = sorted(read_rows(cur, table, where, args, alias='d'),
                                        key=lambda row:tuple(row[k] for k in schema[table]['pk']))
+                operation.update('collect', current=index, total=len(owned_tables),
+                    detail=f'{table} : {len(tables[table]):,} ligne(s) lue(s)')
+            operation.finish('collect')
+            operation.start('dependencies', detail='Historique des mouvements, diplômes et grades')
             dated_agents = []
             if DATED_MOVEMENTS in schema and MEMBERSHIP in schema:
                 from sme_gend.services.mysql_import_period import first_day_of_month, last_day_of_month
@@ -188,7 +206,10 @@ def _create_month_backup(settings, month, destination):
                                 raise ValueError('Une dépendance concerne un autre mois.')
                             tables.setdefault(parent, []).extend(found)
                             changed = True
+                            operation.update('dependencies', detail=f'Dépendance {parent} ; {sum(len(rows) for rows in tables.values()):,} ligne(s) collectée(s)')
         conn.rollback()
+    operation.finish('dependencies', detail=f'{len(tables)} table(s), {sum(len(rows) for rows in tables.values()):,} ligne(s)')
+    operation.start('write')
     payload = {'format': 'sme-month', 'version': 1, 'month': month,
                'created_at': datetime.now(timezone.utc).isoformat(), 'shared_diplomas': shared_diplomas,
                'shared_passations': shared_passations, 'auto_sources': auto_sources,
@@ -201,6 +222,9 @@ def _create_month_backup(settings, month, destination):
         with ZipFile(temporary, 'w', ZIP_DEFLATED) as z:
             z.writestr(MEMBER, data)
             z.writestr('month_sha256.txt', hashlib.sha256(data).hexdigest())
+        operation.finish('write', detail=f'{len(data):,} octet(s) et empreinte SHA-256 écrits')
+        operation.start('publish')
+    operation.finish('publish', detail=f'Mois {month} enregistré')
     return {'month': month, 'counts': {t:len(r) for t,r in tables.items()}, 'path': str(destination)}
 
 
@@ -379,6 +403,18 @@ def _check_dated_correction_evidence(cur, row):
 
 
 def restore_month_backup(settings, archive, *, confirmed_month, _safety_backup=None):
+    with operation_progress((('read', 'Vérification de la sauvegarde mensuelle'),
+                             ('safety', 'Sauvegarde de sécurité'),
+                             ('replace', 'Préparation du remplacement du mois'),
+                             ('rows', 'Restauration des lignes et des références'),
+                             ('verify', 'Contrôle des historiques et des autres mois'),
+                             ('commit', 'Validation et finalisation'))) as operation:
+        return _restore_month_backup_with_progress(settings, archive, confirmed_month=confirmed_month,
+                                                  _safety_backup=_safety_backup, operation=operation)
+
+
+def _restore_month_backup_with_progress(settings, archive, *, confirmed_month, _safety_backup, operation):
+    operation.start('read')
     from sme_gend.services.auth_guard import session_has_admin_role, session_has_permission
     if not session_has_admin_role() or not session_has_permission('system.restore'):
         raise PermissionError('Restauration mensuelle réservée aux administrateurs.')
@@ -400,8 +436,14 @@ def restore_month_backup(settings, archive, *, confirmed_month, _safety_backup=N
                 if DATED_MOVEMENTS in rows:
                     from sme_gend.services.schema_migrations import require_capability
                     require_capability(settings,'dated_movements')
-        backup = Path(_safety_backup or create_backup_to_default_dir(settings))
-        inspect_backup(backup)
+        operation.finish('read', detail=f'Mois {month} ; {sum(len(values) for values in rows.values()):,} ligne(s) à traiter')
+        operation.start('safety')
+        with operation.subtask('safety', current=0, total=2, detail='Préparation de la sauvegarde de sécurité'):
+            backup = Path(_safety_backup or create_backup_to_default_dir(settings))
+        with operation.subtask('safety', current=1, total=2, detail='Vérification de la sauvegarde de sécurité'):
+            inspect_backup(backup)
+        operation.finish('safety', detail=f'Sauvegarde vérifiée : {backup.name}')
+        operation.start('replace', detail=f'Remplacement du mois {month} dans une transaction')
         try:
             with mysql_import_transaction(settings):
                 with MySQLConnection(settings).connect() as conn:
@@ -436,6 +478,7 @@ def restore_month_backup(settings, archive, *, confirmed_month, _safety_backup=N
                         for table in EXTRA:
                             if table in schema:
                                 cur.execute(f"DELETE FROM {quote(table)} WHERE TRIM(REPLACE(mois,'-',''))=%s",(month.replace('-',''),))
+                        operation.finish('replace')
                         mapping = {}
                         restored_careers = []
                         new_dated_movements = []
@@ -449,6 +492,9 @@ def restore_month_backup(settings, archive, *, confirmed_month, _safety_backup=N
                             target=dict(zip([c[0] for c in cur.description],cur.fetchone()))
                             remember('sme_periode',original,target)
                         pending=[(table,r) for table,rs in rows.items() if table!='sme_periode' for r in rs]
+                        total_rows = len(pending)
+                        processed_rows = 0
+                        operation.start('rows', total=total_rows)
                         inserted={}
                         while pending:
                             next_round=[]; progress=False
@@ -507,8 +553,14 @@ def restore_month_backup(settings, archive, *, confirmed_month, _safety_backup=N
                                 if table == 'carriere_situation':
                                     restored_careers.append((existing['id'], existing['agent_id']))
                                 progress=True
+                                processed_rows += 1
+                                if processed_rows % 100 == 0 or processed_rows == total_rows:
+                                    operation.update('rows', current=processed_rows, total=total_rows,
+                                        detail=f'{processed_rows:,}/{total_rows:,} ligne(s) traitée(s) ; {table}')
                             if not progress: raise ValueError('Dépendances circulaires ou références automatiques incomplètes. Restauration annulée.')
                             pending=next_round
+                        operation.finish('rows', detail=f'{processed_rows:,} ligne(s) traitée(s)')
+                        operation.start('verify', detail='Références de positions, grades et appartenance mensuelle')
                         from sme_gend.services.automatic_position_links import remap_external_position_links
                         remap_external_position_links(cur, position_dependencies)
                         from sme_gend.services.grade_history_merge import reconcile_restored_grades
@@ -556,6 +608,8 @@ def restore_month_backup(settings, archive, *, confirmed_month, _safety_backup=N
                                     apply_membership_for_agent(settings,aid,first_day_of_month(month))
                         if other_month_displays(cur, month, settings=settings) != other_before:
                             raise ValueError('La restauration modifierait des données partagees visibles dans un autre mois. Operation annulée ; aucune modification enregistrée.')
+                operation.finish('verify', detail='Autres mois et données partagées préservés')
+                operation.start('commit', detail='Enregistrement de la révision, de l’audit et validation de la transaction')
                 repo=AppConfigRepository(settings)
                 publish_data_change(settings,reason='month_restored',mois=month)
                 repo.append_audit(action='sme_month_restored',module='system',actor=resolve_audit_actor(),
@@ -563,6 +617,7 @@ def restore_month_backup(settings, archive, *, confirmed_month, _safety_backup=N
                         'grade_history_reapplied': grade_corrections})
         finally:
             invalidate_liste_cache(None)
+    operation.finish('commit', detail=f'Mois {month} restauré')
     return {'month':month,'backup':str(backup),'inserted':inserted,'grade_history_reapplied':len(grade_corrections)}
 
 

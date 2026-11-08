@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import shutil
 from sme_gend.services.restore_files import digest, write_recovery
+from sme_gend.services.operation_progress import operation_progress
 
 
 def reset_local_paths(settings, *, keep_document_history):
@@ -41,17 +42,25 @@ class ResetLocalFiles:
         _restrict_folder(self.workspace)
         self.entries = []
         self.phase = 'prepared'
-        for number, path in enumerate(paths):
-            path = Path(path).resolve()
-            if path.is_relative_to(self.workspace.resolve()):
-                raise ValueError("La sauvegarde ne peut pas etre placee parmi les fichiers a effacer.")
-            copy = self.workspace / f'{number}.original'
-            before = digest(path)
-            shutil.copy2(path, copy)
-            if digest(copy) != before or digest(path) != before:
-                raise RuntimeError("Un fichier a change pendant sa sauvegarde.")
-            self.entries.append({'path': str(path), 'copy': str(copy), 'sha256': before})
-        self.record()
+        paths = tuple(paths)
+        with operation_progress((('copy', 'Copie de récupération des fichiers locaux'),)) as progress:
+            progress.start('copy', total=len(paths), detail=f'{len(paths)} fichier(s) à sauvegarder.')
+            for number, path in enumerate(paths):
+                path = Path(path).resolve()
+                progress.update('copy', current=number, total=len(paths),
+                                detail=f'Sauvegarde et vérification du fichier {number + 1}/{len(paths)} : {path.name}…')
+                if path.is_relative_to(self.workspace.resolve()):
+                    raise ValueError("La sauvegarde ne peut pas etre placee parmi les fichiers a effacer.")
+                copy = self.workspace / f'{number}.original'
+                before = digest(path)
+                shutil.copy2(path, copy)
+                if digest(copy) != before or digest(path) != before:
+                    raise RuntimeError("Un fichier a change pendant sa sauvegarde.")
+                self.entries.append({'path': str(path), 'copy': str(copy), 'sha256': before})
+                progress.update('copy', current=number + 1, total=len(paths),
+                                detail=f'Fichier {number + 1}/{len(paths)} sauvegardé et vérifié : {path.name}.')
+            self.record()
+            progress.finish('copy', detail=f'{len(paths)} fichier(s) sauvegardé(s) et vérifié(s).')
 
     def record(self):
         write_recovery(self.workspace / 'reset_files_recovery.json', json.dumps({'phase': self.phase, 'entries': self.entries}, indent=2).encode())
@@ -59,23 +68,38 @@ class ResetLocalFiles:
     def remove(self):
         self.phase = 'removing'
         self.record()
-        for entry in self.entries:
-            if digest(Path(entry['path'])) != entry['sha256']:
-                raise RuntimeError("Un fichier a change avant la réinitialisation.")
-            Path(entry['path']).unlink()
-        self.phase = 'removed'
-        self.record()
+        with operation_progress((('remove', 'Retrait des fichiers locaux sauvegardés'),)) as progress:
+            progress.start('remove', total=len(self.entries))
+            for number, entry in enumerate(self.entries, 1):
+                progress.update('remove', current=number - 1, total=len(self.entries),
+                                detail=f'Contrôle et retrait du fichier {number}/{len(self.entries)} : {Path(entry["path"]).name}…')
+                if digest(Path(entry['path'])) != entry['sha256']:
+                    raise RuntimeError("Un fichier a change avant la réinitialisation.")
+                path = Path(entry['path'])
+                path.unlink()
+                progress.update('remove', current=number, total=len(self.entries),
+                                detail=f'Fichier {number}/{len(self.entries)} retiré : {path.name}.')
+            self.phase = 'removed'
+            self.record()
+            progress.finish('remove', detail=f'{len(self.entries)} fichier(s) retiré(s).')
 
     def rollback(self):
-        for entry in self.entries:
-            path = Path(entry['path'])
-            if path.exists():
-                if digest(path) != entry['sha256']:
-                    raise RuntimeError("Récupération manuelle nécessaire : fichier modifié entre-temps.")
-            else:
-                shutil.copy2(entry['copy'], path)
-        self.phase = 'rolled_back'
-        self.record()
+        with operation_progress((('recover', 'Récupération des fichiers après annulation'),)) as progress:
+            progress.start('recover', total=len(self.entries), detail='Annulation : récupération des fichiers locaux…')
+            for number, entry in enumerate(self.entries, 1):
+                path = Path(entry['path'])
+                progress.update('recover', current=number - 1, total=len(self.entries),
+                                detail=f'Récupération du fichier {number}/{len(self.entries)} : {path.name}…')
+                if path.exists():
+                    if digest(path) != entry['sha256']:
+                        raise RuntimeError("Récupération manuelle nécessaire : fichier modifié entre-temps.")
+                else:
+                    shutil.copy2(entry['copy'], path)
+                progress.update('recover', current=number, total=len(self.entries),
+                                detail=f'Fichier {number}/{len(self.entries)} récupéré : {path.name}.')
+            self.phase = 'rolled_back'
+            self.record()
+            progress.finish('recover', detail='Fichiers locaux récupérés ; opération annulée.')
 
     def committed(self):
         self.phase = 'committed'

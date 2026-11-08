@@ -34,6 +34,7 @@ def test_month_empty_backups_before_database_and_preserves_other_files(tmp_path,
     backup = tmp_path / "backup.zip"
     backup.write_bytes(b"backup")
     calls = []
+    events = []
     monkeypatch.setattr("sme_gend.services.auth_guard.session_has_admin_role", lambda: True)
     monkeypatch.setattr("sme_gend.services.auth_guard.session_has_permission", lambda permission: True)
     monkeypatch.setattr("sme_gend.services.empty_sme_month._assert_no_dated_movements", lambda *a: None)
@@ -58,6 +59,9 @@ def test_month_empty_backups_before_database_and_preserves_other_files(tmp_path,
     def transaction(s):
         calls.append("begin")
         yield
+        assert events[-1].active_key == 'validate'
+        assert events[-1].current < events[-1].total
+        assert all(event.percent < 100 for event in events)
         calls.append("commit")
     monkeypatch.setattr("sme_gend.repositories.mysql_connection.mysql_import_transaction", transaction)
     monkeypatch.setattr("sme_gend.services.mysql_import_period.ensure_sme_periode", lambda c, m: 51)
@@ -82,8 +86,13 @@ def test_month_empty_backups_before_database_and_preserves_other_files(tmp_path,
             raise RuntimeError("Erreur SQL")
         return {"sme_mois": month}
     monkeypatch.setattr("sme_gend.services.empty_sme_month.purge_sme_periode_for_reimport", purge)
+    from sme_gend.services.operation_progress import progress_reporting
     if backup_ok and db_ok:
-        result = empty_sme_month(object(), "2026-09")
+        with progress_reporting(events.append):
+            result = empty_sme_month(object(), "2026-09")
+        assert events[-1].percent == 100
+        assert all(step.state == 'done' for step in events[-1].steps)
+        assert {step.key for step in events[0].steps} >= {'backup', 'purge', 'validate', 'archives_remove'}
         assert calls == ["maintenance", "backup", "begin", "purge", "commit"]
         assert not target.exists() and other.exists()
         assert result["archives_removed"] == 1
@@ -93,8 +102,9 @@ def test_month_empty_backups_before_database_and_preserves_other_files(tmp_path,
             assert "WHERE" in call.args[0]
             assert call.args[1] in ((51,), ("2026-09",), ("202609",), ("202609", "092026"))
     else:
-        with pytest.raises(RuntimeError):
+        with progress_reporting(events.append), pytest.raises(RuntimeError):
             empty_sme_month(object(), "2026-09")
+        assert all(event.percent < 100 for event in events)
         assert target.exists() and other.exists()
         assert "commit" not in calls
         if not backup_ok:
