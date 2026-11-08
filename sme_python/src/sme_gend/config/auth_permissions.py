@@ -176,7 +176,7 @@ def default_permission_catalog() -> tuple[PermissionDef, ...]:
         ("detaches.config", "Configuration Excel détachés", "Administration et outils", ""),
         ("system.settings", "Paramètres & données", "Administration et outils", ""),
         ("system.backup", "Créer et consulter des sauvegardes", "Administration et outils", "N'autorise pas la restauration."),
-        ("system.restore", "Restaurer une sauvegarde", "Administration et outils", "Remplace des données et déclenche la maintenance. Réservé aux administrateurs."),
+        ("system.restore", "Restaurer, vider et réinitialiser les données", "Administration et outils", "Remplace ou supprime des données avec sauvegarde préalable et maintenance. Réservé aux administrateurs."),
         ("system.migrate", "Mettre à niveau le schéma MySQL", "Administration et outils", "Migrations explicites contrôlées, réservées aux administrateurs."),
         ("system.import", "Importer des mises à jour CSV (Édition SME)", "Administration et outils", ""),
         ("admin.users", "Utilisateurs & droits (accès complet)", "Administration", ""),

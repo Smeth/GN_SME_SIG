@@ -7,6 +7,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QCheckBox,
     QFileDialog,
     QGroupBox,
@@ -15,7 +16,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QTabWidget,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -47,6 +50,41 @@ from sme_gend.ui.bg_task import run_in_background, run_with_progress
 from sme_gend.ui.page_header import PageHeader
 
 
+class _BackupColumns(QWidget):
+    """Two columns on a wide page, one column when the sidebar leaves less room."""
+    def __init__(self, left, right):
+        super().__init__()
+        self._layout = QBoxLayout(QBoxLayout.Direction.TopToBottom, self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(16)
+        self._layout.addWidget(left, 1)
+        self._layout.addWidget(right, 1)
+        self._layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._layout.setDirection(QBoxLayout.Direction.LeftToRight if self.width() >= 1120
+                                  else QBoxLayout.Direction.TopToBottom)
+
+
+def _advanced_panel(label, panel):
+    container = QWidget()
+    layout = QVBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    toggle = QToolButton()
+    toggle.setText(label)
+    toggle.setCheckable(True)
+    toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+    toggle.setArrowType(Qt.ArrowType.RightArrow)
+    panel.hide()
+    toggle.toggled.connect(panel.setVisible)
+    toggle.toggled.connect(lambda expanded: toggle.setArrowType(
+        Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow))
+    layout.addWidget(toggle)
+    layout.addWidget(panel)
+    return container, toggle
+
+
 class BackupRestoreView(QWidget):
     def __init__(self, settings: Settings, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -56,13 +94,7 @@ class BackupRestoreView(QWidget):
         self._health_cache: tuple[float, bool, str, Path | None] | None = None
         self._health_ttl_sec = 90.0
 
-        header = PageHeader(
-            "Sauvegarde & restauration",
-            "Archives ZIP portables : sauvegarde <b>complète</b> (tout) ou "
-            "<b>partielle</b> (MySQL par tables, médias photos/insignes seuls, "
-            "config, data\\). Restauration complète ou partielle depuis la même archive. "
-            "Les comptes partagés de cette base peuvent être conservés à la restauration.",
-        )
+        header = PageHeader("Sauvegarde & restauration")
 
         self._health_lbl = QLabel("Vérification MySQL…")
         self._health_lbl.setWordWrap(True)
@@ -87,11 +119,11 @@ class BackupRestoreView(QWidget):
             "Sauvegarde partielle — composants à inclure"
         )
         pb_row = QHBoxLayout()
-        self._btn_partial_quick = QPushButton("Sauvegarde partielle (dossier SME)")
+        self._btn_partial_quick = QPushButton("Sauvegarder dans le dossier SME")
         self._btn_partial_quick.clicked.connect(
             lambda: self._on_partial_backup(to_default_dir=True)
         )
-        self._btn_partial = QPushButton("Sauvegarde partielle (choisir l’emplacement)…")
+        self._btn_partial = QPushButton("Choisir l’emplacement…")
         self._btn_partial.clicked.connect(
             lambda: self._on_partial_backup(to_default_dir=False)
         )
@@ -99,43 +131,43 @@ class BackupRestoreView(QWidget):
         pb_row.addWidget(self._btn_partial)
         g_partial_b.layout().addLayout(pb_row)
 
-        g_restore = QGroupBox("Restauration complète")
+        g_restore = QGroupBox("Restaurer une sauvegarde")
         rl = QVBoxLayout(g_restore)
-        self._chk_config = QCheckBox(
-            "Restaurer préférences locales (contexte SME, thème, colonnes — sans connexion MySQL)"
-        )
+        self._chk_config = QCheckBox("Restaurer les préférences du poste")
+        self._chk_config.setToolTip("Contexte SME, thème et colonnes, sans remplacer la connexion MySQL.")
         self._chk_config.setChecked(True)
         self._chk_mysql = QCheckBox(
-            "Conserver la connexion MySQL de ce poste (hôte, base, identifiant technique, mot de passe)"
+            "Conserver la connexion MySQL du poste"
         )
         self._chk_mysql.setChecked(True)
         self._chk_keep_accounts = QCheckBox(
-            "Conserver les comptes partagés de cette base (utilisateurs, rôles et mots de passe)"
+            "Conserver les utilisateurs et leurs droits"
         )
         self._chk_keep_accounts.setChecked(True)
         self._chk_keep_accounts.setToolTip(
             "La base restaurée ne remplace pas les comptes déjà créés dans cette base."
         )
-        self._chk_media = QCheckBox("Restaurer photos et insignes (personnel_media)")
+        self._chk_media = QCheckBox("Restaurer les photos et insignes")
         self._chk_media.setChecked(True)
         self._chk_preserve_audit = QCheckBox(
             "Conserver le journal d'audit de ce poste (MySQL + miroirs locaux)"
         )
         self._chk_preserve_audit.setChecked(True)
-        self._chk_preserve_audit.setText("Conserver le journal courant de cette base (tous les postes) et les miroirs locaux")
+        self._chk_preserve_audit.setText("Conserver le journal actuel de tous les postes")
+        self._chk_preserve_audit.setToolTip("Conserver aussi les copies locales du journal.")
         self._chk_data = QCheckBox(
-            "Restaurer les fichiers data\\ (configs JSON, journaux locaux non sensibles)"
+            "Restaurer les réglages et journaux locaux"
         )
         self._chk_data.setChecked(False)
-        self._chk_publications = QCheckBox("Restaurer les versions archivées des classeurs SME")
+        self._chk_publications = QCheckBox("Restaurer les versions archivées SME")
         self._chk_publications.setChecked(True)
         self._lbl_warn = QLabel(
-            "⚠ La restauration complète <b>remplace</b> toute la base MySQL de l'archive "
-            "(sauf audit si option cochée). Fermez les autres sessions SME avant de continuer."
+            "Remplace les données de la base partagée. Fermez les autres sessions SME avant de continuer."
         )
         self._lbl_warn.setWordWrap(True)
         self._lbl_warn.setTextFormat(Qt.TextFormat.RichText)
-        self._btn_restore = QPushButton("Restaurer une sauvegarde complète de l’application…")
+        self._btn_restore = QPushButton("Choisir une sauvegarde à restaurer…")
+        self._btn_restore.setToolTip("Restaurer les mois sélectionnés ou toute la sauvegarde.")
         self._btn_restore.setObjectName("primaryButton")
         self._btn_restore.clicked.connect(self._on_restore_full)
         rl.addWidget(self._lbl_warn)
@@ -167,14 +199,15 @@ class BackupRestoreView(QWidget):
         self._restore_scope.chk_mysql.toggled.connect(update_partial_connection_choice)
         update_partial_connection_choice(self._restore_scope.chk_mysql.isChecked())
         self._chk_partial_keep_accounts = QCheckBox(
-            "Conserver les comptes partagés de cette base (utilisateurs, rôles et mots de passe)"
+            "Conserver les utilisateurs et leurs droits"
         )
         self._chk_partial_keep_accounts.setChecked(True)
         self._chk_partial_preserve_audit = QCheckBox(
             "Conserver le journal d'audit (MySQL + miroirs locaux sensibles)"
         )
         self._chk_partial_preserve_audit.setChecked(True)
-        self._chk_partial_preserve_audit.setText("Conserver le journal courant de cette base (tous les postes) et les miroirs locaux")
+        self._chk_partial_preserve_audit.setText("Conserver le journal actuel de tous les postes")
+        self._chk_partial_preserve_audit.setToolTip("Conserver aussi les copies locales du journal.")
         self._lbl_partial_archive = QLabel("Archive : (aucune)")
         self._lbl_partial_archive.setWordWrap(True)
         self._lbl_partial_archive.setObjectName("settingsPathsHint")
@@ -195,44 +228,90 @@ class BackupRestoreView(QWidget):
 
         self._log = QTextEdit()
         self._log.setReadOnly(True)
-        self._log.setMaximumHeight(200)
+        self._log.setMinimumHeight(72)
+        self._log.setMaximumHeight(120)
         self._log.setPlaceholderText("Journal des opérations…")
 
-        inner = QWidget()
-        lay = QVBoxLayout(inner)
-        lay.setSpacing(16)
-        lay.setContentsMargins(0, 0, 8, 0)
-        lay.addWidget(header)
-        lay.addWidget(self._health_lbl)
-        lay.addWidget(g_backup)
-        lay.addWidget(g_partial_b)
-        lay.addWidget(g_restore)
-        lay.addWidget(g_partial_r)
-        monthly = QGroupBox("Sauvegarde et restauration d'un seul mois")
-        monthly_layout = QVBoxLayout(monthly)
-        monthly_hint = QLabel("Sauvegarder les situations et événements d'un mois MySQL, avec les identités "
-            "et références nécessaires. Restaurer ce mois sans remplacer les autres mois ni les comptes. "
-            "Les médias, documents exportés et réglages globaux ne sont pas inclus.")
-        monthly_hint.setWordWrap(True)
-        monthly_layout.addWidget(monthly_hint)
+        for scope in (self._backup_scope, self._restore_scope):
+            for field, text in (("chk_mysql", "Données MySQL"), ("chk_user", "Préférences du poste"),
+                ("chk_data", "Réglages et journaux locaux"), ("chk_publications", "Versions archivées SME"),
+                ("chk_appcfg", "Configuration partagée"), ("chk_photos", "Photos du personnel"),
+                ("chk_grades", "Insignes et grades")):
+                checkbox = getattr(scope, field)
+                checkbox.setToolTip(checkbox.text())
+                checkbox.setText(text)
+
+        self._tabs = QTabWidget()
+        self._tabs.setObjectName("backupRestoreTabs")
+        self._tabs.setDocumentMode(True)
+        self._operations_page = QWidget()
+        operations = QVBoxLayout(self._operations_page)
+        operations.setContentsMargins(4, 12, 8, 8)
+        operations.setSpacing(14)
+        backup_column, restore_column = QWidget(), QWidget()
+        backup_layout, restore_layout = QVBoxLayout(backup_column), QVBoxLayout(restore_column)
+        for layout in (backup_layout, restore_layout):
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(12)
+        backup_layout.addWidget(g_backup)
         self._btn_backup_month = QPushButton("Sauvegarder un mois...")
         self._btn_restore_month = QPushButton("Restaurer un mois...")
         self._btn_backup_month.clicked.connect(self._on_backup_month)
         self._btn_restore_month.clicked.connect(self._on_restore_month)
-        monthly_layout.addWidget(self._btn_backup_month)
-        monthly_layout.addWidget(self._btn_restore_month)
-        lay.addWidget(monthly)
-        lay.addWidget(self._btn_inspect)
+        backup_layout.addWidget(self._btn_backup_month)
+        backup_layout.addWidget(self._btn_inspect)
+        backup_advanced, self._backup_advanced_toggle = _advanced_panel("Sauvegarde partielle…", g_partial_b)
+        backup_layout.addWidget(backup_advanced)
+        backup_layout.addStretch()
+        restore_layout.addWidget(g_restore)
+        restore_layout.addWidget(self._btn_restore_month)
+        monthly_hint = QLabel("Choisissez les mois à restaurer dans une sauvegarde complète, ou restaurez une sauvegarde mensuelle.")
+        monthly_hint.setWordWrap(True)
+        monthly_hint.setObjectName("settingsPathsHint")
+        restore_layout.addWidget(monthly_hint)
+        restore_advanced, self._restore_advanced_toggle = _advanced_panel("Restauration partielle…", g_partial_r)
+        restore_layout.addWidget(restore_advanced)
+        restore_layout.addStretch()
+        self._columns = _BackupColumns(backup_column, restore_column)
+        operations.addWidget(self._columns)
+        operations.addStretch()
+
+        self._data_page = QWidget()
+        data_layout = QVBoxLayout(self._data_page)
+        data_layout.setContentsMargins(4, 12, 8, 8)
+        data_layout.setSpacing(16)
+        self._target_lbl = QLabel()
+        self._target_lbl.setObjectName("settingsPathsHint")
+        self._target_lbl.setWordWrap(True)
+        self._target_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        data_layout.addWidget(self._target_lbl)
+        monthly_delete = QGroupBox("Supprimer les données d’un mois")
+        monthly_delete_layout = QVBoxLayout(monthly_delete)
+        delete_hint = QLabel("Retirer les imports ou vider les données rattachées à un mois. "
+            "Les autres mois et les identités des agents sont conservés.")
+        delete_hint.setWordWrap(True)
+        monthly_delete_layout.addWidget(delete_hint)
+        self._btn_empty_month = QPushButton("Retirer les imports / vider un mois…")
+        self._btn_empty_month.setObjectName("dangerButton")
+        self._btn_empty_month.clicked.connect(self._on_empty_month)
+        monthly_delete_layout.addWidget(self._btn_empty_month)
+        data_layout.addWidget(monthly_delete)
         reset_group = QGroupBox("Réinitialisation complète")
         reset_layout = QVBoxLayout(reset_group)
-        reset_hint = QLabel("Remettre a zero les données de tous les mois. Conservation des utilisateurs "
-                            "et de l'historique des documents au choix. Sauvegarde préalable obligatoire.")
+        reset_hint = QLabel("Effacer les données de tous les mois, les référentiels et les réglages partagés. "
+            "Vous pourrez choisir de conserver les utilisateurs et l’historique des documents.")
         reset_hint.setWordWrap(True)
         reset_layout.addWidget(reset_hint)
-        self._btn_reset = QPushButton("Réinitialiser l'application...")
+        self._btn_reset = QPushButton("Réinitialiser toutes les données…")
+        self._btn_reset.setObjectName("dangerButton")
         self._btn_reset.clicked.connect(self._on_reset_application)
         reset_layout.addWidget(self._btn_reset)
-        lay.addWidget(reset_group)
+        data_layout.addWidget(reset_group)
+        caution = QLabel("Ces actions concernent tous les postes utilisant cette base. "
+                         "Une sauvegarde préalable et une confirmation sont obligatoires.")
+        caution.setWordWrap(True)
+        caution.setObjectName("settingsPathsHint")
+        data_layout.addWidget(caution)
         maintenance_bar = QHBoxLayout()
         self._btn_maintenance_status = QPushButton("État de maintenance…")
         self._btn_maintenance_recover = QPushButton("Lever une maintenance interrompue…")
@@ -240,19 +319,23 @@ class BackupRestoreView(QWidget):
         self._btn_maintenance_recover.clicked.connect(self._recover_maintenance)
         maintenance_bar.addWidget(self._btn_maintenance_status)
         maintenance_bar.addWidget(self._btn_maintenance_recover)
-        lay.addLayout(maintenance_bar)
-        lay.addWidget(QLabel("<b>Journal</b>", textFormat=Qt.TextFormat.RichText))
-        lay.addWidget(self._log)
-        lay.addStretch()
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setWidget(inner)
+        data_layout.addLayout(maintenance_bar)
+        data_layout.addStretch()
+        for page, label in ((self._operations_page, "Sauvegarde et restauration"),
+                            (self._data_page, "Suppression et réinitialisation")):
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+            scroll.setWidget(page)
+            self._tabs.addTab(scroll, label)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 20, 24, 20)
-        root.addWidget(scroll)
+        root.setContentsMargins(20, 12, 20, 12)
+        root.addWidget(header)
+        root.addWidget(self._health_lbl)
+        root.addWidget(self._tabs, 1)
+        root.addWidget(self._log)
+        self._update_target_label()
 
     def on_page_activated(self) -> None:
         can_restore = session_can_perform_action("system.restore")
@@ -260,12 +343,23 @@ class BackupRestoreView(QWidget):
                        self._btn_load_archive, self._btn_maintenance_recover, self._btn_reset, self._btn_restore_month):
             button.setEnabled(can_restore)
             button.setToolTip("" if can_restore else "La restauration est réservée aux administrateurs.")
-        self._btn_backup_month.setEnabled(session_can_perform_action("system.backup"))
+        can_backup = session_can_perform_action("system.backup")
+        for button in (self._btn_backup_month, self._btn_backup_quick, self._btn_backup,
+                       self._btn_partial_quick, self._btn_partial):
+            button.setEnabled(can_backup)
+            button.setToolTip("" if can_backup else "Permission de sauvegarde requise.")
+        from sme_gend.services.auth_guard import session_has_admin_role
+        can_delete = can_restore and session_has_admin_role()
+        for button in (self._btn_empty_month, self._btn_reset):
+            button.setEnabled(can_delete)
+            button.setToolTip("" if can_delete else "Administrateur avec droit de restauration requis.")
+        self._btn_maintenance_status.setEnabled(can_backup or can_restore)
+        self._update_target_label()
         self._refresh_health_async(force=False)
         self._load_mysql_tables_async()
 
     def _maintenance_state(self):
-        if not session_can_perform_action("system.backup"):
+        if not (session_can_perform_action("system.backup") or session_can_perform_action("system.restore")):
             QMessageBox.warning(self, "Droits", "Permission maintenance refusée.")
             return None
         from sme_gend.services.database_maintenance import maintenance_status
@@ -321,9 +415,25 @@ class BackupRestoreView(QWidget):
 
     def rebind_settings(self, settings: Settings) -> None:
         self._settings = settings
+        self._update_target_label()
         self._health_cache = None
         self._refresh_health_async(force=True)
         self._load_mysql_tables_async()
+
+    def _update_target_label(self):
+        from sme_gend.services.application_reset import reset_target
+        self._target_lbl.setText("Base concernée : " + reset_target(self._settings))
+
+    def _on_empty_month(self):
+        from sme_gend.services.auth_guard import session_has_admin_role
+        if not session_has_admin_role() or not session_can_perform_action("system.restore"):
+            QMessageBox.warning(self, "Droits", "Suppression réservée aux administrateurs autorisés à restaurer.")
+            return
+        from sme_gend.ui.empty_month_dialog import run_empty_month_dialog
+        if run_empty_month_dialog(self, self._settings):
+            self._append_log("Données du mois supprimées ; sauvegarde et confirmation effectuées.")
+            self._health_cache = None
+            self._refresh_health_async(force=True)
 
     def _load_mysql_tables_async(self) -> None:
         st = self._settings
@@ -387,12 +497,15 @@ class BackupRestoreView(QWidget):
             return path, inspect_backup(path)
 
         try:
-            dest, manifest = run_with_progress(
+            result = run_with_progress(
                 self,
                 "Sauvegarde rapide",
                 "Sauvegarde vers le dossier SME…",
                 work,
             )
+            if result is None:
+                return
+            dest, manifest = result
         except Exception as e:
             QMessageBox.critical(self, "Sauvegarde", str(e))
             return
@@ -434,6 +547,8 @@ class BackupRestoreView(QWidget):
                 "Sauvegarde complète en cours…",
                 work,
             )
+            if manifest is None:
+                return
         except Exception as e:
             QMessageBox.critical(self, "Sauvegarde", str(e))
             return
@@ -490,6 +605,8 @@ class BackupRestoreView(QWidget):
                 "Création de l'archive…",
                 work,
             )
+            if manifest is None:
+                return
         except Exception as e:
             QMessageBox.critical(self, "Sauvegarde partielle", str(e))
             return
@@ -581,6 +698,8 @@ class BackupRestoreView(QWidget):
         """Prépare la sélection, sans déclencher une restauration."""
         if not session_can_perform_action("system.restore"):
             return
+        self._tabs.setCurrentIndex(0)
+        self._restore_advanced_toggle.setChecked(True)
         zip_p = Path(zip_p).resolve()
         self._partial_restore_zip = None
         self._lbl_partial_archive.setText("Archive non sélectionnée : vérification en cours.")
@@ -822,7 +941,8 @@ class BackupRestoreView(QWidget):
             win.refresh_for_month_change()
 
     def _on_reset_application(self):
-        if not session_can_perform_action("system.restore"):
+        from sme_gend.services.auth_guard import session_has_admin_role
+        if not session_has_admin_role() or not session_can_perform_action("system.restore"):
             QMessageBox.warning(self, "Droits", "Réinitialisation réservée aux administrateurs.")
             return
         from PySide6.QtWidgets import QApplication, QDialog, QInputDialog

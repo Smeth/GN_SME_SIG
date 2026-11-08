@@ -36,6 +36,12 @@ def reset_application(settings, options, *, confirmation, new_username="", new_p
     if confirmation != reset_target(settings):
         raise ValueError("La confirmation ne correspond pas a la base cible.")
     auth = None if options.keep_users else replacement_auth(new_username, new_password)
+    from sme_gend.repositories.mysql_connection import schema_metadata_lock
+    with schema_metadata_lock(settings):
+        return _reset_application_locked(settings, options, auth=auth)
+
+
+def _reset_application_locked(settings, options, *, auth):
     from sme_gend.services.app_config_store import ensure_central_config_ready
     from sme_gend.services.database_maintenance import centralized_maintenance, INTERNAL_TABLES
     from sme_gend.services.backup_restore_service import create_backup_to_default_dir, inspect_backup

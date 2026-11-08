@@ -2073,6 +2073,7 @@ class ShellWindow(QMainWindow):
         )
         m_import.addAction(act_import)
         act_empty_month = QAction("Retirer les imports / vider un mois…", self)
+        self._act_empty_month = act_empty_month
         act_empty_month.triggered.connect(self._on_empty_month_menu)
         m_import.addAction(act_empty_month)
 
@@ -2194,6 +2195,10 @@ class ShellWindow(QMainWindow):
         m_help.addAction(act_about)
 
     def _on_empty_month_menu(self) -> None:
+        from sme_gend.services.empty_sme_month import can_empty_month
+        if not can_empty_month():
+            QMessageBox.warning(self, "Droits", "Suppression de données réservée aux administrateurs autorisés.")
+            return
         from sme_gend.config.settings import get_settings
         from sme_gend.ui.empty_month_dialog import run_empty_month_dialog
 
@@ -2417,6 +2422,10 @@ class ShellWindow(QMainWindow):
         config_action = getattr(self, "_act_paths_configuration", None)
         if config_action is not None:
             config_action.setEnabled(session_has_permission("system.settings"))
+        empty_month_action = getattr(self, "_act_empty_month", None)
+        if empty_month_action is not None:
+            from sme_gend.services.empty_sme_month import can_empty_month
+            empty_month_action.setEnabled(can_empty_month())
         for item in self._walk_nav_items():
             idx = item.data(0, ROLE_STACK)
             if idx is None:

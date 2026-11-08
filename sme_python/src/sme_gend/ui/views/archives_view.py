@@ -227,7 +227,8 @@ class ArchivesView(QWidget):
         self._open.setEnabled(path is not None and not self._busy and not self._load_error and session_has_permission("system.archives"))
         self._import.setEnabled(bool(path and path.suffix.lower() in (".mdb", ".accdb")) and not self._busy and not self._load_error and session_can_perform_action("workflow.import_archive"))
         self._rebuild.setEnabled(session_can_perform_action("workflow.import_archive"))
-        self._empty.setEnabled(session_has_admin_role() and session_can_perform_action("workflow.import_archive"))
+        from sme_gend.services.empty_sme_month import can_empty_month
+        self._empty.setEnabled(can_empty_month())
 
     def _on_import_liste_generale(self):
         if self._busy or self._load_error or not session_can_perform_action("workflow.import_archive"):
@@ -250,7 +251,8 @@ class ArchivesView(QWidget):
         run_backfill_dossier_dialog(self, get_settings())
 
     def _on_undo_month_import(self):
-        if not session_has_admin_role() or not session_can_perform_action("workflow.import_archive"):
+        from sme_gend.services.empty_sme_month import can_empty_month
+        if not can_empty_month():
             return
         from sme_gend.config.settings import get_settings
         from sme_gend.ui.empty_month_dialog import run_empty_month_dialog

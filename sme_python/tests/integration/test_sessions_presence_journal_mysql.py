@@ -184,7 +184,9 @@ def test_month_data_and_main_audit_commit_together(journal, tmp_path, monkeypatc
     with MySQLConnection(settings).connect() as conn:
         with conn.cursor() as cur:
             for name in tables:
-                cur.execute(f'CREATE TABLE {name}(import_lot_id BIGINT) ENGINE=InnoDB')
+                cur.execute(f'CREATE TABLE {name}(import_lot_id BIGINT,sme_periode_id BIGINT) ENGINE=InnoDB')
+            cur.execute('CREATE TABLE sme_periode(id BIGINT PRIMARY KEY,annee_mois VARCHAR(7)) ENGINE=InnoDB')
+            cur.execute("INSERT INTO sme_periode VALUES(1,'2026-09')")
             cur.execute('CREATE TABLE import_lot(id BIGINT,sme_periode_id BIGINT) ENGINE=InnoDB')
             cur.execute('CREATE TABLE etl_erreur(import_lot_id BIGINT) ENGINE=InnoDB')
             for name in ('workflow_task','career_alert_ack','career_alert_ack_occurrence'):
@@ -199,7 +201,8 @@ def test_month_data_and_main_audit_commit_together(journal, tmp_path, monkeypatc
     monkeypatch.setattr('sme_gend.services.sme_month_closure.sme_archives_dir', lambda: tmp_path)
     backup = tmp_path/'backup.zip'; backup.write_bytes(b'SYNTHETIC')
     archive = tmp_path/'sme_bundle_2026-09_20260930T120000Z.mdb'; archive.write_bytes(b'SYNTHETIC')
-    monkeypatch.setattr('sme_gend.services.backup_restore_service.ensure_recent_backup', lambda *a, **kw: backup)
+    monkeypatch.setattr('sme_gend.services.backup_restore_service.create_backup_to_default_dir', lambda *a, **kw: backup)
+    monkeypatch.setattr('sme_gend.services.backup_restore_service.inspect_backup', lambda *a: None)
     def purge(s, month, **kw):
         with MySQLConnection(s).connect() as conn:
             with conn.cursor() as cur:

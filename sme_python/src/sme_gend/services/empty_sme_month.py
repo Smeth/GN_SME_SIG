@@ -6,6 +6,33 @@ from sme_gend.config.settings import Settings
 from sme_gend.services.mysql_import_period import normalize_import_mois, purge_sme_periode_for_reimport
 
 
+def can_empty_month():
+    from sme_gend.services.auth_guard import session_has_admin_role, session_has_permission
+    return session_has_admin_role() and session_has_permission('system.restore')
+
+
+def _authorize():
+    if not can_empty_month():
+        raise PermissionError('Le vidage d’un mois exige un administrateur autorisé à restaurer et supprimer les données.')
+
+
+def _assert_no_dated_movements(settings, month):
+    """A month purge cannot discard a projection of durable real facts."""
+    from sme_gend.services.membership_scope import membership_projection_enabled
+    from sme_gend.services.mysql_import_period import last_day_of_month
+    from sme_gend.repositories.mysql_connection import MySQLConnection
+    if not membership_projection_enabled(settings):
+        return
+    with MySQLConnection(settings).connect(read_only=True) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1 FROM agent_effectif_movement WHERE effective_date<=%s LIMIT 1',
+                           (last_day_of_month(month),))
+            if cursor.fetchone():
+                raise ValueError('Ce mois dépend de mouvements réellement datés. Le vider retirerait leur projection '
+                                 'sans supprimer les faits partagés. Corrigez explicitement les mouvements concernés ; '
+                                 'pour effacer toutes les données, utilisez la réinitialisation complète.')
+
+
 def month_archive_files(root: Path, mois: str) -> list[Path]:
     from sme_gend.services.sme_month_closure import archive_slug_candidates_for_month
 
@@ -26,25 +53,36 @@ def month_archive_files(root: Path, mois: str) -> list[Path]:
 
 
 def empty_sme_month(settings: Settings, mois: str, *, imported_only: bool = False) -> dict:
-    from sme_gend.services.auth_guard import session_has_admin_role
     from sme_gend.repositories.mysql_common import ensure_mysql_schema
-    from sme_gend.repositories.mysql_connection import MySQLConnection, mysql_import_transaction, CommittedMirrorError
+    from sme_gend.repositories.mysql_connection import schema_metadata_lock
     from sme_gend.services.app_config_store import ensure_central_config_ready
-    from sme_gend.services.backup_restore_service import ensure_recent_backup
+    from sme_gend.services.database_maintenance import centralized_maintenance
+    _authorize()
+    ym = normalize_import_mois(mois)
+    _assert_no_dated_movements(settings, ym)
+    # Follow the same global lock order as dumps, migrations and restores.
+    with schema_metadata_lock(settings):
+        ensure_mysql_schema(settings)
+        ensure_central_config_ready(settings)
+        with centralized_maintenance(settings, reason='Vidage des données du mois '+ym):
+            # A first real movement may have committed after the preview.
+            _assert_no_dated_movements(settings, ym)
+            return _empty_sme_month_locked(settings, ym, imported_only=imported_only)
+
+
+def _empty_sme_month_locked(settings: Settings, ym: str, *, imported_only: bool) -> dict:
+    from sme_gend.repositories.mysql_connection import MySQLConnection, mysql_import_transaction, CommittedMirrorError
+    from sme_gend.services.backup_restore_service import create_backup_to_default_dir, inspect_backup
     from sme_gend.services.mysql_import_period import ensure_sme_periode
     from sme_gend.services.sme_month_closure import sme_archives_dir
     from sme_gend.services.audit_log import append_audit_event
     from sme_gend.services.liste_generale_cache import invalidate_liste_cache
 
-    if not session_has_admin_role():
-        raise PermissionError("Le vidage complet d'un mois est réservé aux administrateurs.")
-    ym = normalize_import_mois(mois)
-    ensure_mysql_schema(settings)
-    ensure_central_config_ready(settings)
-    backup = ensure_recent_backup(settings, max_age_days=0.0)
+    backup = create_backup_to_default_dir(settings)
     if backup is None:
         raise RuntimeError("Vidage annulé : la sauvegarde préalable a échoué.")
     backup = Path(backup)
+    inspect_backup(backup)
     root = sme_archives_dir().resolve()
     files = month_archive_files(root, ym)
     archive_backup = None
@@ -124,13 +162,12 @@ def empty_sme_month(settings: Settings, mois: str, *, imported_only: bool = Fals
 
 def preview_empty_sme_month(settings: Settings, mois: str, *, imported_only: bool = False) -> dict:
     """Lecture seule des mêmes critères que la suppression (estimation avant confirmation)."""
-    from sme_gend.services.auth_guard import session_has_admin_role
     from sme_gend.repositories.mysql_connection import MySQLConnection
     from sme_gend.services.month_purge_plan import month_purge_plan
     from sme_gend.services.sme_month_closure import sme_archives_dir
-    if not session_has_admin_role():
-        raise PermissionError("Réservé aux administrateurs.")
+    _authorize()
     ym = normalize_import_mois(mois)
+    _assert_no_dated_movements(settings, ym)
     from sme_gend.services.month_period_scope import month_period_ids
     counts = {}
     with MySQLConnection(settings).connect(read_only=True) as conn:

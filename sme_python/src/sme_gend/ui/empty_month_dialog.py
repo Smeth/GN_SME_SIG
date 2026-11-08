@@ -5,13 +5,12 @@ from PySide6.QtWidgets import QInputDialog, QMessageBox
 
 
 def run_empty_month_dialog(parent, settings) -> bool:
-    from sme_gend.services.auth_guard import session_has_admin_role
     from sme_gend.ui.import_mois_dialog import pick_import_mois
     from sme_gend.ui.bg_task import run_with_progress
-    from sme_gend.services.empty_sme_month import empty_sme_month, preview_empty_sme_month
+    from sme_gend.services.empty_sme_month import empty_sme_month, preview_empty_sme_month, can_empty_month
 
-    if not session_has_admin_role():
-        QMessageBox.warning(parent, "Vider un mois", "Cette action est réservée aux administrateurs.")
+    if not can_empty_month():
+        QMessageBox.warning(parent, "Vider un mois", "Cette action exige un administrateur autorisé à restaurer et supprimer les données.")
         return False
     mois = pick_import_mois(
         parent, title="Mois à nettoyer",

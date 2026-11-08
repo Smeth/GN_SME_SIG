@@ -11,6 +11,7 @@ from sme_gend.ui.empty_month_dialog import run_empty_month_dialog
 ])
 def test_month_confirmation_and_screen_refresh(monkeypatch, text, accepted, should_run):
     monkeypatch.setattr("sme_gend.services.auth_guard.session_has_admin_role", lambda: True)
+    monkeypatch.setattr("sme_gend.services.auth_guard.session_has_permission", lambda permission: True)
     monkeypatch.setattr("sme_gend.ui.import_mois_dialog.pick_import_mois", lambda *a, **kw: "2026-09")
     monkeypatch.setattr("sme_gend.ui.empty_month_dialog.QInputDialog.getText", lambda *a: (text, accepted))
     monkeypatch.setattr("sme_gend.ui.empty_month_dialog.QMessageBox.information", lambda *a: None)

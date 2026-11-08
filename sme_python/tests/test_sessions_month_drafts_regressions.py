@@ -137,12 +137,18 @@ def test_month_empty_audit_failure_prevents_database_commit(tmp_path,monkeypatch
     from sme_gend.services import empty_sme_month as mod
     calls=[]
     monkeypatch.setattr('sme_gend.services.auth_guard.session_has_admin_role',lambda:True)
+    monkeypatch.setattr('sme_gend.services.auth_guard.session_has_permission',lambda permission:True)
+    monkeypatch.setattr(mod,'_assert_no_dated_movements',lambda *a:None)
+    from contextlib import nullcontext
+    monkeypatch.setattr('sme_gend.repositories.mysql_connection.schema_metadata_lock',lambda *a:nullcontext())
+    monkeypatch.setattr('sme_gend.services.database_maintenance.centralized_maintenance',lambda *a,**kw:nullcontext())
     monkeypatch.setattr('sme_gend.repositories.mysql_common.ensure_mysql_schema',lambda s:None)
     monkeypatch.setattr('sme_gend.services.app_config_store.ensure_central_config_ready',lambda s:None)
     monkeypatch.setattr('sme_gend.services.liste_generale_cache.invalidate_liste_cache',lambda s:None)
     monkeypatch.setattr('sme_gend.services.sme_month_closure.sme_archives_dir',lambda:tmp_path)
     backup=tmp_path/'safety.zip';backup.write_bytes(b'SYNTHETIC')
-    monkeypatch.setattr('sme_gend.services.backup_restore_service.ensure_recent_backup',lambda *a,**kw:backup)
+    monkeypatch.setattr('sme_gend.services.backup_restore_service.create_backup_to_default_dir',lambda *a,**kw:backup)
+    monkeypatch.setattr('sme_gend.services.backup_restore_service.inspect_backup',lambda *a:None)
     monkeypatch.setattr('sme_gend.services.data_sync.publish_data_change',lambda *a,**kw:None)
     @contextmanager
     def transaction(s):
